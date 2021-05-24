@@ -237,3 +237,25 @@ class TestMachineConstructor:
                 assert point.qudit in [1, 2, 3]
 
             assert len(op.location) == 3
+    
+    def test_find_qudit_groups(self) -> None:
+        n = 10
+        coup_map = set()
+        num_qudits = n ** 2
+
+        for i in range(0, n):
+            for j in range(2, n):
+                coup_map.add((i*n + j-1, i*n + j))
+        for i in range(0,n):
+            for j in range(0,n-2):
+                coup_map.add((i*n + j, i*n + j+1))
+        for k in range(0, n*(n-1)):
+            coup_map.add((k, k+n))
+
+        block_size = 3
+
+        mach = MachineModel(num_qudits, coup_map)
+        part = SimplePartitioner(mach, block_size)
+        # Get all qubit groups
+        groups = part.get_qudit_groups()
+        assert True

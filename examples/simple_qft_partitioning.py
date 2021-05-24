@@ -142,9 +142,9 @@ data = {}
 
 part.run(circ, data)
 
-circ_iter = circ.CircuitIterator(circuit=circ._circuit)
-count = 0
-for op in circ_iter:
+for count, op in enumerate(circ):
     print('unitary %d' % (count))
     print(op.get_unitary().get_numpy())
     count += 1
+
+print(circ.get_unitary().get_numpy())
