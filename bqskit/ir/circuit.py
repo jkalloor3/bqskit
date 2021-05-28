@@ -1125,12 +1125,12 @@ class Circuit(DifferentiableUnitary, StateVectorMap, Collection[Operation]):
         }
         for qudit_index, bounds in region.items():
             for i, cycle in enumerate(reversed(self._circuit[:bounds[0]])):
-            #for i, cycle in enumerate(reversed(self._circuit[:bounds[0] + 1])):
                 if cycle[qudit_index] is not None:
                     boundary[qudit_index] = (
                         bounds[0] - i - 1,
                         boundary[qudit_index][1],
                     )
+                    break
 
             for i, cycle in enumerate(self._circuit[bounds[1] + 1:]):
                 if cycle[qudit_index] is not None:
@@ -1138,6 +1138,7 @@ class Circuit(DifferentiableUnitary, StateVectorMap, Collection[Operation]):
                         boundary[qudit_index][0],
                         bounds[1] + 1 + i,
                     )
+                    break
 
         # Push outside gates to side if necessary
         region_back_min = min(bound[0] for bound in region.values())
