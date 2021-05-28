@@ -1358,6 +1358,8 @@ class Circuit(DifferentiableUnitary, StateVectorMap, Collection[Operation]):
 
         for op in self:
             op._location = tuple([qudit_permutation[q] for q in op.location])
+            
+        # TODO: actually move the circuit operation's locations
 
     def get_unitary(self, params: Sequence[float] = []) -> UnitaryMatrix:
         """
