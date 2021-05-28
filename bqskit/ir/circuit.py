@@ -1111,7 +1111,7 @@ class Circuit(DifferentiableUnitary, StateVectorMap, Collection[Operation]):
                 if op is not None:
                     ops_in_region.add((bounds[0] + i, op))
 
-        # All operations in the region must be getting folded
+        # All operations in the region must be in the fold
         if len(ops_and_cycles) != len(ops_in_region):
             raise ValueError(
                 'Operations cannot be folded due to'
@@ -1125,9 +1125,10 @@ class Circuit(DifferentiableUnitary, StateVectorMap, Collection[Operation]):
         }
         for qudit_index, bounds in region.items():
             for i, cycle in enumerate(reversed(self._circuit[:bounds[0]])):
+            #for i, cycle in enumerate(reversed(self._circuit[:bounds[0] + 1])):
                 if cycle[qudit_index] is not None:
                     boundary[qudit_index] = (
-                        bounds[0] - 1 - i,
+                        bounds[0] - i - 1,
                         boundary[qudit_index][1],
                     )
 

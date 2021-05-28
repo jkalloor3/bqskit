@@ -7,6 +7,7 @@ from typing import Iterable
 from bqskit.compiler.basepass import BasePass
 from bqskit.compiler.machine import MachineModel
 from bqskit.ir.circuit import Circuit
+from bqskit.ir.gates.constant.identity import IdentityGate
 
 # TODO:
 #   Layout should be a separate pass from partitioning. The partitioner may
@@ -342,13 +343,22 @@ class SimplePartitioner(BasePass):
                     best_block = curr_block
 
             # Replace the highest scoring block with a CircuitGate.
-            qudits = best_block.block_start.keys()
+            qudits = list(best_block.block_start.keys())
             points_in_block = []
             circ_iter = circuit.SubCircuitIterator(  # type: ignore
                 circuit=circuit._circuit,
                 subset=qudits,  # type: ignore
                 and_points=True,
             )
+            # Add an identity gate at the beginning of the block so that the 
+            # CircuitGate is folded into the proper location. 
+            if circuit.is_cycle_unoccupied(best_block.block_start[qudits[0]],
+                [qudits[0]]):
+                circuit.insert_gate(
+                    best_block.block_start[qudits[0]], 
+                    IdentityGate(), 
+                    [qudits[0]])
+
             for point, op in circ_iter:  # type: ignore
                 if point.cycle >= best_block.block_start[point.qudit] and \
                     point.cycle <= best_block.block_end[point.qudit] and \
