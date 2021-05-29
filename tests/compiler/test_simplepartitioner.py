@@ -259,3 +259,53 @@ class TestMachineConstructor:
         # Get all qubit groups
         groups = part.get_qudit_groups()
         assert True
+
+    def test_num_ops_done(self) -> None:
+        mach = MachineModel(5)
+        part = SimplePartitioner(mach)
+
+        # 0 --H--H--H--H--
+        # 1 --H--H--H-----
+        # 2 --H--o--------
+        # 3 --H--x--H-----
+        # 4 --------------
+        circ = Circuit(5)
+        for i in range(4):
+            circ.append_gate(HGate(), [0])
+        for i in range(3):
+            circ.append_gate(HGate(), [1])
+        circ.append_gate(HGate(), [2])
+        circ.append_gate(HGate(), [3])
+        circ.append_gate(CNOTGate(), [2, 3])
+        circ.append_gate(HGate(), [3])
+
+        # Make sure circuit is the right length
+        assert circ.get_depth() == 4
+
+        # Check qudit 0
+        for cycle in range(circ.get_depth()):
+            assert part.num_ops_done(circ, 0, cycle) == cycle
+        # Check qudit 1
+        for cycle in range(circ.get_depth()):
+            if cycle <= 3:
+                assert part.num_ops_done(circ, 1, cycle) == cycle
+            else:
+                assert part.num_ops_done(circ, 1, cycle) == 0
+        # Check qudit 2
+        for cycle in range(circ.get_depth()):
+            if cycle <= 2:
+                assert part.num_ops_done(circ, 2, cycle) == cycle
+            else:
+                assert part.num_ops_done(circ, 2, cycle) == 2
+        # Check qudit 3
+        for cycle in range(circ.get_depth()):
+            if cycle <= 3:
+                assert part.num_ops_done(circ, 3, cycle) == cycle
+            else:
+                assert part.num_ops_done(circ, 3, cycle) == 3
+        # Check qudit 4
+        for cycle in range(circ.get_depth()):
+            assert part.num_ops_done(circ, 4, cycle) == 0
+
+        # Make sure out of bounds references work
+        assert part.num_ops_done(circ, 0, 100) == 4

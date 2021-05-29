@@ -156,9 +156,9 @@ class SimplePartitioner(BasePass):
 
         A BlockInfo object contains the description of a synthesizable block.
 
-        Notes: For each qudit, the block_start is inclusive and the block_end
-            is exclusive, meaning the block_end cycle should not be included
-            in the synthesizable block.
+        Note: block_start gives the number of operations on the qudit before
+            the block starts. block_end gives the number of operations until
+            block's end (start from the beginning of the circuit).
         """
 
         def __init__(
@@ -176,6 +176,91 @@ class SimplePartitioner(BasePass):
             self.block_start = {k: 0 for k in qudits}
             self.block_end = {k: 0 for k in qudits}
             self.score = score
+
+
+    def num_ops_left(
+        self,
+        circuit: Circuit,
+        qudit: int,
+        cycle: int,
+    ) -> int:
+        """
+        Return the number of operations on a qudit at and beyond the cycle
+        specified by the point given.
+
+        Args:
+            circuit (Circuit): Circuit to be analyzed.
+
+            qudit (int): Qudit on which to find remaining operations.
+
+            cycle (int): Cycle at and beyond which to count operations.
+
+        Returns:
+            int: The number of operations at and beyond the given point.
+        """
+        qudit_iter = circuit.operations_on_qudit_with_points(qudit)
+        num_ops = 0
+        for circ_point, circ_op in qudit_iter:
+            if circ_point.cycle >= cycle:
+                num_ops += 1
+        return num_ops
+
+    def num_ops_done(
+        self,
+        circuit: Circuit,
+        qudit: int,
+        cycle: int,
+    ) -> int:
+        """
+        Return the number of operations on a qudit before the cycle specified.
+
+        Args:
+            circuit (Circuit): Circuit to be analyzed.
+
+            qudit (int): Qudit on which to find remaining operations.
+
+            cycle (int): Cycle before which to count operations.
+
+        Returns:
+            int: The number of operations before the given point.
+        """
+        qudit_iter = circuit.operations_on_qudit_with_points(
+            qudit_index=qudit, reversed=True)
+        num_ops = 0
+        # Needs optimization
+        for circ_point, circ_op in qudit_iter:
+            if circ_point.cycle >= cycle:
+                continue
+            else:
+                num_ops += 1
+        return num_ops
+
+        
+    def set_block_start(
+        self,
+        circ  : Circuit,
+        block : BlockInfo, 
+        qudit : int, 
+        cycle : int
+    ) -> None:
+        """
+        Set the start value for the qudit given a cycle.
+        """
+        block.block_start[qudit] = self.num_ops_done(circ, qudit, cycle)
+
+    def set_block_end(
+        self,
+        circ  : Circuit,
+        block : BlockInfo, 
+        qudit : int, 
+        cycle : int
+    ) -> None:
+        """
+        Set the start value for the qudit given a cycle.
+        """
+        block.block_end[qudit] = self.num_ops_done(circ, qudit, cycle)
+
+    
 
     def _set_run_parameters(
         self,
@@ -227,33 +312,6 @@ class SimplePartitioner(BasePass):
         # Get the set of all vertices used in the algorithm
         # self.used_verts = get_used_qudit_set(circuit)
 
-    def num_ops_left(
-        self,
-        circuit: Circuit,
-        qudit: int,
-        cycle: int,
-    ) -> int:
-        """
-        Return the number of operations on a qudit at and beyond the cycle
-        specified by the point given.
-
-        Args:
-            circuit (Circuit): Circuit to be analyzed.
-
-            qudit (int): Qudit on which to find remaining operations.
-
-            cycle (int): Cycle at and beyond which to count operations.
-
-        Returns:
-            int: The number of operations at and beyond the given point.
-        """
-        qudit_iter = circuit.operations_on_qudit_with_points(qudit)
-        num_ops = 0
-        for circ_point, circ_op in qudit_iter:
-            if circ_point.cycle >= cycle:
-                num_ops += 1
-        return num_ops
-
     def run(self, circuit: Circuit, data: dict[str, Any]) -> None:
         """
         Partition gates in a circuit into a series of CircuitGates.
@@ -280,7 +338,7 @@ class SimplePartitioner(BasePass):
         sched_depth = [0 for i in range(self.num_qudits)]
         while any(
             [
-                self.num_ops_left(circuit, p, sched_depth[p]) for p
+                self.num_ops_left(circuit, p, 0) > sched_depth[p] for p
                 in range(self.num_qudits)
             ],
         ):
@@ -310,7 +368,8 @@ class SimplePartitioner(BasePass):
                     # Check if we have finished partitioning the current block
                     if len(insider_qudits) == 0:
                         break
-                    elif point.cycle < sched_depth[point.qudit]:
+                    elif self.num_ops_done(circuit, point.qudit, point.cycle) \
+                        < sched_depth[point.qudit]:
                         continue
 
                     # Check that op doesn't interact with outsider qudits.
@@ -322,16 +381,22 @@ class SimplePartitioner(BasePass):
                     ):
                         for other_qudit in op.location:
                             if other_qudit in insider_qudits:
-                                curr_block.block_end[other_qudit] = max(
-                                    point.cycle - 1, 0,
-                                )
+                                self.set_block_end(circuit, curr_block, 
+                                    other_qudit, point.cycle)
                                 insider_qudits -= {other_qudit}
 
                     # Else add to the score of the current block, update the
                     # end of the block for all still valid insider qudits.
                     else:
+                        # Check that we're not at the end of the circuit
                         for insider in insider_qudits:
-                            curr_block.block_end[insider] = point.cycle
+                            if self.num_ops_left(circuit, insider, point.cycle \
+                                + 1) == 0:
+                                curr_block.block_end[insider] = \
+                                    self.num_ops_left(circuit, insider, 0) + 1
+                            else:
+                                self.set_block_end(circuit, curr_block, 
+                                    insider, point.cycle)
                         if len(op.location) >= 2:
                             curr_block.score += self.multi_gate_score
                         else:
@@ -352,16 +417,18 @@ class SimplePartitioner(BasePass):
             )
             # Add an identity gate at the beginning of the block so that the 
             # CircuitGate is folded into the proper location. 
+            """
             if circuit.is_cycle_unoccupied(best_block.block_start[qudits[0]],
                 [qudits[0]]):
                 circuit.insert_gate(
                     best_block.block_start[qudits[0]], 
                     IdentityGate(), 
                     [qudits[0]])
-
+            """
             for point, op in circ_iter:  # type: ignore
-                if point.cycle >= best_block.block_start[point.qudit] and \
-                    point.cycle <= best_block.block_end[point.qudit] and \
+                op_count = self.num_ops_done(circuit, point.qudit, point.cycle)
+                if op_count >= best_block.block_start[point.qudit] and \
+                    op_count < best_block.block_end[point.qudit] and \
                         all(other_qs in qudits for other_qs in op.location):
                     points_in_block.append(point)
 
@@ -369,6 +436,6 @@ class SimplePartitioner(BasePass):
 
             # Update the scheduled depth list
             to_update = best_block.block_end.keys()
-            new_cycle = max([sched_depth[qudit] for qudit in to_update]) + 1
             for qudit in to_update:
-                sched_depth[qudit] = new_cycle
+                if best_block.block_start[qudit] != best_block.block_end[qudit]:
+                    sched_depth[qudit] += 1
