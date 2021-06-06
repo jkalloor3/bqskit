@@ -9,11 +9,6 @@ from bqskit.compiler.machine import MachineModel
 from bqskit.ir.circuit import Circuit
 from bqskit.ir.gates.constant.identity import IdentityGate
 
-# TODO:
-#   Layout should be a separate pass from partitioning. The partitioner may
-#   need to be changed so that it can accept a layout assignment, but by
-#   default assumes the numberings in the algorithm and topology are equal.
-
 
 class SimplePartitioner(BasePass):
     # Class variables
@@ -417,14 +412,6 @@ class SimplePartitioner(BasePass):
             )
             # Add an identity gate at the beginning of the block so that the 
             # CircuitGate is folded into the proper location. 
-            """
-            if circuit.is_cycle_unoccupied(best_block.block_start[qudits[0]],
-                [qudits[0]]):
-                circuit.insert_gate(
-                    best_block.block_start[qudits[0]], 
-                    IdentityGate(), 
-                    [qudits[0]])
-            """
             for point, op in circ_iter:  # type: ignore
                 op_count = self.num_ops_done(circuit, point.qudit, point.cycle)
                 if op_count >= best_block.block_start[point.qudit] and \

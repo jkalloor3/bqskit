@@ -94,13 +94,23 @@ class SynthesisPass(BasePass):
             if self.collection_filter(op):
                 ops_to_syn.append((point, op))
 
+        new_circ = Circuit(circuit.get_size(), circuit.radixes)
         # Synthesize operations
         for point, op in ops_to_syn:
             # BUG: point is invalid on second successful iteration
             # TODO: Gather synthesized circuits and batch replace
             syn_circuit = self.synthesize(op.get_unitary(), data)
+            new_circ.append_circuit(syn_circuit, op.location)
+            """
             if self.replace_filter(syn_circuit, op):
-                circuit.replace_with_circuit(point, syn_circuit, op.location)
+                #circuit.replace_with_circuit(point, syn_circuit, op.location)
+                circuit.append_circuit(syn_circuit, op.location)
+            """
+        
+        for point, op in reversed(ops_to_syn):
+            circuit.pop(point)
+        circuit.append_circuit(new_circ, list(range(new_circ.get_size())))
+
 
 
 def default_collection_filter(op: Operation) -> bool:

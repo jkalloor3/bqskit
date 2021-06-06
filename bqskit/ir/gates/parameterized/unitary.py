@@ -44,6 +44,7 @@ class VariableUnitaryGate(
         self.shape = (self.dim, self.dim)
         self.num_params = 2 * self.dim**2
         self.name = 'VariableUnitaryGate(%d)' % self.get_size()
+        self.qasm_name = self.name
 
     def get_unitary(self, params: Sequence[float] = []) -> UnitaryMatrix:
         """
