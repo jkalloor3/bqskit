@@ -97,15 +97,8 @@ class SynthesisPass(BasePass):
         new_circ = Circuit(circuit.get_size(), circuit.radixes)
         # Synthesize operations
         for point, op in ops_to_syn:
-            # BUG: point is invalid on second successful iteration
-            # TODO: Gather synthesized circuits and batch replace
             syn_circuit = self.synthesize(op.get_unitary(), data)
             new_circ.append_circuit(syn_circuit, op.location)
-            """
-            if self.replace_filter(syn_circuit, op):
-                #circuit.replace_with_circuit(point, syn_circuit, op.location)
-                circuit.append_circuit(syn_circuit, op.location)
-            """
         
         for point, op in reversed(ops_to_syn):
             circuit.pop(point)
