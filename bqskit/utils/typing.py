@@ -132,8 +132,9 @@ def is_valid_coupling_graph(
         _logger.debug('Coupling graph is not a sequence of tuples.')
         return False
 
-    if not all([len(pair) == 2 for pair in coupling_graph]):
-        _logger.debug('Coupling graph is not a sequence of pairs.')
+    if not all([len(pair) == 2 for pair in coupling_graph]) and not \
+        all(len(triple) == 3 for triple in coupling_graph):
+        _logger.debug('Coupling graph is not a sequence of pairs or triples.')
         return False
 
     if num_qudits is not None:
@@ -144,7 +145,7 @@ def is_valid_coupling_graph(
         if not all(
             qudit < num_qudits
             for pair in coupling_graph
-            for qudit in pair
+            for qudit in [pair[0], pair[1]]
         ):
             _logger.debug('Coupling graph has invalid qudits.')
             return False

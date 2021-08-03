@@ -196,6 +196,7 @@ class GreedyPartitioner(BasePass):  # TODO: Change
                     folded_circuit.extend(circuit[region])
         circuit.become(folded_circuit)
 
+
     def topo_sort(self, regions: list[CircuitRegion]) -> list[CircuitRegion]:
         """Topologically sort regions."""
         sorted_regions: list[CircuitRegion] = []

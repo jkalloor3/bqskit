@@ -21,7 +21,8 @@ class MachineModel:
     def __init__(
         self,
         num_qudits: int,
-        coupling_graph: Iterable[tuple[int, int]] | None = None,
+        coupling_graph: Iterable[tuple[int,int,int]] | Iterable[tuple[int,int,int]] \
+            | None = None,
     ) -> None:
         """
         MachineModel Constructor.
@@ -32,7 +33,9 @@ class MachineModel:
             coupling_graph (Iterable[tuple[int, int]] | None): A coupling
                 graph describing which pairs of qudits can interact.
                 Given as an undirected edge set. If left as None, then
-                an all-to-all coupling graph is used as a default.
+                an all-to-all coupling graph is used as a default. If edges
+                consist of 3-tuples, then the last element of the tuple 
+                represents the weight of that edge.
                 (Default: None)
 
         Raises:
@@ -57,9 +60,9 @@ class MachineModel:
         self.num_qudits = num_qudits
 
         self._adjacency_list: list[list[int]] = [[] for _ in range(num_qudits)]
-        for q0, q1 in self.coupling_graph:
-            self._adjacency_list[q0].append(q1)
-            self._adjacency_list[q1].append(q0)
+        for edge in self.coupling_graph:
+            self._adjacency_list[edge[0]].append(edge[1])
+            self._adjacency_list[edge[1]].append(edge[0])
 
     @lru_cache(maxsize=None)
     def get_locations(self, block_size: int) -> list[CircuitLocation]:
@@ -155,7 +158,7 @@ class MachineModel:
         location: CircuitLocationLike,
         renumbering: dict[int, int] = None,  # type: ignore
     ) -> list[tuple[int, int]]:
-        """Returns the sub_coupling_graph with qudits in location."""
+        """Returns the sub coupling_graph of qudits in location."""
         if not CircuitLocation.is_location(location, self.num_qudits):
             raise TypeError('Invalid location.')
 
@@ -164,7 +167,16 @@ class MachineModel:
             renumbering = {x: x for x in range(self.num_qudits)}
 
         subgraph = []
-        for q0, q1 in self.coupling_graph:
-            if q0 in location and q1 in location:
-                subgraph.append((renumbering[q0], renumbering[q1]))
+        for edge in self.coupling_graph:
+            if edge[0] in location and edge[1] in location:
+                # unweighted edges
+                if len(edge) == 2:
+                    subgraph.append(
+                        (renumbering[edge[0]], renumbering[edge[1]])
+                    )
+                # weighted edges
+                else:
+                    subgraph.append(
+                        (renumbering[edge[0]], renumbering[edge[1]], edge[2])
+                    )
         return subgraph
