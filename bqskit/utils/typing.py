@@ -146,7 +146,7 @@ def is_valid_coupling_graph(
         return False
 
     if not all([len(pair) == 2 for pair in coupling_graph]) and not \
-        all(len(triple) == 3 for triple in coupling_graph):
+            all(len(triple) == 3 for triple in coupling_graph):
         _logger.debug('Coupling graph is not a sequence of pairs or triples.')
         return False
 

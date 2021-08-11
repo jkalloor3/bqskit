@@ -4,8 +4,10 @@ from __future__ import annotations
 import bisect
 import logging
 from typing import Any
+from typing import Callable
 
 from bqskit.compiler.basepass import BasePass
+from bqskit.compiler.machine import MachineModel
 from bqskit.ir.circuit import Circuit
 from bqskit.ir.gates.circuitgate import CircuitGate
 from bqskit.ir.region import CircuitRegion
@@ -22,13 +24,23 @@ class GreedyPartitioner(BasePass):  # TODO: Change
     This pass partitions a circuit by forming the largest regions first.
     """
 
-    def __init__(self, block_size: int = 3) -> None:
+    def __init__(
+        self,
+        block_size: int = 3,
+        score_function: str | Callable[
+            [Circuit, CircuitRegion, MachineModel], float,
+        ] = 'default',
+    ) -> None:
         """
         Construct a GreedyPartitioner.
 
         Args:
             block_size (int): Maximum size of partitioned blocks.
                 (Default: 3)
+
+            score_function (str | Callable): Function used to evaluate which
+                block should be chosen.
+                (Default: "default")
 
         Raises:
             ValueError: If `block_size` is less than 2.
@@ -45,6 +57,13 @@ class GreedyPartitioner(BasePass):  # TODO: Change
             )
 
         self.block_size = block_size
+        if isinstance(score_function, str):
+            if score_function == 'cost_based':
+                self.score_function = self.cost_based_score_function
+            else:
+                self.score_function = self.default_score_function
+        else:
+            self.score_function = score_function  # type: ignore
 
     def run(self, circuit: Circuit, data: dict[str, Any]) -> None:
         """
@@ -67,6 +86,20 @@ class GreedyPartitioner(BasePass):  # TODO: Change
             })
             return
 
+        model = None
+        # Make sure there is a machine model
+        if 'machine_model' in data:
+            model = data['machine_model']
+        if (
+            not isinstance(model, MachineModel)
+            or model.num_qudits < circuit.get_size()
+        ):
+            _logger.warning(
+                'MachineModel not specified or invalid;'
+                ' defaulting to all-to-all.',
+            )
+            model = MachineModel(circuit.get_size())
+
         # For each gate, calculate the best region surrounding it
         total_num_gates = 0
         regions: list[CircuitRegion] = []
@@ -88,15 +121,19 @@ class GreedyPartitioner(BasePass):  # TODO: Change
                 fail_quickly=True,
             )
 
-            potential_regions[point] = (len(circuit[region]), region)
+            potential_regions[point] = (
+                len(circuit[region]),
+                self.score_function(circuit, region, model),
+                region,
+            )
 
         # Form regions until there are no more gates to partition
         num_partitioned_gates = 0
         while num_partitioned_gates < total_num_gates:
 
             # Pick largest region
-            s = sorted(potential_regions.values(), key=lambda x: x[0])
-            num_gates, best_region = s[-1]
+            s = sorted(potential_regions.values(), key=lambda x: x[1])
+            num_gates, _, best_region = s[-1]
             num_partitioned_gates += num_gates
             regions.append(best_region)
 
@@ -108,7 +145,7 @@ class GreedyPartitioner(BasePass):  # TODO: Change
             to_remove = []
             to_update = []
             for point, value in potential_regions.items():
-                region = value[1]
+                region = value[2]
 
                 if point in best_region or region == best_region:
                     to_remove.append(point)
@@ -162,7 +199,11 @@ class GreedyPartitioner(BasePass):  # TODO: Change
                     True,
                 )
 
-                potential_regions[point] = (len(circuit[region]), region)
+                potential_regions[point] = (
+                    len(circuit[region]),
+                    self.score_function(circuit, region, model),
+                    region,
+                )
 
         # TODO: Merge regions that can be merged together
 
@@ -170,33 +211,18 @@ class GreedyPartitioner(BasePass):  # TODO: Change
         folded_circuit = Circuit(circuit.get_size(), circuit.get_radixes())
         regions = self.topo_sort(regions)
         # Option to keep a block's idle qudits as part of the CircuitGate
-        if 'keep_idle_qudits' in data and data['keep_idle_qudits'] is True:
-            for region in regions:
-                small_region = circuit.downsize_region(region)
-                cgc = circuit.get_slice(small_region.points)
-                if len(region.location) > len(small_region.location):
-                    for i in range(len(region.location)):
-                        if region.location[i] not in small_region.location:
-                            cgc.insert_qudit(i)
+        for region in regions:
+            region = circuit.downsize_region(region)
+            if 0 < len(region) <= self.block_size:
+                cgc = circuit.get_slice(region.points)
                 folded_circuit.append_gate(
                     CircuitGate(cgc, True),
                     sorted(list(region.keys())),
                     list(cgc.get_params()),
                 )
-        else:
-            for region in regions:
-                region = circuit.downsize_region(region)
-                if 0 < len(region) <= self.block_size:
-                    cgc = circuit.get_slice(region.points)
-                    folded_circuit.append_gate(
-                        CircuitGate(cgc, True),
-                        sorted(list(region.keys())),
-                        list(cgc.get_params()),
-                    )
-                else:
-                    folded_circuit.extend(circuit[region])
+            else:
+                folded_circuit.extend(circuit[region])
         circuit.become(folded_circuit)
-
 
     def topo_sort(self, regions: list[CircuitRegion]) -> list[CircuitRegion]:
         """Topologically sort regions."""
@@ -228,3 +254,37 @@ class GreedyPartitioner(BasePass):  # TODO: Change
                     in_nodes.remove(selected)
 
         return sorted_regions
+
+    def default_score_function(
+        self,
+        circuit: Circuit,
+        region: CircuitRegion,
+        machine: MachineModel,
+    ) -> float:
+        """Default score function returns the number of gates in the region."""
+        return float(len(circuit[region]))
+
+    def cost_based_score_function(
+        self,
+        circuit: Circuit,
+        region: CircuitRegion,
+        machine: MachineModel,
+    ) -> float:
+        """
+        Score based off the cost of the partition.
+
+        Internal gates have cost = 0. External gates have cost = shortest path
+        length between qudits A and B.
+
+        score = number of operations / (1 + partition cost)
+        """
+        partition_cost = 0
+        for op in circuit[region]:
+            # TODO: Expand this so that gate larger than 2 qudits can be handled
+            verts = op.location
+            if len(verts) > 1:
+                cost = machine.shortest_path_length(verts[0], verts[1])
+                if cost >= self.block_size:
+                    partition_cost += cost
+
+        return float(len(circuit[region]) / (1 + partition_cost))

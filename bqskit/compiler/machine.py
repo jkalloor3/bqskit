@@ -21,7 +21,8 @@ class MachineModel:
     def __init__(
         self,
         num_qudits: int,
-        coupling_graph: Iterable[tuple[int,int,int]] | Iterable[tuple[int,int,int]] \
+        coupling_graph:
+            Iterable[tuple[int, int]] | Iterable[tuple[int, int, int]]
             | None = None,
     ) -> None:
         """
@@ -34,7 +35,7 @@ class MachineModel:
                 graph describing which pairs of qudits can interact.
                 Given as an undirected edge set. If left as None, then
                 an all-to-all coupling graph is used as a default. If edges
-                consist of 3-tuples, then the last element of the tuple 
+                consist of 3-tuples, then the last element of the tuple
                 represents the weight of that edge.
                 (Default: None)
 
@@ -172,11 +173,41 @@ class MachineModel:
                 # unweighted edges
                 if len(edge) == 2:
                     subgraph.append(
-                        (renumbering[edge[0]], renumbering[edge[1]])
+                        (renumbering[edge[0]], renumbering[edge[1]]),
                     )
                 # weighted edges
                 else:
                     subgraph.append(
-                        (renumbering[edge[0]], renumbering[edge[1]], edge[2])
+                        (
+                            renumbering[edge[0]], renumbering[edge[1]],
+                            edge[2],
+                        ),  # type: ignore
                     )
         return subgraph
+
+    def shortest_path_length(
+        self,
+        qudit_a: int,
+        qudit_b: int,
+    ) -> int:
+        """
+        Find the shortest path distance between qudit_a and qudit_b.
+
+        Returns:
+            distance (int): shortest path distance between qudits. If the
+                qudits are disconnected, then -1 is returned.
+        """
+        distance = [-1 for _ in range(self.num_qudits)]
+        frontier = []
+
+        frontier.append((qudit_a, 0))
+
+        while len(frontier) > 0:
+            vertex, dist = frontier.pop(0)
+            distance[vertex] = dist
+
+            for neighbor in self._adjacency_list[vertex]:
+                if distance[neighbor] == -1:
+                    frontier.append((neighbor, dist + 1))
+
+        return distance[qudit_b]
