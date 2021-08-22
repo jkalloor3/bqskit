@@ -279,12 +279,18 @@ class GreedyPartitioner(BasePass):  # TODO: Change
         score = number of operations / (1 + partition cost)
         """
         partition_cost = 0
+        prev_verts = []
         for op in circuit[region]:
             # TODO: Expand this so that gate larger than 2 qudits can be handled
-            verts = op.location
-            if len(verts) > 1:
+            if len(op.location) > 1:
+                verts = op.location
                 cost = machine.shortest_path_length(verts[0], verts[1])
-                if cost >= self.block_size:
+
+                if cost >= self.block_size and not verts in prev_verts:
                     partition_cost += cost
+                elif cost >= self.block_size:
+                    partition_cost /= 2
+
+                prev_verts.append(verts)
 
         return float(len(circuit[region]) / (1 + partition_cost))
