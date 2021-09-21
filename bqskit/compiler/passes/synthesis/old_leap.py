@@ -30,8 +30,8 @@ class OldLeap(SynthesisPass):
         opts = options.Options()
         opts.target = utry
         opts.gateset = gatesets.QubitCNOTAdjacencyList(adjacency_list)
-        opts.verbosity = 0
-        opts.write_to_stdout = False
+        opts.verbosity = 1
+        opts.write_to_stdout = True
         opts.reoptimize_size = 7
 
         # use the LEAP compiler, which scales better than normal qsearch
