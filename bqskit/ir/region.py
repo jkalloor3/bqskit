@@ -181,6 +181,29 @@ class CircuitRegion(Mapping[int, QuditBounds]):
             for cycle_index in bounds.indices
         ]
 
+    @property
+    def points_per_qubit(self) -> list[CircuitPoint]:
+        """Return the points described by this region indexed by qubit"""
+        return [
+            [CircuitPoint(cycle_index, qudit_index)
+            for cycle_index in bounds.indices]
+            for qudit_index, bounds in self.items()
+        ]
+
+    
+    def remove_qubit(self, qubit: int) -> QuditBounds:
+        return self._bounds.pop(qubit)
+
+    
+    def transfer_qubit(self, other: CircuitRegionLike, qubit: int):
+        old_bounds = self.remove_qubit(qubit)
+        other_bounds = other[qubit]
+        new_bounds = old_bounds.union(other_bounds)
+        other._bounds.update(qubit, new_bounds)
+
+    def has_qubit(self, ind: int) -> bool:
+        return ind in self.keys()
+
     def shift_left(self, amount_to_shift: int) -> CircuitRegion:
         """
         Shift the region to the left by `amount_to_shift`.

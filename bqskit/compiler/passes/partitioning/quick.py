@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import heapq
 import logging
-from typing import Any
+from typing import Any, List
 
 from bqskit.compiler.basepass import BasePass
 from bqskit.compiler.machine import MachineModel
@@ -204,6 +204,11 @@ class QuickPartitioner(BasePass):
             del block[-1]
             final_regions.append(CircuitRegion({qdt: (bounds[0], bounds[1]) for qdt, bounds in block.items()}))
                 
+        
+        new_regions = self.merge_blocks(final_regions, circuit)
+
+        final_regions.extend(new_regions)
+
         # If there are any regions
         if final_regions:
 
@@ -220,6 +225,79 @@ class QuickPartitioner(BasePass):
         # Copy the partitioned circuit to the original circuit
         circuit.become(partitioned_circuit)
 
+    def create_graph(self, regions):
+        # Number of regions in the circuit
+        num_regions = len(regions)
+
+        in_edges = [[]]*num_regions
+        out_edges = [[] for _ in range(num_regions)]
+        edges = set()
+        for i in range(num_regions-1):
+            for j in range(i+1, num_regions):
+                dependency = regions[i].dependency(regions[j])
+                if dependency == 1:
+                    in_edges[i].append(j)
+                    out_edges[j].append(i)
+                    edges.add((i,j))
+                elif dependency == -1:
+                    in_edges[j].append(i)
+                    out_edges[i].append(j)
+                    edges.add((j,i))
+    
+        return edges, in_edges, out_edges
+
+    def merge_blocks(self, regions: List[CircuitRegion], circuit: Circuit) -> List[CircuitRegion]:
+        # Merge adjacent blocks so that all qubits are used at least once in a 2 qubit gate.
+        # If not possible, separate out qubit into its own block
+        h = 1
+        _, in_edges, out_edges = self.create_graph(regions)
+        new_regions = []
+        for reg_id, region in enumerate(regions):
+            invalid_qubits = self.contains_single_gate_qubit(region, circuit)
+            if len(invalid_qubits) > 0 and len(invalid_qubits) < region.get_size():
+                # Try to merge qubits into dependent block
+                # Loop through invalid qubits
+                for q in invalid_qubits:
+                    merged = False
+                    # Find dependent region that contains qubit  
+                    for dep_reg_id in out_edges[reg_id]:
+                        if regions[dep_reg_id].has_qubit(q):
+                            # Try to merge, if succesful, then stop looping
+                            if self.merge(region, regions[dep_reg_id], in_edges):
+                                merged = True
+                                continue
+
+                    if not merged:
+                        # Create new block with qubit
+                        bounds = region.remove_qubit(q)
+                        new_region = CircuitRegion({q: bounds})
+                        new_regions.append(new_region)
+
+        return new_regions
+
+    
+    def merge(self, regions: List[CircuitRegion], reg_id: int, dep_reg_id: int, in_edges: List[int], qubit: int) -> bool:
+        # In order to merge, make sure no other in_edges use this qubit
+        other_regions = [id for id in in_edges[dep_reg_id] if id != reg_id]
+        for reg in other_regions:
+            if regions[reg].has_qubit(qubit):
+                return False
+
+        # Else, we are ok to merge
+        regions[reg_id].transfer_qubit(regions[dep_reg_id])
+        return True
+    
+    def contains_single_gate_qubit(self, region: CircuitRegion, circuit: Circuit) -> list[int]:
+        """Returns all qubits that are not used by a 2 qubit gate"""
+        invalid_qubits = []
+        for qubit, qubit_points in enumerate(region.points_per_qubit):
+            valid = any([op.gate.size > 1 for op in circuit.get_operations(qubit_points)])
+            if not valid:
+                invalid_qubits.append(qubit)
+        
+        return invalid_qubits
+            
+    
     def compute_finished_blocks(self, block, qudits, active_blocks, finished_blocks, 
                                 block_id, qudit_dependencies, cycle, num_qudits):
         """
@@ -279,25 +357,12 @@ class QuickPartitioner(BasePass):
         
         """
 
-        # Number of regions in the circuit
+        _, in_edges, out_edges  = self.create_graph(regions)
+
         num_regions = len(regions)
-       
-        # For each region, generate the number of in edges
-        # and the list of all out edges
-        in_edges = [0]*num_regions
-        out_edges = [[] for _ in range(num_regions)]
-        for i in range(num_regions-1):
-            for j in range(i+1, num_regions):
-                dependency = regions[i].dependency(regions[j])
-                if dependency == 1:
-                    in_edges[i] += 1
-                    out_edges[j].append(i)
-                elif dependency == -1:
-                    in_edges[j] += 1
-                    out_edges[i].append(j)
 
         # Convert the list of number of in edges in to a min-heap
-        in_edges = [[num_edges, i] for i, num_edges in enumerate(in_edges)]
+        in_edges = [[len(in_edges), i] for i, in_edges in enumerate(in_edges)]
         heapq.heapify(in_edges)
 
         index = 0
