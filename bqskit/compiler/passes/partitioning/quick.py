@@ -5,6 +5,8 @@ import heapq
 import logging
 from typing import Any
 
+from networkx.algorithms.cuts import edge_expansion
+
 from bqskit.compiler.basepass import BasePass
 from bqskit.compiler.machine import MachineModel
 from bqskit.ir.circuit import Circuit
@@ -49,6 +51,7 @@ class QuickPartitioner(BasePass):
             )
 
         self.block_size = block_size
+        self.final_regions = []
 
     def run(self, circuit: Circuit, data: dict[str, Any]) -> None:
         """
@@ -204,12 +207,16 @@ class QuickPartitioner(BasePass):
             del block[-1]
             final_regions.append(CircuitRegion({qdt: (bounds[0], bounds[1]) for qdt, bounds in block.items()}))
                 
+        
+        
         # If there are any regions
         if final_regions:
 
             # Sort the regions if multiple exist
             if len(final_regions) > 1:
                 final_regions = self.topo_sort(final_regions)
+
+            self.final_regions = final_regions
 
             # Fold the final regions into a partitioned circuit
             for region in final_regions:
@@ -273,6 +280,32 @@ class QuickPartitioner(BasePass):
 
         return block_id, updated_qudits
 
+    
+    
+    def create_graph(self, regions):
+        num_regions = len(regions)
+       
+        # For each region, generate the number of in edges
+        # and the list of all out edges
+        in_edges = [[] for _ in range(num_regions)]
+        out_edges = [[] for _ in range(num_regions)]
+        edges = set()
+        for i in range(num_regions-1):
+            for j in range(i+1, num_regions):
+                dependency = regions[i].dependency(regions[j])
+                if dependency == 1:
+                    in_edges[i].append(j)
+                    out_edges[j].append(i)
+                    edges.add((j,i))
+                elif dependency == -1:
+                    in_edges[j].append(i)
+                    out_edges[i].append(j)
+                    edges.add((i, j))
+
+        # Convert the list of number of in edges in to a min-heap
+        return in_edges, out_edges, edges
+
+    
     def topo_sort(self, regions):
         """
         Topologically sort circuit regions.
@@ -282,22 +315,10 @@ class QuickPartitioner(BasePass):
         # Number of regions in the circuit
         num_regions = len(regions)
        
-        # For each region, generate the number of in edges
-        # and the list of all out edges
-        in_edges = [0]*num_regions
-        out_edges = [[] for _ in range(num_regions)]
-        for i in range(num_regions-1):
-            for j in range(i+1, num_regions):
-                dependency = regions[i].dependency(regions[j])
-                if dependency == 1:
-                    in_edges[i] += 1
-                    out_edges[j].append(i)
-                elif dependency == -1:
-                    in_edges[j] += 1
-                    out_edges[i].append(j)
+        in_edges, out_edges, _ = self.create_graph(regions)
 
-        # Convert the list of number of in edges in to a min-heap
-        in_edges = [[num_edges, i] for i, num_edges in enumerate(in_edges)]
+        in_edges = [[len(l), i] for i,l in enumerate(in_edges)]
+
         heapq.heapify(in_edges)
 
         index = 0
@@ -327,3 +348,11 @@ class QuickPartitioner(BasePass):
             heapq.heapify(in_edges)
 
         return sorted_regions
+
+
+    def create_networkx_graph(self):
+        import networkx as nx
+        graph = nx.DiGraph()
+        _, _, edges = self.create_graph(self.final_regions)
+        graph.add_edges_from(edges)
+        return graph
