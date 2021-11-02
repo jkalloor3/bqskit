@@ -51,6 +51,7 @@ class QuickPartitioner(BasePass):
 
         self.block_size = block_size
         self.all_regions = []
+        self.edges = []
 
     def run(self, circuit: Circuit, data: dict[str, Any] = {}) -> None:
         """
@@ -366,7 +367,7 @@ class QuickPartitioner(BasePass):
         # Number of regions in the circuit
         num_regions = len(regions)
        
-        in_edges, out_edges, _ = self.create_graph(regions)
+        in_edges, out_edges, edges = self.create_graph(regions)
 
         in_edges = [[len(l), i] for i,l in enumerate(in_edges)]
 
@@ -374,6 +375,8 @@ class QuickPartitioner(BasePass):
 
         index = 0
         sorted_regions = []
+
+        self.edges.extend(edges)
 
         # While there are regions remaining to be sorted
         while index < num_regions:
@@ -406,7 +409,5 @@ class QuickPartitioner(BasePass):
 
     def create_networkx_graph(self):
         import networkx as nx
-        graph = nx.DiGraph()
-        _, _, edges = self.create_graph(self.all_regions)
-        graph.add_edges_from(edges)
+        graph = nx.DiGraph(self.edges)
         return graph

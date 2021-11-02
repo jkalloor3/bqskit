@@ -1,7 +1,7 @@
 from __future__ import annotations
 from typing import NamedTuple
 
-from bqskit.compiler.passes.partitioning.quick import QuickPartitioner
+from bqskit.passes.partitioning.quick import QuickPartitioner
 from bqskit.ir.circuit import Circuit
 from bqskit.ir.gates import CircuitGate
 from bqskit.ir.gates import CNOTGate

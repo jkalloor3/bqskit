@@ -1320,6 +1320,10 @@ class Circuit(DifferentiableUnitary, StateVectorMap, Collection[Operation]):
 
     # endregion
 
+    def get_ops_at_cycle(self, cycle: int) -> Iterable[Operation]:
+        circuit_points = [CircuitPoint(cycle, q) for q in range(self.num_qudits)]
+        return self.get_operations(circuit_points)
+
     # region Region Methods
 
     def is_valid_region(
