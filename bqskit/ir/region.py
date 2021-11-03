@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import logging
 from typing import Any
-from typing import Iterator
+from typing import Iterator, Iterable
 from typing import Mapping
 from typing import Union
 
@@ -197,8 +197,14 @@ class CircuitRegion(Mapping[int, CycleInterval]):
         ]
 
 
-    def remove_qubit(self, qubit: int) -> QuditBounds:
-        return self._bounds.pop(qubit)
+    def remove_qubit(self, qubit: int) -> CycleInterval:
+        return self._intervals.pop(qubit)
+
+    def remove_qubits(self, qubits: Iterable[int]) -> Mapping[int, CycleInterval]:
+        bounds_dict = {}
+        for q in qubits:
+            bounds_dict[q] = self.remove_qubit(q)
+        return bounds_dict
 
 
     def transfer_qubit(self, other: CircuitRegionLike, qubit: int):

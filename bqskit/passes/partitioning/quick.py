@@ -5,6 +5,8 @@ import heapq
 import logging
 from typing import Any, List
 
+import networkx as nx
+
 from bqskit.compiler.basepass import BasePass
 from bqskit.ir.circuit import Circuit
 from bqskit.ir.gates.circuitgate import CircuitGate
@@ -88,6 +90,9 @@ class QuickPartitioner(BasePass):
         # The partitioned circuit
         partitioned_circuit = Circuit(num_qudits, circuit.radixes)
 
+        total_new_regions = 0
+        total_regions = 0
+
         # For each cycle, operation in topological order
         for cycle, op in circuit.operations_with_cycles():
 
@@ -160,6 +165,7 @@ class QuickPartitioner(BasePass):
                 block[-1] = set()
                 active_blocks.append(block)
 
+
             # Where the active qudit cycles keep getting updated
             while updated_qudits:
 
@@ -193,11 +199,14 @@ class QuickPartitioner(BasePass):
 
                 # If there are any regions
                 if final_regions:
-
+                    new_regions = self.merge_blocks(final_regions, circuit)
+                    total_new_regions += len(new_regions)
+                    final_regions.extend(new_regions)
                     # Sort the regions if multiple exist
                     if len(final_regions) > 1:
                         final_regions = self.topo_sort(final_regions)
 
+                    total_regions += len(final_regions)
                     # Fold the final regions into a partitioned circuit
                     for region in final_regions:
                         region = circuit.downsize_region(region)
@@ -234,12 +243,18 @@ class QuickPartitioner(BasePass):
 
         final_regions.extend(new_regions)
 
+        total_new_regions += len(new_regions)
+
+        print(total_new_regions)
+
         # If there are any regions
         if final_regions:
 
             # Sort the regions if multiple exist
             if len(final_regions) > 1:
                 final_regions = self.topo_sort(final_regions)
+
+            total_regions += len(final_regions)
 
             # Fold the final regions into a partitioned circuit
             for region in final_regions:
@@ -257,6 +272,9 @@ class QuickPartitioner(BasePass):
                     ),
                 )
 
+        print(total_new_regions)
+        print(final_regions)
+
         # Copy the partitioned circuit to the original circuit
         circuit.become(partitioned_circuit)
 
@@ -264,22 +282,34 @@ class QuickPartitioner(BasePass):
         # Number of regions in the circuit
         num_regions = len(regions)
 
-        in_edges = [[]]*num_regions
-        out_edges = [[] for _ in range(num_regions)]
+        in_edges = [set() for _ in range(num_regions)]
+        out_edges = [set() for _ in range(num_regions)]
         edges = set()
         for i in range(num_regions-1):
             for j in range(i+1, num_regions):
                 dependency = regions[i].dependency(regions[j])
                 if dependency == 1:
-                    in_edges[i].append(j)
-                    out_edges[j].append(i)
-                    edges.add((i,j))
-                elif dependency == -1:
-                    in_edges[j].append(i)
-                    out_edges[i].append(j)
+                    in_edges[i].add(j)
+                    out_edges[j].add(i)
                     edges.add((j,i))
+                elif dependency == -1:
+                    in_edges[j].add(i)
+                    out_edges[i].add(j)
+                    edges.add((i,j))
 
         return edges, in_edges, out_edges
+
+
+    def try_to_merge_groups(self, groups, reg_id, regions, out_edges, in_edges):
+        region = regions[reg_id]
+        new_regions = []
+        for group in groups:
+            # Create new block with qubit
+            bounds = region.remove_qubits(group)
+            new_region = CircuitRegion(bounds)
+            new_regions.append(new_region)
+
+        return new_regions
 
     def merge_blocks(self, regions: List[CircuitRegion], circuit: Circuit) -> List[CircuitRegion]:
         # Merge adjacent blocks so that all qubits are used at least once in a 2 qubit gate.
@@ -288,49 +318,24 @@ class QuickPartitioner(BasePass):
         _, in_edges, out_edges = self.create_graph(regions)
         new_regions = []
         for reg_id, region in enumerate(regions):
-            invalid_qubits = self.contains_single_gate_qubit(region, circuit)
-            if len(invalid_qubits) > 0 and len(invalid_qubits) < region.get_size():
-                # Try to merge qubits into dependent block
-                # Loop through invalid qubits
-                for q in invalid_qubits:
-                    merged = False
-                    # Find dependent region that contains qubit
-                    for dep_reg_id in out_edges[reg_id]:
-                        if regions[dep_reg_id].has_qubit(q):
-                            # Try to merge, if succesful, then stop looping
-                            if self.merge(region, regions[dep_reg_id], in_edges):
-                                merged = True
-                                continue
-
-                    if not merged:
-                        # Create new block with qubit
-                        bounds = region.remove_qubit(q)
-                        new_region = CircuitRegion({q: bounds})
-                        new_regions.append(new_region)
+            groups = self.contains_separate_groups(region, circuit)
+            if len(groups) > 1:
+                # Try to merge last n - 1 groups
+                add_regions = self.try_to_merge_groups(groups[1:], reg_id, regions, out_edges, in_edges)
+                new_regions.extend(add_regions)
 
         return new_regions
 
+    def contains_separate_groups(self, region: CircuitRegion, circuit: Circuit) -> list[int]:
+        """Returns a list of lists describing all separate qubit groups"""
+        ops = circuit.get_operations(region.points)
+        op_locations = [(op.location[0], op.location[1]) for op in ops if len(op.location) == 2]
+        G = nx.Graph(op_locations)
+        groups = nx.connected_components(G)
+        # Return groups with longest group first, try to merge smaller groups
+        return sorted([tuple(c) for c in groups], key=len, reverse=True)
 
-    def merge(self, regions: List[CircuitRegion], reg_id: int, dep_reg_id: int, in_edges: List[int], qubit: int) -> bool:
-        # In order to merge, make sure no other in_edges use this qubit
-        other_regions = [id for id in in_edges[dep_reg_id] if id != reg_id]
-        for reg in other_regions:
-            if regions[reg].has_qubit(qubit):
-                return False
 
-        # Else, we are ok to merge
-        regions[reg_id].transfer_qubit(regions[dep_reg_id])
-        return True
-
-    def contains_single_gate_qubit(self, region: CircuitRegion, circuit: Circuit) -> list[int]:
-        """Returns all qubits that are not used by a 2 qubit gate"""
-        invalid_qubits = []
-        for qubit, qubit_points in enumerate(region.points_per_qubit):
-            valid = any([op.gate.size > 1 for op in circuit.get_operations(qubit_points)])
-            if not valid:
-                invalid_qubits.append(qubit)
-
-        return invalid_qubits
 
 
     def compute_finished_blocks(self, block, qudits, active_blocks, finished_blocks,
