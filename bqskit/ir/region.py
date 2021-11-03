@@ -216,6 +216,18 @@ class CircuitRegion(Mapping[int, CycleInterval]):
     def has_qubit(self, ind: int) -> bool:
         return ind in self.keys()
 
+
+    def has_all_qubits(self, inds: Iterable[int]) -> int:
+        # Returns 1 if contains all qubits
+        # Returns 0 if contains no qubits
+        # Returns -1 if contains some but not all qubits
+        has_qubits = [ind in self.keys() for ind in inds]
+        if all(has_qubits):
+            return 1
+        if any(has_qubits):
+            return -1
+        return 0
+
     def shift_left(self, amount_to_shift: int) -> CircuitRegion:
         """
         Shift the region to the left by `amount_to_shift`.

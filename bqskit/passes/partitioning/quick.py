@@ -300,28 +300,49 @@ class QuickPartitioner(BasePass):
         return edges, in_edges, out_edges
 
 
-    def try_to_merge_groups(self, groups, reg_id, regions, out_edges, in_edges):
+    def try_to_merge_groups(self, groups: List[List[int]], reg_id: int, regions: List[CircuitRegion]) -> List[CircuitRegion]:
         region = regions[reg_id]
         new_regions = []
         for group in groups:
-            # Create new block with qubit
+            # Loop through topo sorted blocks
+            # If block contains all qubits in group, then we can merge!
+            # If block contains only some qubits, then we can not merge and must split!
+            merged = False
+            # Remove qubits from current region and
+            # Collect bounds
             bounds = region.remove_qubits(group)
             new_region = CircuitRegion(bounds)
-            new_regions.append(new_region)
+            for i in range(reg_id + 1, len(regions)):
+                next_reg = regions[i]
+                can_merge = next_reg.has_all_qubits(group)
+                if can_merge == 1:
+                    # Merge in new region
+                    next_reg.union(new_region)
+                    merged = True
+                    break
+                elif can_merge == -1:
+                    # Break out of search and split
+                    break
+                else:
+                    # continue search
+                    continue
+            if not merged:
+                # Split! Add new region to list
+                new_regions.append(new_region)
 
         return new_regions
+
 
     def merge_blocks(self, regions: List[CircuitRegion], circuit: Circuit) -> List[CircuitRegion]:
         # Merge adjacent blocks so that all qubits are used at least once in a 2 qubit gate.
         # If not possible, separate out qubit into its own block
-        h = 1
-        _, in_edges, out_edges = self.create_graph(regions)
+        regions = self.topo_sort(regions)
         new_regions = []
         for reg_id, region in enumerate(regions):
             groups = self.contains_separate_groups(region, circuit)
             if len(groups) > 1:
                 # Try to merge last n - 1 groups
-                add_regions = self.try_to_merge_groups(groups[1:], reg_id, regions, out_edges, in_edges)
+                add_regions = self.try_to_merge_groups(groups[1:], reg_id, regions)
                 new_regions.extend(add_regions)
 
         return new_regions
