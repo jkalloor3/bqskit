@@ -94,6 +94,8 @@ class QuickPartitioner(BasePass):
         total_new_regions = 0
         total_regions = 0
 
+        final_regions = []
+
         # For each cycle, operation in topological order
         for cycle, op in circuit.operations_with_cycles():
 
@@ -166,14 +168,12 @@ class QuickPartitioner(BasePass):
                 block[-1] = set()
                 active_blocks.append(block)
 
-
             # Where the active qudit cycles keep getting updated
             while updated_qudits:
 
                 # Check if any blocks corresponding to updated qudits
                 # are eligible to be added to the circuit. If eligible,
                 # update actives, dependencies, and updated qudits.
-                final_regions = []
                 new_updated_qudits = set()
                 for qudit in updated_qudits:
                     blk_ids = list(qudit_dependencies[qudit].keys())
@@ -198,37 +198,10 @@ class QuickPartitioner(BasePass):
                             )
                             del finished_blocks[blk_id]
 
-                # If there are any regions
-                if final_regions:
-                    new_regions = self.merge_blocks(final_regions, circuit)
-                    total_new_regions += len(new_regions)
-                    final_regions.extend(new_regions)
-                    # Sort the regions if multiple exist
-                    if len(final_regions) > 1:
-                        final_regions = self.topo_sort(final_regions)
-
-                    total_regions += len(final_regions)
-                    # Fold the final regions into a partitioned circuit
-                    for region in final_regions:
-                        region = circuit.downsize_region(region)
-                        cgc = circuit.get_slice(region.points)
-                        partitioned_circuit.append_gate(
-                            CircuitGate(
-                                cgc, True,
-                            ), sorted(
-                                list(
-                                    region.keys(),
-                                ),
-                            ), list(
-                                cgc.params,
-                            ),
-                        )
-
                 updated_qudits = new_updated_qudits
 
         # Convert all remaining finished blocks and active blocks
         # into circuit regions
-        final_regions = []
         for block in finished_blocks.values():
             final_regions.append(
                 CircuitRegion(
@@ -239,12 +212,9 @@ class QuickPartitioner(BasePass):
             del block[-1]
             final_regions.append(CircuitRegion({qdt: (bounds[0], bounds[1]) for qdt, bounds in block.items()}))
 
-
-        new_regions = self.merge_blocks(final_regions, circuit)
-
-        final_regions.extend(new_regions)
-
-        total_new_regions += len(new_regions)
+        old_size = len(final_regions)
+        final_regions = self.merge_blocks(final_regions, circuit)
+        total_new_regions += (len(final_regions) - old_size)
 
         print(total_new_regions)
 
@@ -274,7 +244,7 @@ class QuickPartitioner(BasePass):
                 )
 
         print(total_new_regions)
-        print(final_regions)
+        print(total_regions)
 
         # Copy the partitioned circuit to the original circuit
         circuit.become(partitioned_circuit)
@@ -299,7 +269,6 @@ class QuickPartitioner(BasePass):
                     edges.add((i,j))
 
         return edges, in_edges, out_edges
-
 
     def try_to_merge_groups(self, groups: List[List[int]], reg_id: int, regions: List[CircuitRegion]) -> List[CircuitRegion]:
         region = regions[reg_id]
@@ -342,9 +311,11 @@ class QuickPartitioner(BasePass):
         for reg_id, region in enumerate(regions):
             groups = self.contains_separate_groups(region, circuit)
             if len(groups) > 1:
-                # Try to merge last n - 1 groups
-                add_regions = self.try_to_merge_groups(groups[1:], reg_id, regions)
+                # Try to merge groups
+                add_regions = self.try_to_merge_groups(groups, reg_id, regions)
                 new_regions.extend(add_regions)
+            else:
+                new_regions.append(region)
 
         return new_regions
 
