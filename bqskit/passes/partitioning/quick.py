@@ -199,9 +199,9 @@ class QuickPartitioner(BasePass):
 
                 # If there are any regions
                 if final_regions:
-                    new_regions = self.merge_blocks(final_regions, circuit)
-                    total_new_regions += len(new_regions)
-                    final_regions.extend(new_regions)
+                    old_size = len(final_regions)
+                    final_regions = self.merge_blocks(final_regions, circuit)
+                    total_new_regions += (len(final_regions) - old_size)
                     # Sort the regions if multiple exist
                     if len(final_regions) > 1:
                         final_regions = self.topo_sort(final_regions)
@@ -238,12 +238,9 @@ class QuickPartitioner(BasePass):
             del block[-1]
             final_regions.append(CircuitRegion({qdt: (bounds[0], bounds[1]) for qdt, bounds in block.items()}))
 
-
-        new_regions = self.merge_blocks(final_regions, circuit)
-
-        final_regions.extend(new_regions)
-
-        total_new_regions += len(new_regions)
+        old_size = len(final_regions)
+        final_regions = self.merge_blocks(final_regions, circuit)
+        total_new_regions += (len(final_regions) - old_size)
 
         print(total_new_regions)
 
@@ -273,7 +270,7 @@ class QuickPartitioner(BasePass):
                 )
 
         print(total_new_regions)
-        print(final_regions)
+        print(total_regions)
 
         # Copy the partitioned circuit to the original circuit
         circuit.become(partitioned_circuit)
@@ -342,8 +339,10 @@ class QuickPartitioner(BasePass):
             groups = self.contains_separate_groups(region, circuit)
             if len(groups) > 1:
                 # Try to merge last n - 1 groups
-                add_regions = self.try_to_merge_groups(groups[1:], reg_id, regions)
+                add_regions = self.try_to_merge_groups(groups, reg_id, regions)
                 new_regions.extend(add_regions)
+            else:
+                new_regions.append(region)
 
         return new_regions
 
