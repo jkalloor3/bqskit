@@ -3,9 +3,9 @@ from __future__ import annotations
 
 import heapq
 import logging
-from typing import Any
+from typing import Any, List
 
-from networkx.algorithms.cuts import edge_expansion
+import networkx as nx
 
 from bqskit.compiler.basepass import BasePass
 from bqskit.ir.circuit import Circuit
@@ -50,7 +50,6 @@ class QuickPartitioner(BasePass):
             )
 
         self.block_size = block_size
-        self.all_regions = []
         self.edges = []
 
     def run(self, circuit: Circuit, data: dict[str, Any] = {}) -> None:
@@ -91,6 +90,9 @@ class QuickPartitioner(BasePass):
 
         # The partitioned circuit
         partitioned_circuit = Circuit(num_qudits, circuit.radixes)
+
+        total_new_regions = 0
+        total_regions = 0
 
         # For each cycle, operation in topological order
         for cycle, op in circuit.operations_with_cycles():
@@ -164,6 +166,7 @@ class QuickPartitioner(BasePass):
                 block[-1] = set()
                 active_blocks.append(block)
 
+
             # Where the active qudit cycles keep getting updated
             while updated_qudits:
 
@@ -197,13 +200,14 @@ class QuickPartitioner(BasePass):
 
                 # If there are any regions
                 if final_regions:
-
+                    new_regions = self.merge_blocks(final_regions, circuit)
+                    total_new_regions += len(new_regions)
+                    final_regions.extend(new_regions)
                     # Sort the regions if multiple exist
                     if len(final_regions) > 1:
                         final_regions = self.topo_sort(final_regions)
 
-                    self.all_regions.extend(final_regions)
-
+                    total_regions += len(final_regions)
                     # Fold the final regions into a partitioned circuit
                     for region in final_regions:
                         region = circuit.downsize_region(region)
@@ -233,11 +237,16 @@ class QuickPartitioner(BasePass):
             )
         for block in active_blocks:
             del block[-1]
-            final_regions.append(
-                CircuitRegion(
-                {qdt: (bounds[0], bounds[1]) for qdt, bounds in block.items()},  # noqa
-                ),
-            )
+            final_regions.append(CircuitRegion({qdt: (bounds[0], bounds[1]) for qdt, bounds in block.items()}))
+
+
+        new_regions = self.merge_blocks(final_regions, circuit)
+
+        final_regions.extend(new_regions)
+
+        total_new_regions += len(new_regions)
+
+        print(total_new_regions)
 
         # If there are any regions
         if final_regions:
@@ -246,7 +255,7 @@ class QuickPartitioner(BasePass):
             if len(final_regions) > 1:
                 final_regions = self.topo_sort(final_regions)
 
-            self.all_regions.extend(final_regions)
+            total_regions += len(final_regions)
 
             # Fold the final regions into a partitioned circuit
             for region in final_regions:
@@ -264,15 +273,100 @@ class QuickPartitioner(BasePass):
                     ),
                 )
 
+        print(total_new_regions)
+        print(final_regions)
+
         # Copy the partitioned circuit to the original circuit
         circuit.become(partitioned_circuit)
 
-    def compute_finished_blocks(  # type: ignore
-        self, block, qudits, active_blocks, finished_blocks,
-        block_id, qudit_dependencies, cycle, num_qudits,
-    ):
-        """Add blocks with all inactive qudits to the finished_blocks list and
-        remove them from the active_blocks list."""
+    def create_graph(self, regions):
+        # Number of regions in the circuit
+        num_regions = len(regions)
+
+        in_edges = [set() for _ in range(num_regions)]
+        out_edges = [set() for _ in range(num_regions)]
+        edges = set()
+        for i in range(num_regions-1):
+            for j in range(i+1, num_regions):
+                dependency = regions[i].dependency(regions[j])
+                if dependency == 1:
+                    in_edges[i].add(j)
+                    out_edges[j].add(i)
+                    edges.add((j,i))
+                elif dependency == -1:
+                    in_edges[j].add(i)
+                    out_edges[i].add(j)
+                    edges.add((i,j))
+
+        return edges, in_edges, out_edges
+
+
+    def try_to_merge_groups(self, groups: List[List[int]], reg_id: int, regions: List[CircuitRegion]) -> List[CircuitRegion]:
+        region = regions[reg_id]
+        new_regions = []
+        for group in groups:
+            # Loop through topo sorted blocks
+            # If block contains all qubits in group, then we can merge!
+            # If block contains only some qubits, then we can not merge and must split!
+            merged = False
+            # Remove qubits from current region and
+            # Collect bounds
+            bounds = region.remove_qubits(group)
+            new_region = CircuitRegion(bounds)
+            for i in range(reg_id + 1, len(regions)):
+                next_reg = regions[i]
+                can_merge = next_reg.has_all_qubits(group)
+                if can_merge == 1:
+                    # Merge in new region
+                    next_reg.union(new_region)
+                    merged = True
+                    break
+                elif can_merge == -1:
+                    # Break out of search and split
+                    break
+                else:
+                    # continue search
+                    continue
+            if not merged:
+                # Split! Add new region to list
+                new_regions.append(new_region)
+
+        return new_regions
+
+
+    def merge_blocks(self, regions: List[CircuitRegion], circuit: Circuit) -> List[CircuitRegion]:
+        # Merge adjacent blocks so that all qubits are used at least once in a 2 qubit gate.
+        # If not possible, separate out qubit into its own block
+        regions = self.topo_sort(regions)
+        new_regions = []
+        for reg_id, region in enumerate(regions):
+            groups = self.contains_separate_groups(region, circuit)
+            if len(groups) > 1:
+                # Try to merge last n - 1 groups
+                add_regions = self.try_to_merge_groups(groups[1:], reg_id, regions)
+                new_regions.extend(add_regions)
+
+        return new_regions
+
+    def contains_separate_groups(self, region: CircuitRegion, circuit: Circuit) -> list[int]:
+        """Returns a list of lists describing all separate qubit groups"""
+        ops = circuit.get_operations(region.points)
+        op_locations = [(op.location[0], op.location[1]) for op in ops if len(op.location) == 2]
+        G = nx.Graph(op_locations)
+        groups = nx.connected_components(G)
+        # Return groups with longest group first, try to merge smaller groups
+        return sorted([tuple(c) for c in groups], key=len, reverse=True)
+
+
+
+
+    def compute_finished_blocks(self, block, qudits, active_blocks, finished_blocks,
+                                block_id, qudit_dependencies, cycle, num_qudits):
+        """
+        Add blocks with all inactive qudits to the finished_blocks list and
+        remove them from the active_blocks list.
+
+        """
 
         # Compile the qudits from the new operation,
         # the active qudits of the block being updated,
@@ -332,45 +426,15 @@ class QuickPartitioner(BasePass):
 
         return block_id, updated_qudits
 
-    
-    
-    def create_graph(self, regions):
-        num_regions = len(regions)
+    def topo_sort(self, regions):  # type: ignore
+        """Topologically sort circuit regions."""
 
-        # For each region, generate the number of in edges
-        # and the list of all out edges
-        in_edges = [[] for _ in range(num_regions)]
-        out_edges = [[] for _ in range(num_regions)]
-        edges = set()
-        for i in range(num_regions-1):
-            for j in range(i+1, num_regions):
-                dependency = regions[i].dependency(regions[j])
-                if dependency == 1:
-                    in_edges[i].append(j)
-                    out_edges[j].append(i)
-                    edges.add((j,i))
-                elif dependency == -1:
-                    in_edges[j].append(i)
-                    out_edges[i].append(j)
-                    edges.add((i, j))
+        edges, in_edges, out_edges = self.create_graph(regions)
+
+        num_regions = len(regions)
 
         # Convert the list of number of in edges in to a min-heap
-        return in_edges, out_edges, edges
-
-    
-    def topo_sort(self, regions):
-        """
-        Topologically sort circuit regions.
-        
-        """
-
-        # Number of regions in the circuit
-        num_regions = len(regions)
-       
-        in_edges, out_edges, edges = self.create_graph(regions)
-
-        in_edges = [[len(l), i] for i,l in enumerate(in_edges)]
-
+        in_edges = [[len(in_edges), i] for i, in_edges in enumerate(in_edges)]
         heapq.heapify(in_edges)
 
         index = 0

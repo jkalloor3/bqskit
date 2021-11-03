@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import logging
 from typing import Any
-from typing import Iterator
+from typing import Iterator, Iterable
 from typing import Mapping
 from typing import Union
 
@@ -186,6 +186,47 @@ class CircuitRegion(Mapping[int, CycleInterval]):
     def empty(self) -> bool:
         """Return true if this region is empty."""
         return len(self) == 0
+
+    @property
+    def points_per_qubit(self) -> list[CircuitPoint]:
+        """Return the points described by this region indexed by qubit"""
+        return [
+            [CircuitPoint(cycle_index, qudit_index)
+            for cycle_index in bounds.indices]
+            for qudit_index, bounds in self.items()
+        ]
+
+
+    def remove_qubit(self, qubit: int) -> CycleInterval:
+        return self._intervals.pop(qubit)
+
+    def remove_qubits(self, qubits: Iterable[int]) -> Mapping[int, CycleInterval]:
+        bounds_dict = {}
+        for q in qubits:
+            bounds_dict[q] = self.remove_qubit(q)
+        return bounds_dict
+
+
+    def transfer_qubit(self, other: CircuitRegionLike, qubit: int):
+        old_bounds = self.remove_qubit(qubit)
+        other_bounds = other[qubit]
+        new_bounds = old_bounds.union(other_bounds)
+        other._bounds.update(qubit, new_bounds)
+
+    def has_qubit(self, ind: int) -> bool:
+        return ind in self.keys()
+
+
+    def has_all_qubits(self, inds: Iterable[int]) -> int:
+        # Returns 1 if contains all qubits
+        # Returns 0 if contains no qubits
+        # Returns -1 if contains some but not all qubits
+        has_qubits = [ind in self.keys() for ind in inds]
+        if all(has_qubits):
+            return 1
+        if any(has_qubits):
+            return -1
+        return 0
 
     def shift_left(self, amount_to_shift: int) -> CircuitRegion:
         """
