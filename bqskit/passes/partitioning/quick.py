@@ -273,6 +273,8 @@ class QuickPartitioner(BasePass):
     def try_to_merge_groups(self, groups: List[List[int]], reg_id: int, regions: List[CircuitRegion]) -> List[CircuitRegion]:
         region = regions[reg_id]
         new_regions = []
+        if reg_id == 321:
+            h = 1
         for group in groups:
             # Loop through topo sorted blocks
             # If block contains all qubits in group, then we can merge!
@@ -287,8 +289,11 @@ class QuickPartitioner(BasePass):
                 can_merge = next_reg.has_all_qubits(group)
                 if can_merge == 1:
                     # Merge in new region
-                    next_reg.union(new_region)
-                    merged = True
+                    try:
+                        next_reg.union(new_region)
+                        merged = True
+                    except ValueError:
+                        logging.info("Cannot union, splitting into new block")
                     break
                 elif can_merge == -1:
                     # Break out of search and split
