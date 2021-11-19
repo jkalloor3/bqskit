@@ -199,9 +199,9 @@ class QuickPartitioner(BasePass):
 
                 # If there are any regions
                 if final_regions:
-                    old_size = len(final_regions)
-                    final_regions = self.merge_blocks(final_regions, circuit)
-                    total_new_regions += (len(final_regions) - old_size)
+                    # old_size = len(final_regions)
+                    # final_regions = self.merge_blocks(final_regions, circuit)
+                    # total_new_regions += (len(final_regions) - old_size)
                     # Sort the regions if multiple exist
                     if len(final_regions) > 1:
                         final_regions = self.topo_sort(final_regions)
@@ -238,11 +238,11 @@ class QuickPartitioner(BasePass):
             del block[-1]
             final_regions.append(CircuitRegion({qdt: (bounds[0], bounds[1]) for qdt, bounds in block.items()}))
 
-        old_size = len(final_regions)
-        final_regions = self.merge_blocks(final_regions, circuit)
-        total_new_regions += (len(final_regions) - old_size)
+        # old_size = len(final_regions)
+        # final_regions = self.merge_blocks(final_regions, circuit)
+        # total_new_regions += (len(final_regions) - old_size)
 
-        print(total_new_regions)
+        # print(total_new_regions)
 
         # If there are any regions
         if final_regions:
