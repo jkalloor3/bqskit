@@ -270,11 +270,9 @@ class QuickPartitioner(BasePass):
 
         return edges, in_edges, out_edges
 
-    def try_to_merge_groups(self, groups: List[List[int]], reg_id: int, regions: List[CircuitRegion]) -> List[CircuitRegion]:
+    def try_to_merge_groups(self, groups: List[List[int]], reg_id: int, regions: List[CircuitRegion], circuit: Circuit) -> List[CircuitRegion]:
         region = regions[reg_id]
         new_regions = []
-        if reg_id == 321:
-            h = 1
         for group in groups:
             # Loop through topo sorted blocks
             # If block contains all qubits in group, then we can merge!
@@ -290,7 +288,8 @@ class QuickPartitioner(BasePass):
                 if can_merge == 1:
                     # Merge in new region
                     try:
-                        next_reg.union(new_region)
+                        new_next_reg = next_reg.union(new_region)
+                        regions[i] = new_next_reg
                         merged = True
                     except ValueError:
                         logging.info("Cannot union, splitting into new block")
@@ -313,11 +312,12 @@ class QuickPartitioner(BasePass):
         # If not possible, separate out qubit into its own block
         regions = self.topo_sort(regions)
         new_regions = []
-        for reg_id, region in enumerate(regions):
+        for reg_id in range(len(regions)):
+            region = regions[reg_id]
             groups = self.contains_separate_groups(region, circuit)
             if len(groups) > 1:
                 # Try to merge groups
-                add_regions = self.try_to_merge_groups(groups, reg_id, regions)
+                add_regions = self.try_to_merge_groups(groups, reg_id, regions, circuit)
                 new_regions.extend(add_regions)
             else:
                 new_regions.append(region)
