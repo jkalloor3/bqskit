@@ -25,6 +25,7 @@ from bqskit.ir.operation import Operation
 from bqskit.ir.opt import HilbertSchmidtCostGenerator
 from bqskit.ir.opt import ScipyMinimizer
 from bqskit.passes import *
+from bqskit.passes.mapping.placement import NoiseAwarePlacementPass
 from bqskit.qis.state.state import StateVector
 from bqskit.qis.unitary.unitarymatrix import UnitaryMatrix
 from bqskit.utils.typing import is_integer
@@ -44,6 +45,7 @@ def compile(
     error_threshold: float | None = None,
     error_sim_size: int = 8,
     compiler: Compiler | None = None,
+    run_noise_aware: bool = False,
     *compiler_args: Any,
     **compiler_kwargs: Any,
 ) -> Circuit:
@@ -147,6 +149,12 @@ def compile(
 
     if model.num_qudits < input.num_qudits:
         raise ValueError('Machine is too small for circuit.')
+
+    if run_noise_aware and not model.valid_noise_model():
+        run_noise_aware = False
+        _logger.warning(
+            'Machine does not have noise model, will not run noise-aware compilation'
+        )
 
     if not all(r == 2 for r in model.radixes):
         raise ValueError(
@@ -264,6 +272,7 @@ def compile(
             max_synthesis_size,
             error_threshold,
             error_sim_size,
+            run_noise_aware
         )
 
     elif isinstance(input, UnitaryMatrix):
@@ -283,6 +292,7 @@ def compile(
             max_synthesis_size,
             error_threshold,
             error_sim_size,
+            run_noise_aware
         )
 
     elif isinstance(input, StateVector):
@@ -302,6 +312,7 @@ def compile(
             max_synthesis_size,
             error_threshold,
             error_sim_size,
+            run_noise_aware
         )
 
     # Connect to or construct a Compiler
@@ -344,6 +355,7 @@ def _circuit_workflow(
     max_synthesis_size: int = 4,
     error_threshold: float | None = None,
     error_sim_size: int = 8,
+    run_noise_aware: bool = False
 ) -> CompilationTask:
     """Build standard workflow for circuit compilation."""
     workflow_builders = [
@@ -361,6 +373,7 @@ def _circuit_workflow(
         max_synthesis_size,
         error_threshold,
         error_sim_size,
+        run_noise_aware
     )
     workflow += [RestoreMeasurements()]
     return CompilationTask(circuit, workflow)
@@ -373,6 +386,7 @@ def _opt1_workflow(
     max_synthesis_size: int = 4,
     error_threshold: float | None = None,
     error_sim_size: int = 8,
+    run_noise_aware: bool = False
 ) -> list[BasePass]:
     """Build Optimization Level 1 workflow for circuit compilation."""
     layer_gen = _get_layer_gen(model)
@@ -422,6 +436,7 @@ def _opt1_workflow(
         smallest_entangler_size = 1
         multi_qudit_gate_rebase = NOOPPass()
 
+    placement_pass = NoiseAwarePlacementPass if run_noise_aware else GreedyPlacementPass
     return [
         SetModelPass(model),
 
@@ -453,7 +468,7 @@ def _opt1_workflow(
 
         # Mapping via Sabre
         LogPass('Mapping circuit.'),
-        GreedyPlacementPass(),
+        placement_pass(),
         GeneralizedSabreLayoutPass(),
         GeneralizedSabreRoutingPass(),
 
@@ -499,6 +514,7 @@ def _opt2_workflow(
     max_synthesis_size: int = 3,
     error_threshold: float | None = None,
     error_sim_size: int = 8,
+    run_noise_aware: bool = False
 ) -> list[BasePass]:
     """Build Optimization Level 2 workflow for circuit compilation."""
     inst_ops = {'multistarts': 4, 'ftol': 5e-12, 'gtol': 1e-14}
@@ -552,6 +568,7 @@ def _opt2_workflow(
         smallest_entangler_size = 1
         multi_qudit_gate_rebase = NOOPPass()
 
+    placement_pass = NoiseAwarePlacementPass if run_noise_aware else GreedyPlacementPass
     return [
         SetModelPass(model),
 
@@ -583,7 +600,7 @@ def _opt2_workflow(
 
         # Mapping via Sabre
         LogPass('Mapping circuit.'),
-        GreedyPlacementPass(),
+        placement_pass(),
         GeneralizedSabreLayoutPass(),
         GeneralizedSabreRoutingPass(),
 
@@ -640,6 +657,7 @@ def _opt3_workflow(
     max_synthesis_size: int = 4,
     error_threshold: float | None = None,
     error_sim_size: int = 8,
+    run_noise_aware: bool = False
 ) -> list[BasePass]:
     """Build Optimization Level 3 workflow for circuit compilation."""
     inst_ops = {
@@ -700,6 +718,7 @@ def _opt3_workflow(
         multi_qudit_gate_rebase = NOOPPass()
         native_mq_gates = []
 
+    placement_pass = NoiseAwarePlacementPass if run_noise_aware else GreedyPlacementPass
     return [
         SetModelPass(model),
 
@@ -731,7 +750,7 @@ def _opt3_workflow(
 
         # Mapping via Sabre
         LogPass('Mapping circuit.'),
-        GreedyPlacementPass(),
+        placement_pass(),
         GeneralizedSabreLayoutPass(),
         GeneralizedSabreRoutingPass(),
 
@@ -816,6 +835,7 @@ def _opt4_workflow(
     max_synthesis_size: int = 4,
     error_threshold: float | None = None,
     error_sim_size: int = 8,
+    run_noise_aware: bool = False
 ) -> list[BasePass]:
     """Build optimization Level 4 workflow for circuit compilation."""
     # TODO

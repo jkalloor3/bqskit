@@ -7,6 +7,7 @@ to start the circuit on.
 from __future__ import annotations
 
 from bqskit.passes.mapping.placement.greedy import GreedyPlacementPass
+from bqskit.passes.mapping.placement.noise_aware import NoiseAwarePlacementPass
 from bqskit.passes.mapping.placement.trivial import TrivialPlacementPass
 
-__all__ = ['GreedyPlacementPass', 'TrivialPlacementPass']
+__all__ = ['GreedyPlacementPass', 'TrivialPlacementPass', 'NoiseAwarePlacementPass']

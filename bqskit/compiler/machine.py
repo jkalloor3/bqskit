@@ -12,7 +12,7 @@ from bqskit.qis.graph import CouplingGraph
 from bqskit.qis.graph import CouplingGraphLike
 from bqskit.utils.typing import is_integer
 from bqskit.utils.typing import is_valid_radixes
-
+from qiskit.providers.backend import BackendV1
 
 default_gate_set: set[Gate] = {
     CNOTGate(),
@@ -29,6 +29,7 @@ class MachineModel:
         coupling_graph: CouplingGraphLike | None = None,
         gate_set: set[Gate] = default_gate_set,
         radixes: Sequence[int] = [],
+        qudit_noise_model: list[float] = None
     ) -> None:
         """
         MachineModel Constructor.
@@ -93,6 +94,7 @@ class MachineModel:
         self.gate_set = gate_set
         self.coupling_graph = CouplingGraph(coupling_graph)
         self.num_qudits = num_qudits
+        self.qudit_noise_model = qudit_noise_model
 
     def get_locations(self, block_size: int) -> list[CircuitLocation]:
         """Return all `block_size` connected blocks of qudit indicies."""
@@ -113,3 +115,11 @@ class MachineModel:
             return False
 
         return True
+
+    def valid_noise_model(self):
+        return self.qudit_noise_model != None
+
+    def add_noise_model_from_backend(self, backend: BackendV1):
+        props = backend.properties()
+        qudit_noise_model = [(props.t1(i) + props.t2(i)) for i in range(len(props.qubits))]
+        self.qudit_noise_model = [i / float(max(qudit_noise_model)) for i in qudit_noise_model] # Normalize
