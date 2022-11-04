@@ -31,7 +31,7 @@ class UnitaryBuilder(Unitary):
     unitary matrices.
     """
 
-    def __init__(self, num_qudits: int, radixes: Sequence[int] = [], initial_value: UnitaryMatrix = None, mat_lib = np) -> None:
+    def __init__(self, num_qudits: int, radixes: Sequence[int] = [], initial_value: UnitaryMatrix = None, mat_lib=np) -> None:
         """
         UnitaryBuilder constructor.
 
@@ -183,12 +183,11 @@ class UnitaryBuilder(Unitary):
             utry_builder_tensor_indexs[loc] = offset + i
             output_tensor_index[loc] = (utry_size - offset) + i
 
-        
         self.tensor = self._mat_lib.einsum(
-               utry_tensor, utry_tensor_indexs,
-               self.tensor, utry_builder_tensor_indexs, output_tensor_index,
-            )
-    
+            utry_tensor, utry_tensor_indexs,
+            self.tensor, utry_builder_tensor_indexs, output_tensor_index,
+        )
+
     def apply_left(
         self,
         utry: UnitaryMatrix,
@@ -273,12 +272,17 @@ class UnitaryBuilder(Unitary):
                 self.num_qudits +
                 loc
             ] = (utry_size - offset) + i
+<<<<<<< HEAD
        
+=======
+
+>>>>>>> 9ef7422... [pre-commit.ci] auto fixes from pre-commit.com hooks
         self.tensor = self._mat_lib.einsum(
             utry_tensor, utry_tensor_indexs,
             self.tensor, utry_builder_tensor_indexs, output_tensor_index,
         )
 
+<<<<<<< HEAD
     def eval_apply_right(
         self,
         M: npt.NDArray[np.complex128],
@@ -349,8 +353,10 @@ class UnitaryBuilder(Unitary):
         out_M = tensor_copy.reshape((self.dim, self.dim))
         return out_M
     
+=======
+>>>>>>> 9ef7422... [pre-commit.ci] auto fixes from pre-commit.com hooks
     def calc_env_matrix(
-            self, location: Sequence[int]
+            self, location: Sequence[int],
     ):
         """
         Calculates the environment matrix w.r.t. the specified location.
@@ -372,9 +378,7 @@ class UnitaryBuilder(Unitary):
             [chr(ord('a') + i) for i in contraction_indexs],
         )
 
-        
         env_tensor = self._mat_lib.einsum(contraction_indexs_str, self.tensor)
         env_mat = env_tensor.reshape((2**len(location), -1))
 
         return env_mat
-
