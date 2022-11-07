@@ -87,8 +87,13 @@ class QFactor_jax_batched_jit(Instantiater):
         untrys = []
 
         for gate in gates:
-            size_of_untry = 2**gate.num_qudits
-            untrys.append([_apply_padding_and_flatten(unitary_group.rvs(size_of_untry), gate, biggest_gate_size) for _ in range(amount_of_starts)])
+            if gate.num_params > 0:
+                size_of_untry = 2**gate.num_qudits
+                untrys.append([_apply_padding_and_flatten(unitary_group.rvs(size_of_untry), gate, biggest_gate_size) for _ in range(amount_of_starts)])
+            else:
+                untry = gate.get_unitary().numpy
+                untrys.append([_apply_padding_and_flatten(untry, gate, biggest_gate_size) for _ in range(amount_of_starts)])
+
 
                 
                 
@@ -123,12 +128,17 @@ class QFactor_jax_batched_jit(Instantiater):
                         f'Terminated: |c1 - c2| = '
                         ' <= diff_tol_a + diff_tol_r * |c1|.',
                     )
-                    best_start = jnp.argmin(c1s)
+                    best_start = jnp.argmin(jnp.abs(c1s))
+
+                    _logger.info(
+                    f'Terminated: {it} c1 = {c1s} Reached PLATO.\n Best start is {best_start}',
+                    )
+
                     break
 
                 if it > self.max_iters:
                     _logger.info('Terminated: iteration limit reached.')
-                    best_start = jnp.argmin(c1s)
+                    best_start = jnp.argmin(jnp.abs(c1s))
                     break
 
         params = []
