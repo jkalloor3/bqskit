@@ -83,7 +83,6 @@ class QFactor_jax_batched_jit(Instantiater):
         gates = tuple([op.gate for op in circuit])
         biggest_gate_size = max((gate.num_qudits for gate in gates))
         
-        
         untrys = []
 
         for gate in gates:
@@ -95,8 +94,6 @@ class QFactor_jax_batched_jit(Instantiater):
                 untrys.append([_apply_padding_and_flatten(untry, gate, biggest_gate_size) for _ in range(amount_of_starts)])
 
 
-                
-                
         untrys = jnp.array(np.stack(untrys, axis=1))
         n = 40
         c1s = jnp.array([1] * amount_of_starts)
