@@ -147,7 +147,7 @@ class QFactor_jax_batched_jit(Instantiater):
                     best_start = jnp.argmin(jnp.abs(c1s))
 
                     _logger.info(
-                    f'Terminated: {it} c1 = {c1s} Reached PLATO.\n Best start is {best_start}',
+                    f'Terminated: {it} c1 = {c1s} Reached plateuo.\n Best start is {best_start}',
                     )
 
                     break
