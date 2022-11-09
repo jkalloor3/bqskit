@@ -1,4 +1,5 @@
 from __future__ import annotations
+import functools
 
 import logging
 from typing import TYPE_CHECKING
@@ -98,10 +99,12 @@ class QFactor_jax_batched_jit(Instantiater):
         it = 0
         it2 = 0
         best_start = 0
+        plateau_windows_size = 3
+        plateau_window = jnp.array([[0] * plateau_windows_size for _ in range(amount_of_starts)])
 
         while (True):
-            c1s, untrys, plato_calc, reached_desired_distance = _sweep_jited_vmaped(
-                target, locations, gates, untrys, n, c1s, self.dist_tol, self.diff_tol_a, self.diff_tol_r,
+            c1s, untrys, plateau_calc, reached_desired_distance, plateau_window = _sweep_jited_vmaped(
+                target, locations, gates, untrys, n, c1s, self.dist_tol, self.diff_tol_a, self.diff_tol_r, plateau_window,
             )
 
             it += n
@@ -120,7 +123,7 @@ class QFactor_jax_batched_jit(Instantiater):
                 break
 
             if it > self.min_iters:
-                if all(plato_calc):
+                if all(plateau_calc):
                     _logger.info(
                         f'Terminated: |c1 - c2| = '
                         ' <= diff_tol_a + diff_tol_r * |c1|.',
@@ -281,7 +284,7 @@ def _remove_padding_and_create_matrix(untry, gate):
     return untry[:size_to_keep].reshape((len_of_matrix, len_of_matrix))
 
 
-def _sweep_circuit(target: UnitaryMatrix, locations, gates, untrys, n: int, c1, dist_tol, diff_tol_a, diff_tol_r):
+def _sweep_circuit(target: UnitaryMatrix, locations, gates, untrys, n: int, c1, dist_tol, diff_tol_a, diff_tol_r, plateau_window):
     amount_of_gates = len(gates)
     untrys_as_matrixs = []
     for gate_index, gate in enumerate(gates):
@@ -312,7 +315,9 @@ def _sweep_circuit(target: UnitaryMatrix, locations, gates, untrys, n: int, c1, 
     c1 = jnp.abs(jnp.trace(untry_res))
     c1 = 1 - (c1 / (2 ** amount_of_qudits))
 
-    plato_calc = jnp.abs(c1 - c2) <= diff_tol_a + diff_tol_r * jnp.abs(c1)
+    curr_plateau_calc = jnp.abs(c1 - c2) <= diff_tol_a + diff_tol_r * jnp.abs(c1)
+    plateau_calc = functools.reduce(jnp.bitwise_or, plateau_window) | curr_plateau_calc
+    plateau_window = jnp.concatenate((jnp.array([curr_plateau_calc]), plateau_window[:-1]))
     reached_required_tol = c1 < dist_tol
 
     biggest_gate_size = max(gate.num_qudits for gate in gates)
@@ -323,7 +328,7 @@ def _sweep_circuit(target: UnitaryMatrix, locations, gates, untrys, n: int, c1, 
         ) for untry, gate in zip(untrys, gates)
     ])
 
-    return c1, final_untrys_padded, plato_calc, reached_required_tol
+    return c1, final_untrys_padded, plateau_calc, reached_required_tol, plateau_window
 
 
 _sweep_circuit_jited = jax.jit(
@@ -332,6 +337,6 @@ _sweep_circuit_jited = jax.jit(
 
 _sweep_jited_vmaped = jax.vmap(
     _sweep_circuit_jited, in_axes=(
-        None, None, None, 0, None, 0, None, None, None,
+        None, None, None, 0, None, 0, None, None, None,0,
     ),
 )
