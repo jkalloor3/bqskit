@@ -31,7 +31,7 @@ class UnitaryBuilder(Unitary):
     unitary matrices.
     """
 
-    def __init__(self, num_qudits: int, radixes: Sequence[int] = [], initial_value: UnitaryMatrix = None, mat_lib=np) -> None:
+    def __init__(self, num_qudits: int, radixes: Sequence[int] = [], initial_value: UnitaryMatrix = None, mat_lib=np, tensor=None) -> None:
         """
         UnitaryBuilder constructor.
 
@@ -80,21 +80,24 @@ class UnitaryBuilder(Unitary):
         self._num_params = 0
         self._dim = int(np.prod(self.radixes))
 
-        if initial_value is None:
-            self.tensor = mat_lib.identity(self.dim, dtype=np.complex128)
-        elif isinstance(initial_value, UnitaryMatrix):
-            if not all((d1 == d2 for d1, d2 in zip(self.radixes, initial_value.radixes))):
-                raise ValueError(
-                    f'Expected radixes to be equal between the intial value to desired builder radixes:'
-                    ' {initail_value.radixes} != {self.radixes}',
-                )
+        if tensor is None:
+            if initial_value is None:
+                self.tensor = mat_lib.identity(self.dim, dtype=mat_lib.complex128)
+            elif isinstance(initial_value, UnitaryMatrix):
+                if not all((d1 == d2 for d1, d2 in zip(self.radixes, initial_value.radixes))):
+                    raise ValueError(
+                        f'Expected radixes to be equal between the intial value to desired builder radixes:'
+                        ' {initail_value.radixes} != {self.radixes}',
+                    )
 
-            self.tensor = initial_value.numpy
+                self.tensor = initial_value.numpy
+            else:
+                self.tensor = initial_value
+
+            if isinstance(self.tensor, mat_lib.ndarray):
+                self.tensor = self.tensor.reshape(self.radixes * 2)
         else:
-            self.tensor = initial_value
-
-        if isinstance(self.tensor, mat_lib.ndarray):
-            self.tensor = self.tensor.reshape(self.radixes * 2)
+            self.tensor = tensor
 
     def get_unitary(self, params: RealVector = []) -> UnitaryMatrix:
         """Build the unitary, see :func:`Unitary.get_unitary` for more."""

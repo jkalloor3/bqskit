@@ -26,7 +26,7 @@ class UnitaryBuilderJax(UnitaryBuilder):
     unitary matrices.
     """
 
-    def __init__(self, num_qudits: int, radixes: Sequence[int] = [], initial_value: UnitaryMatrix = None) -> None:
+    def __init__(self, num_qudits: int, radixes: Sequence[int] = [], initial_value: UnitaryMatrix = None, tensor = None) -> None:
         """
         UnitaryBuilder constructor.
 
@@ -46,7 +46,7 @@ class UnitaryBuilderJax(UnitaryBuilder):
         Examples:
             >>> builder = UnitaryBuilder(4)  # Creates a 4-qubit builder.
         """
-        super().__init__(num_qudits, radixes, initial_value, jnp)
+        super().__init__(num_qudits, radixes, initial_value, jnp, tensor)
 
     def get_unitary(self, params: RealVector = []) -> UnitaryMatrixJax:
         """Build the unitary, see :func:`Unitary.get_unitary` for more."""
@@ -57,7 +57,7 @@ class UnitaryBuilderJax(UnitaryBuilder):
         return UnitaryMatrixJax(utry, self.radixes)
 
     def _tree_flatten(self):
-        children = (self.get_unitary(),)  # arrays / dynamic values
+        children = (self.tensor,)  # arrays / dynamic values
         aux_data = {
             'radixes': self._radixes,
             'num_qudits': self.num_qudits,
@@ -66,7 +66,7 @@ class UnitaryBuilderJax(UnitaryBuilder):
 
     @classmethod
     def _tree_unflatten(cls, aux_data, children):
-        return cls(initial_value=children[0], **aux_data)
+        return cls(initial_value=None, tensor=children[0], **aux_data)
 
 
 jax.tree_util.register_pytree_node(
