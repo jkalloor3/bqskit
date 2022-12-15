@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import logging
 import sys
+import os
 import time
 import uuid
 from subprocess import PIPE
@@ -186,8 +187,13 @@ def start_dask_cluster() -> tuple[Popen[bytes], Popen[str]]:
             workers.append('--nthreads')
             workers.append('1')
 
+        if 'DASK_CUDA' in os.environ:
+            command = ['dask-cuda-worker',  'localhost:8786']
+        else:
+            command = ['dask-worker', '--nworkers', *workers, 'localhost:8786']
+
         worker_proc = Popen(
-            ['dask-worker', '--nworkers', *workers, 'localhost:8786'],
+            command ,
             bufsize=1,
             universal_newlines=True,
             stdout=sys.stdout,
