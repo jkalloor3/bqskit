@@ -92,20 +92,6 @@ class QFactor_jax_batched_jit(Instantiater):
         amount_of_starts = len(starts)
         locations = tuple([op.location for op in circuit])
         gates = tuple([op.gate for op in circuit])
-<<<<<<< HEAD
-        biggest_gate_size = max((gate.num_qudits for gate in gates))
-        
-        untrys = []
-
-        for gate in gates:
-            if gate.num_params > 0:
-                size_of_untry = 2**gate.num_qudits
-                untrys.append([_apply_padding_and_flatten(unitary_group.rvs(size_of_untry), gate, biggest_gate_size) for _ in range(amount_of_starts)])
-            else:
-                untry = gate.get_unitary().numpy
-                untrys.append([_apply_padding_and_flatten(untry, gate, biggest_gate_size) for _ in range(amount_of_starts)])
-
-=======
         biggest_gate_size = max(gate.num_qudits for gate in gates)
 
         untrys = []
@@ -119,7 +105,6 @@ class QFactor_jax_batched_jit(Instantiater):
                     ), gate, biggest_gate_size,
                 ) for _ in range(amount_of_starts)
             ])
->>>>>>> 9ef7422... [pre-commit.ci] auto fixes from pre-commit.com hooks
 
         untrys = jnp.array(np.stack(untrys, axis=1))
         n = 40
