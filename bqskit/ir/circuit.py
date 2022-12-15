@@ -2750,7 +2750,7 @@ class Circuit(DifferentiableUnitary, StateVectorMap, Collection[Operation]):
         cost_fn = score_fn_gen.gen_cost(self, target)
 
         # Instantiate the circuit
-        if parallel and multistarts > 1:
+        if parallel and multistarts > 1 and not instantiater.can_internaly_perform_multistart():
             client = get_client()
 
             def single_start_instantiate(
