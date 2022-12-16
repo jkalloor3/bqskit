@@ -327,8 +327,8 @@ class UnitaryBuilder(Unitary):
             for x in left_perm
             if x not in location
         ]
-        right_perm = [x + self.num_qudits for x in location]
 
+        right_perm = [x + self.num_qudits for x in location]
         right_dim = int(
             np.prod([
                 self.radixes[x - self.num_qudits]
