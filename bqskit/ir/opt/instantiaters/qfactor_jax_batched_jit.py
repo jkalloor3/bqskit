@@ -29,6 +29,7 @@ if TYPE_CHECKING:
 
 _logger = logging.getLogger(__name__)
 
+jax.config.update('jax_enable_x64', True)
 
 class QFactor_jax_batched_jit(Instantiater):
     """The QFactor batch circuit instantiater."""
@@ -143,8 +144,6 @@ class QFactor_jax_batched_jit(Instantiater):
         else:
             _logger.error(f'Terminated with no good reason after {it} iterstion with c1s {c1s}.')
 
-
-        print(f"Finished after {it} iterations")
         params = []
         for untry, gate in zip(untrys[best_start], gates):
             params.extend(
