@@ -188,7 +188,7 @@ def start_dask_cluster() -> tuple[Popen[bytes], Popen[str]]:
             workers.append('1')
 
         if 'DASK_CUDA' in os.environ:
-            command = ['dask-cuda-worker',  'localhost:8786']
+            command = ['dask-cuda-worker', '--nthreads', os.environ['DASK_CUDA'], 'localhost:8786']
         else:
             command = ['dask-worker', '--nworkers', *workers, 'localhost:8786']
 
