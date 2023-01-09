@@ -21,6 +21,7 @@ from bqskit.qis.state.state import StateVector
 from bqskit.qis.unitary.unitarybuilderjax import UnitaryBuilderJax
 from bqskit.qis.unitary.unitarymatrix import UnitaryMatrix
 from bqskit.qis.unitary.unitarymatrixjax import UnitaryMatrixJax
+import time
 
 
 if TYPE_CHECKING:
@@ -79,7 +80,9 @@ class QFactor_jax_batched_jit(Instantiater):
         target: UnitaryMatrix | StateVector,
         starts: list[npt.NDArray[np.float64]],
     ):
-        
+        times = []
+        times.append(time.perf_counter())
+        in_c = circuit
         circuit = circuit.copy()
         
         # A very ugly casting
@@ -110,11 +113,11 @@ class QFactor_jax_batched_jit(Instantiater):
         untrys = jnp.array(np.stack(untrys, axis=1))
         n = 40
         plateau_windows_size = 8
-
+        times.append(time.perf_counter())
         res_var = _sweep2_jited(
                 target, locations, gates, untrys, n, self.dist_tol, self.diff_tol_a, self.diff_tol_r, plateau_windows_size, self.max_iters, self.min_iters, amount_of_starts
             )
-
+        times.append(time.perf_counter())
         best_start = 0
         it = res_var["iteration_counts"][0]
         c1s = res_var["c1s"]
@@ -143,7 +146,7 @@ class QFactor_jax_batched_jit(Instantiater):
             best_start = jnp.argmin(jnp.abs(c1s))
         else:
             _logger.error(f'Terminated with no good reason after {it} iterstion with c1s {c1s}.')
-
+        times.append(time.perf_counter())
         params = []
         for untry, gate in zip(untrys[best_start], gates):
             params.extend(
@@ -151,6 +154,14 @@ class QFactor_jax_batched_jit(Instantiater):
                 _remove_padding_and_create_matrix(untry, gate),
                 ),
             )
+        times.append(time.perf_counter())
+        
+        # print(os.environ)
+        # print (f" **** took {it} iterations to do the matrix\n", target, "\nWith the circuit:\n", in_c)
+        for i, st in enumerate(["setup", "calc", "find stop cond", "create params"]):
+            t = times[i+1] - times[i]
+            # print (f" **** took {t} sec for {st}")
+        
 
         return np.array(params)
 
@@ -383,9 +394,10 @@ def _sweep2(target, locations, gates, untrys, n, dist_tol, diff_tol_a, diff_tol_
 
     return res_var
 
-if "JIT_QFACTOR" in os.environ:
-    _sweep2_jited = jax.jit(_sweep2, static_argnums=(1, 2, 4, 5, 6, 7, 8, 9, 10, 11))
-else:
+if "NO_JIT_QFACTOR" in os.environ:
     _sweep2_jited = _sweep2
+else:
+    _sweep2_jited = jax.jit(_sweep2, static_argnums=(1, 2, 4, 5, 6, 7, 8, 9, 10, 11))
+    
 
 

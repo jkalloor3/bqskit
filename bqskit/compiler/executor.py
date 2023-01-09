@@ -1,5 +1,6 @@
 """This module implements the Executor class."""
 from __future__ import annotations
+import time
 
 from typing import TYPE_CHECKING
 
@@ -34,6 +35,13 @@ class Executor:
     def run(self) -> tuple[Circuit, dict[str, Any]]:
         """Execute the task."""
         for pass_obj in self.passes:
+            print("Starting to run pass: ", type(pass_obj))
+            start = time.perf_counter()
+            
             pass_obj.run(self.circuit, self.data)
+            t = time.perf_counter() - start
+
+            print(f"It took {t} seconds")
+            
         self.done = True
         return self.circuit, self.data
