@@ -25,4 +25,5 @@ __all__ = [
     'ExtendBlockSizePass',
     'LogErrorPass',
     'FillSingleQuditGatesPass',
+    'FromU3ToVariablePass',
 ]
