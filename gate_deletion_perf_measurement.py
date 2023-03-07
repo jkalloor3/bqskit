@@ -42,11 +42,15 @@ gate_size = run_params.gate_size
 calculate_error_bound = run_params.calculate_error_bound
 
 
-assert(should_use_dask)
-dask_type = "DASK"
+
+if should_use_dask:
+    dask_type = "DASK"
+else:
+    dask_type = "No DASK"
+
 print(f"Will compile {file_path}")
 
-batched_instantiation = QFactor_jax_batched_jit(diff_tol_r=1e-5, diff_tol_a=1e-10, min_iters=10, max_iters=500)
+batched_instantiation = QFactor_jax_batched_jit(diff_tol_r=1e-5, diff_tol_a=1e-10, min_iters=10, max_iters=100000)
 
 def replace_filer(new_circuit, old_op):
     old_ops = old_op.gate._circuit.num_operations
@@ -62,7 +66,8 @@ if use_qfactor:
                     'method': 'QFactor',
                     'diff_tol_r':1e-5,
                     'diff_tol_a':1e-10,
-                    'min_iters':0,
+                    'min_iters':10,
+                    'max_iters': 100000,
                     'multistarts': num_multistarts,
                     'seed': seed,
                     'parallel': False,
@@ -94,7 +99,8 @@ in_circuit = Circuit.from_file(file_path)
 
 passes =         [
         # Convert U3's to VU
-        BlockConversionPass('variable', convert_constant=False),
+        # BlockConversionPass('variable', convert_constant=False),
+        FromU3ToVariablePass(),
         QuickPartitioner(partition_size),
         # Delete gates using qfactor
         ForEachBlockPass([
@@ -113,12 +119,20 @@ if not use_qfactor:
     passes = passes[1:-1] # no need to convert to variable and then back to U3s
 task = CompilationTask(in_circuit.copy(), passes)
 
-print(f"using s_file {scheduler_file}")
-compiler =  Compiler() if scheduler_file is None else Compiler(scheduler_file=scheduler_file)
+if should_use_dask:
+    print(f"using s_file {scheduler_file}")
+    compiler =  Compiler() if scheduler_file is None else Compiler(scheduler_file=scheduler_file)
+else:
+    out_circuit = in_circuit.copy()
 
 print(f"Starting {instantiation_type}")
 start = timer()
-out_circuit = compiler.compile(task)
+if should_use_dask:
+    out_circuit = compiler.compile(task)
+else:
+    data = {}
+    for pas in passes:
+        pas.run(out_circuit, data)
 end = timer()
 run_time = end - start
 print(
