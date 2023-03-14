@@ -50,7 +50,7 @@ else:
 
 print(f"Will compile {file_path}")
 
-batched_instantiation = QFactor_jax_batched_jit(diff_tol_r=1e-5, diff_tol_a=1e-10, min_iters=10, max_iters=100000)
+batched_instantiation = QFactor_jax_batched_jit(diff_tol_r=1e-5, diff_tol_a=1e-10, min_iters=10, max_iters=100000, dist_tol=1e-10)
 
 def replace_filer(new_circuit, old_op):
     old_ops = old_op.gate._circuit.num_operations
@@ -67,6 +67,7 @@ if use_qfactor:
                     'diff_tol_r':1e-5,
                     'diff_tol_a':1e-10,
                     'min_iters':10,
+                    'dist_tol':1e-10,     # Stopping criteria for distance
                     'max_iters': 100000,
                     'multistarts': num_multistarts,
                     'seed': seed,
