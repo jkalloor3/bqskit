@@ -90,7 +90,7 @@ class QFactor_jax_batched_jit(Instantiater):
         if len(circuit) == 0:
             return np.array([])
 
-        # in_c = circuit
+        in_c = circuit
         circuit = circuit.copy()
         
         # A very ugly casting
@@ -100,7 +100,7 @@ class QFactor_jax_batched_jit(Instantiater):
                 g.__class__ = VariableUnitaryGateAcc
 
         """Instantiate `circuit`, see Instantiater for more info."""
-        target = UnitaryMatrixJax(target)
+        target = UnitaryMatrixJax(self.check_target(target))
         locations = tuple([op.location for op in circuit])
         gates = tuple([op.gate for op in circuit])
         biggest_gate_size = max(gate.num_qudits for gate in gates)
@@ -160,7 +160,7 @@ class QFactor_jax_batched_jit(Instantiater):
                 _remove_padding_and_create_matrix(untry, gate),
                 ),
             )
-        return np.array(params)
+        return in_c.set_params(np.array(params))
 
     @staticmethod
     def get_method_name() -> str:
