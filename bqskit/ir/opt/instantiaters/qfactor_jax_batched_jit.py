@@ -126,8 +126,6 @@ class QFactor_jax_batched_jit(Instantiater):
         c1s = res_var["c1s"]
         untrys = res_var["untrys"]
 
-        # for p in res_var["plateau_windows"]:
-            # print(p[:it])
 
         if any(res_var["curr_reached_required_tol_l"]):
             best_start = jnp.argmin(jnp.abs(c1s))
