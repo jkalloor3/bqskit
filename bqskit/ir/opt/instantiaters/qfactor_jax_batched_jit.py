@@ -18,10 +18,17 @@ from bqskit.ir.gates.parameterized.unitary import VariableUnitaryGate
 from bqskit.ir.gates.parameterized.unitary_acc import VariableUnitaryGateAcc
 from bqskit.ir.opt.instantiater import Instantiater
 from bqskit.qis.state.state import StateVector
+from bqskit.qis.state.system import StateSystem
 from bqskit.qis.unitary.unitarybuilderjax import UnitaryBuilderJax
 from bqskit.qis.unitary.unitarymatrix import UnitaryMatrix
 from bqskit.qis.unitary.unitarymatrixjax import UnitaryMatrixJax
 import time
+
+if TYPE_CHECKING:
+    from bqskit.ir.circuit import Circuit
+    from bqskit.qis.state.state import StateLike
+    from bqskit.qis.state.system import StateSystemLike
+    from bqskit.qis.unitary.unitarymatrix import UnitaryLike
 
 
 if TYPE_CHECKING:
@@ -67,23 +74,23 @@ class QFactor_jax_batched_jit(Instantiater):
 
     def instantiate(
         self,
-        circuit,  # : Circuit,
-        target: UnitaryMatrix | StateVector,
-        x0,
-    ):
+        circuit: Circuit,
+        target: UnitaryMatrix | StateVector | StateSystem,
+        x0: npt.NDArray[np.float64],
+    ) -> npt.NDArray[np.float64]:
+    
+        return self.multi_start_instantiate(circuit, target, 1)
 
-        return self.instantiate_multistart(circuit, target, [x0])
-
-    def instantiate_multistart(
+    def multi_start_instantiate(
         self,
-        circuit,  # : Circuit,
-        target: UnitaryMatrix | StateVector,
-        starts: list[npt.NDArray[np.float64]],
-    ):
+        circuit: Circuit,
+        target: UnitaryLike | StateLike | StateSystemLike,
+        num_starts: int,
+    ) -> Circuit:
         if len(circuit) == 0:
             return np.array([])
 
-        in_c = circuit
+        # in_c = circuit
         circuit = circuit.copy()
         
         # A very ugly casting
@@ -94,7 +101,6 @@ class QFactor_jax_batched_jit(Instantiater):
 
         """Instantiate `circuit`, see Instantiater for more info."""
         target = UnitaryMatrixJax(target)
-        amount_of_starts = len(starts)
         locations = tuple([op.location for op in circuit])
         gates = tuple([op.gate for op in circuit])
         biggest_gate_size = max(gate.num_qudits for gate in gates)
@@ -112,14 +118,14 @@ class QFactor_jax_batched_jit(Instantiater):
             untrys.append([
                 _apply_padding_and_flatten(
                     untry , gate, biggest_gate_size,
-                ) for _ in range(amount_of_starts)
+                ) for _ in range(num_starts)
             ])
 
         untrys = jnp.array(np.stack(untrys, axis=1))
         n = 40
         plateau_windows_size = 8
         res_var = _sweep2_jited(
-                target, locations, gates, untrys, n, self.dist_tol, self.diff_tol_a, self.diff_tol_r, plateau_windows_size, self.max_iters, self.min_iters, amount_of_starts
+                target, locations, gates, untrys, n, self.dist_tol, self.diff_tol_a, self.diff_tol_r, plateau_windows_size, self.max_iters, self.min_iters, num_starts
             )
         best_start = 0
         it = res_var["iteration_counts"][0]
