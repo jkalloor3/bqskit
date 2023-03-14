@@ -5,6 +5,7 @@ from typing import Sequence
 import jax
 import jax.numpy as jnp
 import jax.scipy.linalg as jla
+import numpy as np
 
 from bqskit.qis.unitary.unitarymatrix import UnitaryLike
 from bqskit.qis.unitary.unitarymatrix import UnitaryMatrix
@@ -13,7 +14,6 @@ from bqskit.utils.typing import is_square_matrix
 
 
 class UnitaryMatrixJax(UnitaryMatrix):
-
     def __init__(
         self,
         input: UnitaryLike,
@@ -35,11 +35,27 @@ class UnitaryMatrixJax(UnitaryMatrix):
             self._dim = input.dim
             return
 
-        self._radixes = tuple(radixes)
+        if len(radixes) != 0:
+            self._radixes = tuple(radixes)
+        else:
+            dim = len(input)
+            self._dim = dim
+            # Check if unitary dimension is a power of two
+            if dim & (dim - 1) == 0:
+                self._radixes = tuple([2] * int(np.round(np.log2(dim))))
 
-        if type(input) is not object and type(input) is not jax.core.ShapedArray and not _from_tree:
+        # Check if unitary dimension is a power of three
+            elif 3 ** int(np.round(np.log(dim) / np.log(3))) == dim:  # noqa
+                radixes = [3] * int(np.round(np.log(dim) / np.log(3)))
+                self._radixes = tuple(radixes)
+
+        if (
+            type(input) is not object
+            and type(input) is not jax.core.ShapedArray
+                and not _from_tree
+        ):
             self._utry = jnp.array(input, dtype=jnp.complex128).reshape(
-                self.radixes * 2,
+                self._radixes * 2,
             )  # make sure its a square matrix
         else:
             self._utry = input
