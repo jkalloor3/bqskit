@@ -2,12 +2,9 @@
 from __future__ import annotations
 
 import logging
-import random
-from typing import Any
-
-import numpy as np
 
 from bqskit.compiler.basepass import BasePass
+from bqskit.compiler.passdata import PassData
 from bqskit.ir.circuit import Circuit
 from bqskit.utils.typing import is_integer
 
@@ -35,9 +32,7 @@ class SetRandomSeedPass(BasePass):
 
         self.seed = seed
 
-    def run(self, circuit: Circuit, data: dict[str, Any] = {}) -> None:
+    async def run(self, circuit: Circuit, data: PassData) -> None:
         """Perform the pass's operation, see :class:`BasePass` for more."""
         _logger.debug(f'Setting the random seed to {self.seed}.')
-        data['SetRandomSeedPass_random_seed'] = self.seed
-        np.random.seed(self.seed)
-        random.seed(self.seed)
+        data.seed = self.seed
