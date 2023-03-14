@@ -29,24 +29,20 @@ file_name = file_path.split("/")[-1]
 partition_size = run_params.partitions_size
 num_multistarts = run_params.multistarts
 iterations_with_out_dask = run_params.iterations_no_dask
-should_use_dask = run_params.use_dask
+use_detached = run_params.use_detached
 seed = run_params.seed
 use_rust = run_params.use_rust
 output_in_u3s_cnots = run_params.output_in_u3s_cnots
 use_variable_untry = run_params.use_variable_untry
-scheduler_file = run_params.scheduler_file
-nodes = run_params.nodes
+print_amount_of_nodes = run_params.print_amount_of_nodes
 print_amount_of_workers_per_gpu = run_params.print_amount_of_workers_per_gpu
 print_amount_gpus_in_run = run_params.print_amount_gpus_in_run
 gate_size = run_params.gate_size
 calculate_error_bound = run_params.calculate_error_bound
 
+detached_server_ip = run_params.detached_server_ip
+detached_server_port = run_params.detached_server_port
 
-
-if should_use_dask:
-    dask_type = "DASK"
-else:
-    dask_type = "No DASK"
 
 print(f"Will compile {file_path}")
 
@@ -71,7 +67,6 @@ if use_qfactor:
                     'max_iters': 100000,
                     'multistarts': num_multistarts,
                     'seed': seed,
-                    'parallel': False,
                 }
     else:
         instantiation_type = "JAX Qfactor "
@@ -120,20 +115,16 @@ if not use_qfactor:
     passes = passes[1:-1] # no need to convert to variable and then back to U3s
 task = CompilationTask(in_circuit.copy(), passes)
 
-if should_use_dask:
-    print(f"using s_file {scheduler_file}")
-    compiler =  Compiler() if scheduler_file is None else Compiler(scheduler_file=scheduler_file)
+if not use_detached:
+    compiler =  Compiler()
 else:
-    out_circuit = in_circuit.copy()
+    compiler = Compiler(detached_server_ip, detached_server_port)
 
 print(f"Starting {instantiation_type}")
 start = timer()
-if should_use_dask:
-    out_circuit = compiler.compile(task)
-else:
-    data = {}
-    for pas in passes:
-        pas.run(out_circuit, data)
+
+out_circuit = compiler.compile(task)
+
 end = timer()
 run_time = end - start
 print(
@@ -142,6 +133,6 @@ print(
 )
 print(f"Circuit finished with gates: {out_circuit.gate_counts}.")
 final_gates_count_by_qudit_number = {g.num_qudits:v for g,v in out_circuit.gate_counts.items()}
-print(f"{use_variable_untry},{instantiation_type},{dask_type},{file_name},{num_multistarts},{partition_size},{in_circuit.num_qudits},{run_time},{final_gates_count_by_qudit_number[1]},{final_gates_count_by_qudit_number[2]},{output_in_u3s_cnots},{nodes},{print_amount_of_workers_per_gpu},{print_amount_gpus_in_run}")
+print(f"{use_variable_untry},{instantiation_type},{file_name},{num_multistarts},{partition_size},{in_circuit.num_qudits},{run_time},{final_gates_count_by_qudit_number[1]},{final_gates_count_by_qudit_number[2]},{output_in_u3s_cnots},{print_amount_of_nodes},{print_amount_of_workers_per_gpu},{print_amount_gpus_in_run}")
 
 compiler.close()
