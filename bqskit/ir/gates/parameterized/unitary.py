@@ -3,7 +3,6 @@ from __future__ import annotations
 
 from typing import Sequence
 
-import jax.numpy as jnp
 import numpy as np
 import numpy.typing as npt
 import scipy as sp
@@ -67,7 +66,11 @@ class VariableUnitaryGate(
         x = real + imag
         return UnitaryMatrix.closest_to(np.reshape(x, self.shape), self.radixes)
 
-    def optimize(self, env_matrix: npt.NDArray[np.complex128], get_untry: bool = False) -> list[float] | UnitaryMatrix:
+    def optimize(
+        self,
+        env_matrix: npt.NDArray[np.complex128],
+        get_untry: bool = False,
+    ) -> list[float] | UnitaryMatrix:
         """
         Return the optimal parameters with respect to an environment matrix.
 
@@ -79,7 +82,11 @@ class VariableUnitaryGate(
         utry = Vh.conj().T @ U.conj().T
 
         if get_untry:
-            return UnitaryMatrix(utry, radixes=self._radixes, check_arguments=False)
+            return UnitaryMatrix(
+                utry,
+                radixes=self._radixes,
+                check_arguments=False,
+            )
 
         x = np.reshape(utry, (self.num_params // 2,))
         return list(np.real(x)) + list(np.imag(x))
