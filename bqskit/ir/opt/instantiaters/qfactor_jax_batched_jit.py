@@ -1,7 +1,8 @@
 from __future__ import annotations
-import functools
 
+import functools
 import logging
+import os
 from typing import TYPE_CHECKING
 
 import jax
@@ -9,8 +10,6 @@ import jax.numpy as jnp
 import numpy as np
 import numpy.typing as npt
 from scipy.stats import unitary_group
-
-import os
 
 from bqskit.ir.gates.constantgate import ConstantGate
 from bqskit.ir.gates.parameterized.u3 import U3Gate
@@ -22,7 +21,6 @@ from bqskit.qis.state.system import StateSystem
 from bqskit.qis.unitary.unitarybuilderjax import UnitaryBuilderJax
 from bqskit.qis.unitary.unitarymatrix import UnitaryMatrix
 from bqskit.qis.unitary.unitarymatrixjax import UnitaryMatrixJax
-import time
 
 if TYPE_CHECKING:
     from bqskit.ir.circuit import Circuit
@@ -30,14 +28,10 @@ if TYPE_CHECKING:
     from bqskit.qis.state.system import StateSystemLike
     from bqskit.qis.unitary.unitarymatrix import UnitaryLike
 
-
-if TYPE_CHECKING:
-    from bqskit.ir.circuit import Circuit
-
-
 _logger = logging.getLogger(__name__)
 
 jax.config.update('jax_enable_x64', True)
+
 
 class QFactor_jax_batched_jit(Instantiater):
     """The QFactor batch circuit instantiater."""
@@ -78,7 +72,7 @@ class QFactor_jax_batched_jit(Instantiater):
         target: UnitaryMatrix | StateVector | StateSystem,
         x0: npt.NDArray[np.float64],
     ) -> npt.NDArray[np.float64]:
-    
+
         return self.multi_start_instantiate(circuit, target, 1)
 
     def multi_start_instantiate(
@@ -92,7 +86,7 @@ class QFactor_jax_batched_jit(Instantiater):
 
         in_c = circuit
         circuit = circuit.copy()
-        
+
         # A very ugly casting
         for op in circuit:
             g = op.gate
@@ -109,17 +103,21 @@ class QFactor_jax_batched_jit(Instantiater):
 
         for gate in gates:
             size_of_untry = 2**gate.num_qudits
-            
+
             if isinstance(gate, VariableUnitaryGateAcc):
-                pre_padding_untrys = [unitary_group.rvs(size_of_untry) for 
-                                      _ in range(num_starts)]
-            else:   
-                pre_padding_untrys = [gate.get_unitary().numpy for
-                                       _ in range(num_starts)]
+                pre_padding_untrys = [
+                    unitary_group.rvs(size_of_untry) for
+                    _ in range(num_starts)
+                ]
+            else:
+                pre_padding_untrys = [
+                    gate.get_unitary().numpy for
+                    _ in range(num_starts)
+                ]
 
             untrys.append([
                 _apply_padding_and_flatten(
-                    pre_padd , gate, biggest_gate_size,
+                    pre_padd, gate, biggest_gate_size,
                 ) for pre_padd in pre_padding_untrys
             ])
 
@@ -127,39 +125,45 @@ class QFactor_jax_batched_jit(Instantiater):
         n = 40
         plateau_windows_size = 8
         res_var = _sweep2_jited(
-                target, locations, gates, untrys, n, self.dist_tol, self.diff_tol_a, self.diff_tol_r, plateau_windows_size, self.max_iters, self.min_iters, num_starts
-            )
+            target, locations, gates, untrys, n, self.dist_tol,
+            self.diff_tol_a, self.diff_tol_r, plateau_windows_size,
+            self.max_iters, self.min_iters, num_starts,
+        )
         best_start = 0
-        it = res_var["iteration_counts"][0]
-        c1s = res_var["c1s"]
-        untrys = res_var["untrys"]
+        it = res_var['iteration_counts'][0]
+        c1s = res_var['c1s']
+        untrys = res_var['untrys']
 
-
-        if any(res_var["curr_reached_required_tol_l"]):
+        if any(res_var['curr_reached_required_tol_l']):
             best_start = jnp.argmin(jnp.abs(c1s))
             _logger.debug(
-                f'Terminated: {it} c1 = {c1s} <= dist_tol.\n Best start is {best_start}',
+                f'Terminated: {it} c1 = {c1s} <= dist_tol.\n'
+                f'Best start is {best_start}',
             )
-        elif all(res_var["curr_plateau_calc_l"]):
+        elif all(res_var['curr_plateau_calc_l']):
             _logger.debug(
-                    f'Terminated: |c1 - c2| = '
-                    ' <= diff_tol_a + diff_tol_r * |c1|.',
-                )
+                'Terminated: |c1 - c2| = '
+                ' <= diff_tol_a + diff_tol_r * |c1|.',
+            )
             best_start = jnp.argmin(jnp.abs(c1s))
 
             _logger.debug(
-                f'Terminated: {it} c1 = {c1s} Reached plateuo.\n Best start is {best_start}',
-                )
+                f'Terminated: {it} c1 = {c1s} Reached plateuo.\n'
+                f'Best start is {best_start}',
+            )
         elif it >= self.max_iters:
             _logger.debug('Terminated: iteration limit reached.')
             best_start = jnp.argmin(jnp.abs(c1s))
         else:
-            _logger.error(f'Terminated with no good reason after {it} iterstion with c1s {c1s}.')
+            _logger.error(
+                f'Terminated with no good reason after {it} iterstion '
+                f'with c1s {c1s}.',
+            )
         params = []
         for untry, gate in zip(untrys[best_start], gates):
             params.extend(
                 gate.get_params(
-                _remove_padding_and_create_matrix(untry, gate),
+                    _remove_padding_and_create_matrix(untry, gate),
                 ),
             )
         in_c.set_params(np.array(params))
@@ -180,7 +184,12 @@ class QFactor_jax_batched_jit(Instantiater):
     def is_capable(circuit) -> bool:
         """Return true if the circuit can be instantiated."""
         return all(
-            isinstance(gate, (VariableUnitaryGate, VariableUnitaryGateAcc, U3Gate, ConstantGate))
+            isinstance(
+                gate, (
+                    VariableUnitaryGate,
+                    VariableUnitaryGateAcc, U3Gate, ConstantGate,
+                ),
+            )
             for gate in circuit.gate_set
         )
 
@@ -200,15 +209,22 @@ class QFactor_jax_batched_jit(Instantiater):
         invalid_gates = {
             gate
             for gate in circuit.gate_set
-            if not isinstance(gate, (VariableUnitaryGate, VariableUnitaryGateAcc, U3Gate, ConstantGate))
+            if not isinstance(
+                gate, (
+                    VariableUnitaryGate,
+                    VariableUnitaryGateAcc,
+                    U3Gate,
+                    ConstantGate,
+                ),
+            )
         }
 
         if len(invalid_gates) == 0:
             raise ValueError('Circuit can be instantiated.')
 
         return (
-            'Cannot instantiate circuit with qfactor'
-            ' because the following gates are not locally optimizable with jax: %s.'
+            'Cannot instantiate circuit with qfactor because'
+            ' the following gates are not locally optimizable with jax: %s.'
             % ', '.join(str(g) for g in invalid_gates)
         )
 
@@ -233,7 +249,10 @@ def _initilize_circuit_tensor(
     return target_untry_builder
 
 
-def _single_sweep(locations, gates, amount_of_gates, target_untry_builder, untrys):
+def _single_sweep(
+    locations, gates, amount_of_gates, target_untry_builder,
+    untrys,
+):
     # from right to left
     for k in reversed(range(amount_of_gates)):
         gate = gates[k]
@@ -296,35 +315,53 @@ def _remove_padding_and_create_matrix(untry, gate):
     return untry[:size_to_keep].reshape((len_of_matrix, len_of_matrix))
 
 
-def Loop_vars(untrys, c1s, plateau_windows, curr_plateau_calc_l, curr_reached_required_tol_l, iteration_counts, target_untry_builders):
+def Loop_vars(
+    untrys, c1s, plateau_windows, curr_plateau_calc_l,
+    curr_reached_required_tol_l, iteration_counts,
+    target_untry_builders,
+):
     d = {}
-    d["untrys"] = untrys
-    d["c1s"] = c1s
-    d["plateau_windows"] = plateau_windows
-    d["curr_plateau_calc_l"] = curr_plateau_calc_l
-    d["curr_reached_required_tol_l"] = curr_reached_required_tol_l
-    d["iteration_counts"] = iteration_counts
-    d["target_untry_builders"] = target_untry_builders
+    d['untrys'] = untrys
+    d['c1s'] = c1s
+    d['plateau_windows'] = plateau_windows
+    d['curr_plateau_calc_l'] = curr_plateau_calc_l
+    d['curr_reached_required_tol_l'] = curr_reached_required_tol_l
+    d['iteration_counts'] = iteration_counts
+    d['target_untry_builders'] = target_untry_builders
 
     return d
 
-def _sweep2(target, locations, gates, untrys, n, dist_tol, diff_tol_a, diff_tol_r, plateau_windows_size, max_iters, min_iters, amount_of_starts):
 
+def _sweep2(
+    target, locations, gates, untrys, n, dist_tol, diff_tol_a,
+    diff_tol_r, plateau_windows_size, max_iters, min_iters,
+    amount_of_starts,
+):
     c1s = jnp.array([1.0] * amount_of_starts)
-    plateau_windows = jnp.array([[0] * plateau_windows_size for _ in range(amount_of_starts)], dtype=bool)
+    plateau_windows = jnp.array(
+        [[0] * plateau_windows_size for
+         _ in range(amount_of_starts)], dtype=bool,
+    )
 
     def should_continue(var):
         return jnp.logical_not(
-                    jnp.logical_or(
-                        jnp.any(var["curr_reached_required_tol_l"]), 
-                        jnp.logical_or(
-                            var["iteration_counts"][0] > max_iters,
-                            jnp.logical_and(
-                                var["iteration_counts"][0] > min_iters,
-                                jnp.all(var["curr_plateau_calc_l"])))))
-                                
-    def _while_body_to_be_vmaped(untrys, c1, plateau_window, curr_plateau_calc, curr_reached_required_tol, iteration_count, target_untry_builder_tensor):
+            jnp.logical_or(
+                jnp.any(var['curr_reached_required_tol_l']),
+                jnp.logical_or(
+                    var['iteration_counts'][0] > max_iters,
+                    jnp.logical_and(
+                        var['iteration_counts'][0] > min_iters,
+                        jnp.all(var['curr_plateau_calc_l']),
+                    ),
+                ),
+            ),
+        )
 
+    def _while_body_to_be_vmaped(
+        untrys, c1, plateau_window, curr_plateau_calc,
+        curr_reached_required_tol, iteration_count,
+        target_untry_builder_tensor,
+    ):
         amount_of_gates = len(gates)
         amount_of_qudits = target.num_qudits
         target_radixes = target.radixes
@@ -340,24 +377,28 @@ def _sweep2(target, locations, gates, untrys, n, dist_tol, diff_tol_a, diff_tol_
             )
         untrys = untrys_as_matrixs
 
-        ##### initilize every "n" iterations of the loop
+        # initilize every "n" iterations of the loop
         operand_for_if = (untrys, target_untry_builder_tensor)
         initilize_body = lambda x: _initilize_circuit_tensor(
-            amount_of_qudits, target_radixes, locations, target.numpy, x[0]
+            amount_of_qudits, target_radixes, locations, target.numpy, x[0],
         ).tensor
         no_initilize_body = lambda x: x[1]
-        
-        target_untry_builder_tensor = jax.lax.cond(iteration_count % n == 0, initilize_body, no_initilize_body, operand_for_if)
 
+        target_untry_builder_tensor = jax.lax.cond(
+            iteration_count % n == 0, initilize_body,
+            no_initilize_body, operand_for_if,
+        )
 
-        target_untry_builder = UnitaryBuilderJax(amount_of_qudits, target_radixes, tensor=target_untry_builder_tensor)
+        target_untry_builder = UnitaryBuilderJax(
+            amount_of_qudits, target_radixes,
+            tensor=target_untry_builder_tensor,
+        )
 
-        iteration_count  = iteration_count + 1
+        iteration_count = iteration_count + 1
 
         target_untry_builder, untrys = _single_sweep(
             locations, gates, amount_of_gates, target_untry_builder, untrys,
         )
-
 
         c2 = c1
         dim = target_untry_builder.dim
@@ -365,11 +406,16 @@ def _sweep2(target, locations, gates, untrys, n, dist_tol, diff_tol_a, diff_tol_
         c1 = jnp.abs(jnp.trace(untry_res))
         c1 = 1 - (c1 / (2 ** amount_of_qudits))
 
-        curr_plateau_part = jnp.abs(c1 - c2) <= diff_tol_a + diff_tol_r * jnp.abs(c1)
-        curr_plateau_calc = functools.reduce(jnp.bitwise_or, plateau_window) | curr_plateau_part
-        plateau_window = jnp.concatenate((jnp.array([curr_plateau_part]), plateau_window[:-1]))
+        curr_plateau_part = jnp.abs(
+            c1 - c2,
+        ) <= diff_tol_a + diff_tol_r * jnp.abs(c1)
+        curr_plateau_calc = functools.reduce(
+            jnp.bitwise_or, plateau_window,
+        ) | curr_plateau_part
+        plateau_window = jnp.concatenate(
+            (jnp.array([curr_plateau_part]), plateau_window[:-1]),
+        )
         curr_reached_required_tol = c1 < dist_tol
-
 
         biggest_gate_size = max(gate.num_qudits for gate in gates)
         final_untrys_padded = jnp.array([
@@ -379,26 +425,49 @@ def _sweep2(target, locations, gates, untrys, n, dist_tol, diff_tol_a, diff_tol_
             ) for untry, gate in zip(untrys, gates)
         ])
 
-        return final_untrys_padded, c1, plateau_window, curr_plateau_calc, curr_reached_required_tol, iteration_count, target_untry_builder.tensor
-
+        return (
+            final_untrys_padded, c1, plateau_window, curr_plateau_calc,
+            curr_reached_required_tol, iteration_count,
+            target_untry_builder.tensor,
+        )
 
     while_body_vmaped = jax.vmap(_while_body_to_be_vmaped)
 
     def while_body(var):
-        return Loop_vars(*while_body_vmaped(var["untrys"], var["c1s"], var["plateau_windows"], var["curr_plateau_calc_l"], var["curr_reached_required_tol_l"], var["iteration_counts"], var["target_untry_builders"]))
+        return Loop_vars(
+            *while_body_vmaped(
+                var['untrys'], var['c1s'],
+                var['plateau_windows'],
+                var['curr_plateau_calc_l'],
+                var['curr_reached_required_tol_l'],
+                var['iteration_counts'],
+                var['target_untry_builders'],
+            ),
+        )
 
     dim = np.prod(target.radixes)
-    initial_untray_builders_values = jnp.array([jnp.identity(dim, dtype=jnp.complex128).reshape(target.radixes * 2) for _ in range(amount_of_starts)])
+    initial_untray_builders_values = jnp.array([
+        jnp.identity(
+            dim, dtype=jnp.complex128,
+        ).reshape(target.radixes * 2) for _ in range(amount_of_starts)
+    ])
 
-    initial_loop_var = Loop_vars(untrys, c1s, plateau_windows, jnp.array([False] * amount_of_starts),  jnp.array([False]*amount_of_starts), jnp.array([0]*amount_of_starts), initial_untray_builders_values)
+    initial_loop_var = Loop_vars(
+        untrys, c1s, plateau_windows, jnp.array([False] * amount_of_starts),
+        jnp.array([False] * amount_of_starts),
+        jnp.array([0] * amount_of_starts),
+        initial_untray_builders_values,
+    )
     res_var = jax.lax.while_loop(should_continue, while_body, initial_loop_var)
 
     return res_var
 
-if "NO_JIT_QFACTOR" in os.environ:
+
+if 'NO_JIT_QFACTOR' in os.environ:
     _sweep2_jited = _sweep2
 else:
-    _sweep2_jited = jax.jit(_sweep2, static_argnums=(1, 2, 4, 5, 6, 7, 8, 9, 10, 11))
-    
-
-
+    _sweep2_jited = jax.jit(
+        _sweep2, static_argnums=(
+            1, 2, 4, 5, 6, 7, 8, 9, 10, 11,
+        ),
+    )
