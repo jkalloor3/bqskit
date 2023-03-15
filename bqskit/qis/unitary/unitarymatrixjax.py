@@ -26,8 +26,6 @@ class UnitaryMatrixJax(UnitaryMatrix):
             self._utry = jnp.array([])
             return
 
-        self._my_class = UnitaryMatrixJax
-        self._mat_lib = jnp
         # Copy constructor
         if isinstance(input, (UnitaryMatrixJax, UnitaryMatrix)):
             self._utry = jnp.array(input.numpy)
@@ -59,6 +57,10 @@ class UnitaryMatrixJax(UnitaryMatrix):
             )  # make sure its a square matrix
         else:
             self._utry = input
+
+    @property
+    def mat_lib(self):
+        return jnp
 
     @staticmethod
     def identity(dim: int, radixes: Sequence[int] = []):

@@ -7,9 +7,7 @@ from typing import Sequence
 from typing import TYPE_CHECKING
 from typing import Union
 
-import jax
 import jax.numpy as jnp
-import jax.scipy.linalg as jla
 import numpy as np
 import numpy.typing as npt
 import scipy as sp
@@ -83,8 +81,7 @@ class UnitaryMatrix(Unitary, StateVectorMap, NDArrayOperatorsMixin):
         if building_docs():
             self._utry: npt.NDArray[np.complex128] = np.array([])
             return
-        self._mat_lib = np
-        self._my_class = UnitaryMatrix
+
         # Copy constructor
         if isinstance(input, UnitaryMatrix):
             self._utry = input.numpy
@@ -135,6 +132,10 @@ class UnitaryMatrix(Unitary, StateVectorMap, NDArrayOperatorsMixin):
     _num_params = 0
 
     @property
+    def mat_lib(self):
+        return np
+
+    @property
     def numpy(self) -> npt.NDArray[np.complex128]:
         """The NumPy array holding the unitary."""
         return self._utry
@@ -183,15 +184,15 @@ class UnitaryMatrix(Unitary, StateVectorMap, NDArrayOperatorsMixin):
             UnitaryMatrix: The resulting unitary matrix.
         """
 
-        utrys = [self._my_class(u) for u in utrys]
+        utrys = [self.__class__(u) for u in utrys]
 
         utry_acm = self.numpy
         radixes_acm = self.radixes
         for utry in utrys:
-            utry_acm = self._mat_lib.kron(utry_acm, utry.numpy)
+            utry_acm = self.mat_lib.kron(utry_acm, utry.numpy)
             radixes_acm += utry.radixes
 
-        return self._my_class(utry_acm, radixes_acm)
+        return self.__class__(utry_acm, radixes_acm)
 
     def get_unitary(self, params: RealVector = []) -> UnitaryMatrix:
         """Return the same object, satisfies the :class:`Unitary` API."""
@@ -240,11 +241,11 @@ class UnitaryMatrix(Unitary, StateVectorMap, NDArrayOperatorsMixin):
             are equal up to global phase and 1 means the two unitaries are
             very unsimilar or far apart.
         """
-        other = self._my_class(other)
-        num = self._mat_lib.abs(self._mat_lib.trace(self.conj().T @ other))
+        other = self.__class__(other)
+        num = self.mat_lib.abs(self.mat_lib.trace(self.conj().T @ other))
         dem = self.dim
         frac = min(num / dem, 1)
-        dist = self._mat_lib.power(1 - (frac ** degree), 1.0 / degree)
+        dist = self.mat_lib.power(1 - (frac ** degree), 1.0 / degree)
         return dist if dist > 0.0 else 0.0
 
     def get_statevector(self, in_state: StateLike) -> StateVector:
@@ -468,7 +469,7 @@ class UnitaryMatrix(Unitary, StateVectorMap, NDArrayOperatorsMixin):
         non_unitary_involved = False
         args: list[npt.NDArray[Any]] = []
         for input in inputs:
-            if isinstance(input, self._my_class):
+            if isinstance(input, self._class__):
                 args.append(input.numpy)
             else:
                 args.append(input)
@@ -489,20 +490,20 @@ class UnitaryMatrix(Unitary, StateVectorMap, NDArrayOperatorsMixin):
             or (
                 ufunc.__name__ == 'multiply'
                 and all(
-                    self._mat_lib.isscalar(input) or isinstance(
-                        input, self._my_class,
+                    self.mat_lib.isscalar(input) or isinstance(
+                        input, self.__class__,
                     )
                     for input in inputs
                 )
                 and all(
-                    self._mat_lib.abs(self._mat_lib.abs(input) - 1) <= 1e-14
-                    for input in inputs if self._mat_lib.isscalar(input)
+                    self.mat_lib.abs(self.mat_lib.abs(input) - 1) <= 1e-14
+                    for input in inputs if self.mat_lib.isscalar(input)
                 )
             )
         )
 
         if convert_back:
-            return self._my_class(out, self.radixes)
+            return self.__class__(out, self.radixes)
 
         return out
 

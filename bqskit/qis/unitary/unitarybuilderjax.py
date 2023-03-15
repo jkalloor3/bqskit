@@ -8,7 +8,6 @@ import jax
 import jax.numpy as jnp
 
 from bqskit.qis.unitary.unitary import RealVector
-from bqskit.qis.unitary.unitary import Unitary
 from bqskit.qis.unitary.unitarybuilder import UnitaryBuilder
 from bqskit.qis.unitary.unitarymatrix import UnitaryMatrix
 from bqskit.qis.unitary.unitarymatrixjax import UnitaryMatrixJax
@@ -26,7 +25,13 @@ class UnitaryBuilderJax(UnitaryBuilder):
     unitary matrices.
     """
 
-    def __init__(self, num_qudits: int, radixes: Sequence[int] = [], initial_value: UnitaryMatrix = None, tensor = None) -> None:
+    def __init__(
+        self,
+        num_qudits: int,
+        radixes: Sequence[int] = [],
+        initial_value: UnitaryMatrix = None,
+        tensor=None,
+    ) -> None:
         """
         UnitaryBuilder constructor.
 
@@ -46,7 +51,11 @@ class UnitaryBuilderJax(UnitaryBuilder):
         Examples:
             >>> builder = UnitaryBuilder(4)  # Creates a 4-qubit builder.
         """
-        super().__init__(num_qudits, radixes, initial_value, jnp, tensor)
+        super().__init__(num_qudits, radixes, initial_value, tensor)
+
+    @property
+    def mat_lib(self):
+        return jnp
 
     def get_unitary(self, params: RealVector = []) -> UnitaryMatrixJax:
         """Build the unitary, see :func:`Unitary.get_unitary` for more."""

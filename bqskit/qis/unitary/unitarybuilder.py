@@ -5,8 +5,6 @@ import logging
 from typing import cast
 from typing import Sequence
 
-import jax
-import jax.numpy as jnp
 import numpy as np
 import numpy.typing as npt
 
@@ -31,7 +29,13 @@ class UnitaryBuilder(Unitary):
     unitary matrices.
     """
 
-    def __init__(self, num_qudits: int, radixes: Sequence[int] = [], initial_value: UnitaryMatrix = None, mat_lib=np, tensor=None) -> None:
+    def __init__(
+        self,
+        num_qudits: int,
+        radixes: Sequence[int] = [],
+        initial_value: UnitaryMatrix = None,
+        tensor=None,
+    ) -> None:
         """
         UnitaryBuilder constructor.
 
@@ -64,7 +68,6 @@ class UnitaryBuilder(Unitary):
                 num_qudits,
             )
 
-        self._mat_lib = mat_lib
         self._num_qudits = num_qudits
         self._radixes = tuple(radixes if len(radixes) > 0 else [2] * num_qudits)
 
@@ -82,22 +85,33 @@ class UnitaryBuilder(Unitary):
 
         if tensor is None:
             if initial_value is None:
-                self.tensor = mat_lib.identity(self.dim, dtype=mat_lib.complex128)
+                self.tensor = self.mat_lib.identity(
+                    self.dim, dtype=self.mat_lib.complex128,
+                )
             elif isinstance(initial_value, UnitaryMatrix):
-                if not all((d1 == d2 for d1, d2 in zip(self.radixes, initial_value.radixes))):
+                if not all((
+                    d1 == d2 for
+                    d1, d2 in
+                    zip(self.radixes, initial_value.radixes)
+                )):
                     raise ValueError(
-                        f'Expected radixes to be equal between the intial value to desired builder radixes:'
-                        ' {initail_value.radixes} != {self.radixes}',
+                        'Expected radixes to be equal between the intial'
+                        + 'value to desired builder radixes: '
+                        + f' {initial_value.radixes} != {self.radixes}',
                     )
 
                 self.tensor = initial_value.numpy
             else:
                 self.tensor = initial_value
 
-            if isinstance(self.tensor, mat_lib.ndarray):
+            if isinstance(self.tensor, self.mat_lib.ndarray):
                 self.tensor = self.tensor.reshape(self.radixes * 2)
         else:
             self.tensor = tensor
+
+    @property
+    def mat_lib(self):
+        return np
 
     def get_unitary(self, params: RealVector = []) -> UnitaryMatrix:
         """Build the unitary, see :func:`Unitary.get_unitary` for more."""
@@ -178,15 +192,15 @@ class UnitaryBuilder(Unitary):
             2 * utry_size + i for i in range(2 * self.num_qudits)
         ]
         output_tensor_index = [
-            2 * utry_size +
-            i for i in range(2 * self.num_qudits)
+            2 * utry_size + i for
+            i in range(2 * self.num_qudits)
         ]
 
         for i, loc in enumerate(location):
             utry_builder_tensor_indexs[loc] = offset + i
             output_tensor_index[loc] = (utry_size - offset) + i
 
-        self.tensor = self._mat_lib.einsum(
+        self.tensor = self.mat_lib.einsum(
             utry_tensor, utry_tensor_indexs,
             self.tensor, utry_builder_tensor_indexs, output_tensor_index,
         )
@@ -265,17 +279,16 @@ class UnitaryBuilder(Unitary):
             2 * utry_size + i for i in range(2 * self.num_qudits)
         ]
         output_tensor_index = [
-            2 * utry_size +
-            i for i in range(2 * self.num_qudits)
+            2 * utry_size + i for
+            i in range(2 * self.num_qudits)
         ]
 
         for i, loc in enumerate(location):
             utry_builder_tensor_indexs[self.num_qudits + loc] = offset + i
             output_tensor_index[
-                self.num_qudits +
-                loc
+                self.num_qudits + loc
             ] = (utry_size - offset) + i
-        self.tensor = self._mat_lib.einsum(
+        self.tensor = self.mat_lib.einsum(
             utry_tensor, utry_tensor_indexs,
             self.tensor, utry_builder_tensor_indexs, output_tensor_index,
         )
@@ -349,7 +362,7 @@ class UnitaryBuilder(Unitary):
         tensor_copy = tensor_copy.transpose(inv_perm)
         out_M = tensor_copy.reshape((self.dim, self.dim))
         return out_M
-    
+
     def calc_env_matrix(
             self, location: Sequence[int],
     ):
@@ -373,7 +386,7 @@ class UnitaryBuilder(Unitary):
             [chr(ord('a') + i) for i in contraction_indexs],
         )
 
-        env_tensor = self._mat_lib.einsum(contraction_indexs_str, self.tensor)
+        env_tensor = self.mat_lib.einsum(contraction_indexs_str, self.tensor)
         env_mat = env_tensor.reshape((2**len(location), -1))
 
         return env_mat
