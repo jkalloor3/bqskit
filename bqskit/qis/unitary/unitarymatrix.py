@@ -469,7 +469,7 @@ class UnitaryMatrix(Unitary, StateVectorMap, NDArrayOperatorsMixin):
         non_unitary_involved = False
         args: list[npt.NDArray[Any]] = []
         for input in inputs:
-            if isinstance(input, self._class__):
+            if isinstance(input, self.__class__):
                 args.append(input.numpy)
             else:
                 args.append(input)
