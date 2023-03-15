@@ -18,7 +18,7 @@ jax.config.update('jax_enable_x64', True)
 from bqskit import enable_logging, enable_dashboard
 
 
-enable_logging(True)
+# enable_logging(True)
 import params
 
 run_params = params.get_params()
@@ -28,7 +28,6 @@ file_path = run_params.input_qasm
 file_name = file_path.split("/")[-1]
 partition_size = run_params.partitions_size
 num_multistarts = run_params.multistarts
-iterations_with_out_dask = run_params.iterations_no_dask
 use_detached = run_params.use_detached
 seed = run_params.seed
 use_rust = run_params.use_rust
@@ -116,7 +115,7 @@ if not use_qfactor:
 task = CompilationTask(in_circuit.copy(), passes)
 
 if not use_detached:
-    compiler =  Compiler()
+    compiler =  Compiler(num_workers=16)
 else:
     compiler = Compiler(detached_server_ip, detached_server_port)
 
