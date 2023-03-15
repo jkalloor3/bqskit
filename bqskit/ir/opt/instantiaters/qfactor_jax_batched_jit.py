@@ -111,14 +111,16 @@ class QFactor_jax_batched_jit(Instantiater):
             size_of_untry = 2**gate.num_qudits
             
             if isinstance(gate, VariableUnitaryGateAcc):
-                untry =  unitary_group.rvs(size_of_untry)
-            else:
-                untry = gate.get_unitary().numpy
+                pre_padding_untrys = [unitary_group.rvs(size_of_untry) for 
+                                      _ in range(num_starts)]
+            else:   
+                pre_padding_untrys = [gate.get_unitary().numpy for
+                                       _ in range(num_starts)]
 
             untrys.append([
                 _apply_padding_and_flatten(
-                    untry , gate, biggest_gate_size,
-                ) for _ in range(num_starts)
+                    pre_padd , gate, biggest_gate_size,
+                ) for pre_padd in pre_padding_untrys
             ])
 
         untrys = jnp.array(np.stack(untrys, axis=1))
