@@ -135,21 +135,21 @@ class QFactor_jax_batched_jit(Instantiater):
 
         if any(res_var["curr_reached_required_tol_l"]):
             best_start = jnp.argmin(jnp.abs(c1s))
-            _logger.info(
+            _logger.debug(
                 f'Terminated: {it} c1 = {c1s} <= dist_tol.\n Best start is {best_start}',
             )
         elif all(res_var["curr_plateau_calc_l"]):
-            _logger.info(
+            _logger.debug(
                     f'Terminated: |c1 - c2| = '
                     ' <= diff_tol_a + diff_tol_r * |c1|.',
                 )
             best_start = jnp.argmin(jnp.abs(c1s))
 
-            _logger.info(
+            _logger.debug(
                 f'Terminated: {it} c1 = {c1s} Reached plateuo.\n Best start is {best_start}',
                 )
         elif it >= self.max_iters:
-            _logger.info('Terminated: iteration limit reached.')
+            _logger.debug('Terminated: iteration limit reached.')
             best_start = jnp.argmin(jnp.abs(c1s))
         else:
             _logger.error(f'Terminated with no good reason after {it} iterstion with c1s {c1s}.')
@@ -160,7 +160,9 @@ class QFactor_jax_batched_jit(Instantiater):
                 _remove_padding_and_create_matrix(untry, gate),
                 ),
             )
-        return in_c.set_params(np.array(params))
+        in_c.set_params(np.array(params))
+
+        return in_c
 
     @staticmethod
     def get_method_name() -> str:
