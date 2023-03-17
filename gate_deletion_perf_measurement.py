@@ -34,8 +34,8 @@ use_rust = run_params.use_rust
 output_in_u3s_cnots = run_params.output_in_u3s_cnots
 use_variable_untry = run_params.use_variable_untry
 print_amount_of_nodes = run_params.print_amount_of_nodes
-print_amount_of_workers_per_gpu = run_params.print_amount_of_workers_per_gpu
-print_amount_gpus_in_run = run_params.print_amount_gpus_in_run
+amount_of_workers = run_params.amount_of_workers
+amount_gpus_per_node = run_params.amount_gpus_per_node
 gate_size = run_params.gate_size
 calculate_error_bound = run_params.calculate_error_bound
 
@@ -45,7 +45,7 @@ detached_server_port = run_params.detached_server_port
 
 print(f"Will compile {file_path}")
 
-batched_instantiation = QFactor_jax_batched_jit(diff_tol_r=1e-5, diff_tol_a=1e-10, min_iters=10, max_iters=100000, dist_tol=1e-10)
+batched_instantiation = QFactor_jax_batched_jit(diff_tol_r=1e-5, diff_tol_a=1e-10, min_iters=1, max_iters=18, dist_tol=1e-10)
 
 def replace_filer(new_circuit, old_op):
     old_ops = old_op.gate._circuit.num_operations
@@ -115,7 +115,8 @@ if not use_qfactor:
 task = CompilationTask(in_circuit.copy(), passes)
 
 if not use_detached:
-    compiler =  Compiler(num_workers=16)
+    compiler =  Compiler(num_workers=amount_of_workers)
+    # compiler =  Compiler()
 else:
     compiler = Compiler(detached_server_ip, detached_server_port)
 
@@ -132,6 +133,6 @@ print(
 )
 print(f"Circuit finished with gates: {out_circuit.gate_counts}.")
 final_gates_count_by_qudit_number = {g.num_qudits:v for g,v in out_circuit.gate_counts.items()}
-print(f"{use_variable_untry},{instantiation_type},{file_name},{num_multistarts},{partition_size},{in_circuit.num_qudits},{run_time},{final_gates_count_by_qudit_number[1]},{final_gates_count_by_qudit_number[2]},{output_in_u3s_cnots},{print_amount_of_nodes},{print_amount_of_workers_per_gpu},{print_amount_gpus_in_run}")
+print(f"{use_variable_untry},{instantiation_type},{file_name},{num_multistarts},{partition_size},{in_circuit.num_qudits},{run_time},{final_gates_count_by_qudit_number[1]},{final_gates_count_by_qudit_number[2]},{output_in_u3s_cnots},{print_amount_of_nodes},{amount_of_workers},{amount_gpus_per_node}")
 
 compiler.close()
