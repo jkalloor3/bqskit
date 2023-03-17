@@ -43,6 +43,9 @@ class QFactor_jax_batched_jit(Instantiater):
         dist_tol: float = 1e-10,
         max_iters: int = 100000,
         min_iters: int = 1000,
+        n: int = 40,
+        plateau_windows_size: int = 8,
+
     ):
 
         if not isinstance(diff_tol_a, float) or diff_tol_a > 0.5:
@@ -65,6 +68,8 @@ class QFactor_jax_batched_jit(Instantiater):
         self.dist_tol = dist_tol
         self.max_iters = max_iters
         self.min_iters = min_iters
+        self.n = n
+        self.plateau_windows_size = plateau_windows_size
 
     def instantiate(
         self,
@@ -122,11 +127,9 @@ class QFactor_jax_batched_jit(Instantiater):
             ])
 
         untrys = jnp.array(np.stack(untrys, axis=1))
-        n = 40
-        plateau_windows_size = 8
         res_var = _sweep2_jited(
-            target, locations, gates, untrys, n, self.dist_tol,
-            self.diff_tol_a, self.diff_tol_r, plateau_windows_size,
+            target, locations, gates, untrys, self.n, self.dist_tol,
+            self.diff_tol_a, self.diff_tol_r, self.plateau_windows_size,
             self.max_iters, self.min_iters, num_starts,
         )
         best_start = 0
