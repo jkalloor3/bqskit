@@ -34,11 +34,11 @@ server_pid=$!
 
 echo "will run {env_vars} python  ./{python_file} {command_args} "
 
-{env_vars} python  ./{python_file} {command_args}
+{env_vars} python  ./{python_file} --use_detached {command_args}
 
 
 echo "Killing the server"
-kill server_pid
+kill $server_pid
 
 sleep 2
 
@@ -136,17 +136,20 @@ if __name__ == '__main__':
 
     # circuits =  [f'{f}.qasm' for f in ['qaoa10_u3', 'qaoa12_u3', 'mul10_u3']]
 
-    circuits =  [('qaoa5.qasm', 5), ('grover5_u3.qasm', 5), ('adder9_u3.qasm', 9), ('hub4.qasm', 4)]
+    # circuits =  [('qaoa5.qasm', 5), ('grover5_u3.qasm', 5), ('adder9_u3.qasm', 9), ('hub4.qasm', 4)]
     # circuits =  [ ('qaoa12_u3.qasm', 12)]
-    # circuits =  [ ('adder63_u3.qasm', 63), ('shor26.qasm', 26), ('hub18.qasm', 18)]
+    circuits =  [ ('adder63_u3.qasm', 63), ('shor26.qasm', 26), ('hub18.qasm', 18)]
 
     # instantiators = ['CERES', 'QFACTOR-RUST', 'QFACTOR-JAX', 'LBFGS']
-    instantiators = ['LBFGS']
+    instantiators = ['CERES', 'QFACTOR-RUST']
+    # instantiators = ['QFACTOR-JAX']
+    # instantiators = ['LBFGS']
 
     # partisions_size_l = [8,7]
-    partisions_size_l = [3]
-    # partisions_size_l = [4,5, 6,7,8, 9]
+    # partisions_size_l = [3]
+    partisions_size_l = [3,4,5,6,7,8, 9, 10, 11, 12]
     # partisions_size_l = [10, 11, 12]
+    # partisions_size_l = [13, 14, 15]
 
     num_multistarts_l = [32]
 
@@ -154,13 +157,13 @@ if __name__ == '__main__':
 
 
     # n_nodes = [4, 2, 1]
-    n_nodes = [1]
+    n_nodes = [4]
 
-    n_workers_per_node = [12]
-    n_amount_of_gpus_in_node=[1]
+    n_workers_per_node = [-1]
+    n_amount_of_gpus_in_node=[4]
 
-    use_detached = False
-    # use_detached = True
+    # use_detached = False
+    use_detached = True
 
     python_file = 'gate_deletion_perf_measurement.py'
 
