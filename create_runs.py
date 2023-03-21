@@ -28,8 +28,13 @@ echo "starting BQSKit managers on all nodes"
 srun run_workers_and_managers.sh {amount_of_gpus_per_node} {amount_of_workers_per_gpu} &
 managers_pid=$!
 
+while [[ ! -f $SCRATCH/managers_${{SLURM_JOB_ID}}_started ]]
+do
+    sleep 1
+done
+
 echo "starting BQSKit server on main node"
-bqskit-server $(hostlist -e -s' ' $SLURM_NODELIST) &> $SCRATCH/bqskit_logs/server_${{SLURM_JOB_ID}}.log &
+bqskit-server $(scontrol show hostnames "$SLURM_JOB_NODELIST" | tr '\\n' ' ') &> $SCRATCH/bqskit_logs/server_${{SLURM_JOB_ID}}.log &
 server_pid=$!
 
 echo "will run {env_vars} python  ./{python_file} {command_args} "
@@ -38,7 +43,7 @@ echo "will run {env_vars} python  ./{python_file} {command_args} "
 
 
 echo "Killing the server"
-kill $server_pid
+kill -2 $server_pid
 
 sleep 2
 
@@ -138,16 +143,18 @@ if __name__ == '__main__':
 
     # circuits =  [('qaoa5.qasm', 5), ('grover5_u3.qasm', 5), ('adder9_u3.qasm', 9), ('hub4.qasm', 4)]
     # circuits =  [ ('qaoa12_u3.qasm', 12)]
-    circuits =  [ ('adder63_u3.qasm', 63), ('shor26.qasm', 26), ('hub18.qasm', 18)]
+    # circuits =  [ ('adder63_u3.qasm', 63), ('shor26.qasm', 26), ('hub18.qasm', 18)]
+    circuits =  [ ('hub4.qasm', 4)]
 
     # instantiators = ['CERES', 'QFACTOR-RUST', 'QFACTOR-JAX', 'LBFGS']
-    instantiators = ['CERES', 'QFACTOR-RUST']
-    # instantiators = ['QFACTOR-JAX']
+    # instantiators = ['CERES', 'QFACTOR-RUST']
+    # instantiators = ['QFACTOR-JAX', 'QFACTOR-RUST']
+    instantiators = ['QFACTOR-RUST']
     # instantiators = ['LBFGS']
 
     # partisions_size_l = [8,7]
-    # partisions_size_l = [3]
-    partisions_size_l = [3,4,5,6,7,8, 9, 10, 11, 12]
+    partisions_size_l = [4]
+    # partisions_size_l = [3,4,5,6,7,8, 9, 10, 11, 12]
     # partisions_size_l = [10, 11, 12]
     # partisions_size_l = [13, 14, 15]
 
@@ -157,13 +164,14 @@ if __name__ == '__main__':
 
 
     # n_nodes = [4, 2, 1]
-    n_nodes = [4]
+    n_nodes = [1]
+    # n_nodes = [4]
 
     n_workers_per_node = [-1]
-    n_amount_of_gpus_in_node=[4]
+    n_amount_of_gpus_in_node=[1]
 
-    # use_detached = False
-    use_detached = True
+    use_detached = False
+    # use_detached = True
 
     python_file = 'gate_deletion_perf_measurement.py'
 

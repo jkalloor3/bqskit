@@ -3,9 +3,8 @@ from timeit import default_timer as timer
 from bqskit import Circuit
 from bqskit.compiler import Compiler, CompilationTask
 from bqskit.ir.gates.constant.cx import CXGate
-from bqskit.ir.gates.parameterized.unitary import VariableUnitaryGate
+from bqskit.ir.opt.cost.functions.cost.hilbertschmidt import HilbertSchmidtCostGenerator
 from bqskit.ir.opt.instantiaters import QFactor_jax_batched_jit
-from bqskit.ir.opt.instantiaters import QFactor
 from bqskit.ir.opt.minimizers.lbfgs import LBFGSMinimizer
 from bqskit.passes import *
 
@@ -80,6 +79,7 @@ elif instantiator == 'LBFGS':
             'method':'minimization',
             'minimizer':LBFGSMinimizer(),
             'multistarts': num_multistarts,
+            'cost_fn_gen': HilbertSchmidtCostGenerator(),
             'seed': seed}
 else:
     instantiator_operated_on_u3s = True
