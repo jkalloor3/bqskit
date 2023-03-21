@@ -7,7 +7,7 @@ total_amount_of_workers=$(($amount_of_gpus * $amont_of_workers_per_gpu))
 if [ $amount_of_gpus -eq 0 ]
 then
     echo "Will run manager on node $node_id with n args of $amont_of_workers_per_gpu"
-    bqskit-manager -n$amont_of_workers_per_gpu -v &> $SCRATCH/bqskit_logs/manager_${SLURM_JOB_ID}_${node_id}.log
+    bqskit-manager -n $amont_of_workers_per_gpu -v &> $SCRATCH/bqskit_logs/manager_${SLURM_JOB_ID}_${node_id}.log
     echo "Manager finished on node $node_id"
 else
     echo "Starting MPS servers on node $node_id"
