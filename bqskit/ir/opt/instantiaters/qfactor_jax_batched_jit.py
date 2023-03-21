@@ -87,7 +87,7 @@ class QFactor_jax_batched_jit(Instantiater):
         num_starts: int,
     ) -> Circuit:
         if len(circuit) == 0:
-            return np.array([])
+            return circuit
 
         in_c = circuit
         circuit = circuit.copy()
