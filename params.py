@@ -34,11 +34,13 @@ def make_argparser():
 
     parser.add_argument('--instantiator', type=str, choices=['CERES', 'QFACTOR-RUST', 'QFACTOR-JAX', 'LBFGS'], required=True)
     parser.add_argument('--multistarts', type=int, default=16)
-    parser.add_argument('--max_iters', type=int,  default=100000)
+    parser.add_argument('--max_iters', type=int,  default=10000000)
     parser.add_argument('--min_iters', type=int,  default=0)
     parser.add_argument('--diff_tol_r', type=float,  default=1e-5)
     parser.add_argument('--diff_tol_a', type=float,  default=1e-10)
-    parser.add_argument('--dist_tol', type=float,  default=1e-10)
+    parser.add_argument('--dist_tol', type=float,  default=1e-10) 
+    
+
 
 
     return parser.parse_args()
