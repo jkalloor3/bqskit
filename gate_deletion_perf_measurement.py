@@ -22,6 +22,7 @@ from bqskit import enable_logging, enable_dashboard
 import params
 
 run_params = params.get_params()
+print(run_params)
 
 file_path = run_params.input_qasm
 file_name = file_path.split("/")[-1]
