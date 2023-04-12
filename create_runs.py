@@ -12,17 +12,22 @@ detached_runtime_header="""#!/bin/bash
 #SBATCH -A m4141_g
 #SBATCH -C gpu
 #SBATCH -q regular
-#SBATCH -t 11:50:00
+#SBATCH -t 11:55:00
 #SBATCH -n {nodes}
 #SBATCH --mem=0
 #SBATCH --ntasks-per-node=1
 #SBATCH --gpus-per-task={amount_of_gpus_per_node}
 #SBATCH --output=./logs_tol_a_0/{cir_name}_{partitions_size}p_{instantiator}_detached_runtime_{nodes}_nodes_{num_multistarts}_starts-%j.txt
 
+
+#sdfsgTCH --output=./logs_qfactor_jax_new_termination_cond/{cir_name}_{partitions_size}p_{instantiator}_detached_runtime_{nodes}_nodes_{num_multistarts}_starts-%j.txt
+
 date
 uname -a
 module load python
-conda activate my_env
+# conda activate my_env
+conda activate dev_env
+
 module load nvidia
 
 
@@ -67,17 +72,23 @@ attached_runtime_header="""#!/bin/bash
 #SBATCH -A m4141_g
 #SBATCH -C gpu
 #SBATCH -q regular
-#SBATCH -t 0:20:00
+#SBATCH -t 3:48:00
 #SBATCH -n {nodes}
 #SBATCH --mem=0
 #SBATCH --ntasks-per-node=1
 #SBATCH --gpus-per-task={amount_of_gpus_per_node}
 #SBATCH --output=./logs_tol_a_0/{cir_name}_{partitions_size}p_{instantiator}_attached_runtime_{nodes}_nodes_{num_multistarts}_starts-%j.txt
 
+
+
+#alon --output=./logs_qfactor_jax_new_termination_cond/{cir_name}_{partitions_size}p_{instantiator}_attached_runtime_{nodes}_nodes_{num_multistarts}_starts-%j.txt
+
 date
 uname -a
 module load python
 conda activate my_env
+# conda activate dev_env
+
 module load nvidia
 
 echo "starting MPS server on node"
@@ -157,7 +168,7 @@ def create_and_run_a_job(cir_path, partitions_size, python_file,
 
 
 
-if __name__ == '__main__':
+if __name__ == '__main__':  
 
     # circuits =  [f'{f}.qasm' for f in ['qaoa10_u3', 'qaoa12_u3', 'mul10_u3']]
 
@@ -165,13 +176,21 @@ if __name__ == '__main__':
     # circuits =  [ ('qaoa12_u3.qasm', 12)]
     # circuits =  [ ('adder63_u3.qasm', 63), ('shor26.qasm', 26), ('hub18.qasm', 18)]
     # circuits =  [ ('adder63_u3.qasm', 63)]
+    # circuits = [ ('tfim8.qasm', 8), ('tfim16.qasm', 16), ('qpe8.qasm', 8), ('qpe10.qasm', 10), ('qpe12.qasm', 12), ('hhl8.qasm', 8),  ('heisenberg8.qasm', 8),   ('heisenberg7.qasm', 7), ('qae11.qasm', 11), ('qae13.qasm', 13)]
+    # circuits = [('qae11.qasm', 11), ('qae13.qasm', 13)]
+    # circuits =  [ ('shor64.qasm', 64), ('qae33.qasm', 33), ('qae81.qasm', 81), ('mult64.qasm', 64), ('mult16.qasm', 16), ('heisenberg64.qasm', 64),  ('add17.qasm', 17), ('tfim400.qasm', 400)]
+    circuits =  [ ('vqe12.qasm', 12), ('vqe14.qasm', 14), ('qae33.qasm', 33), ('qae81.qasm', 81), ('mult64.qasm', 64), ('mult16.qasm', 16), ('heisenberg64.qasm', 64),  ('add17.qasm', 17)]
+    # circuits =  [ ('qae33.qasm', 33), ('qae81.qasm', 81)]
     # circuits =  [ ('hub4.qasm', 4)]
-    circuits =  [ ('hub18.qasm', 18)]
+    # circuits =  [ ('tfim16.qasm', 16)]
+    # circuits =  [ ('hub18.qasm', 18)]
     # circuits =  [ ('shor26.qasm', 26)]
     # circuits =  [ ('grover5_u3.qasm', 5)]
     # circuits =  [ ('qaoa5.qasm', 5)]
     # circuits =  [ ('adder9_u3.qasm', 9)]
-
+    # circuits = [('hhl8', 8)]
+    # circuits = [('heisenberg7.qasm', 7)]
+    
     # instantiators = ['CERES', 'QFACTOR-RUST', 'LBFGS']
     # instantiators = ['CERES', 'QFACTOR-RUST', 'QFACTOR-JAX', 'LBFGS']
     # instantiators = ['CERES', 'QFACTOR-RUST', 'QFACTOR-JAX']
@@ -179,12 +198,13 @@ if __name__ == '__main__':
     # instantiators = ['CERES', 'QFACTOR-RUST']
     # instantiators = ['CERES', 'QFACTOR-JAX']
     # instantiators = ['CERES']
-    # instantiators = ['QFACTOR-JAX']
+    instantiators = ['QFACTOR-JAX']
     # instantiators = ['QFACTOR-RUST']
     # instantiators = ['QFACTOR-RUST', 'LBFGS']
-    instantiators = ['LBFGS']
+    # instantiators = ['CERES', 'LBFGS']
+    # instantiators = ['LBFGS']
 
-    partisions_size_l = [4,5, 6]
+    partisions_size_l = [6,7]
     #partisions_size_l = [3,4,5,6,7,8]
     # partisions_size_l = [3,4,5,6,7,8, 9,11,12]
     # partisions_size_l = [5, 6, 7,8, 9]
@@ -197,10 +217,12 @@ if __name__ == '__main__':
 
     # n_nodes = [4, 2, 1]
     # n_nodes = [1]
-    n_nodes = [8]
+    n_nodes = [16]
 
-    n_workers_per_node = [-1]
-    n_amount_of_gpus_in_node=[0]
+    # n_workers_per_node = [4*3, 4*4, 4*5, 4*6, 4*7]
+    # n_workers_per_node = [4*8, 4*10, 4*12, 4*14, 4*16]
+    n_workers_per_node = [4*2]
+    n_amount_of_gpus_in_node=[4]
 
     # use_detached = False
     use_detached = True
