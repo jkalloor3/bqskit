@@ -46,12 +46,15 @@ diff_tol_r = run_params.diff_tol_r
 diff_tol_a = run_params.diff_tol_a
 dist_tol = run_params.dist_tol
 
+diff_tol_step_r = run_params.diff_tol_step_r
+diff_tol_step = run_params.diff_tol_step
+
 partition_size = run_params.partitions_size
 perform_while = run_params.perform_while
 
 print(f"Will compile {file_path}")
 
-batched_instantiation = QFactor_jax_batched_jit(diff_tol_r=diff_tol_r, diff_tol_a=diff_tol_a, min_iters=min_iters, max_iters=max_iters, dist_tol=dist_tol)
+batched_instantiation = QFactor_jax_batched_jit(diff_tol_r=diff_tol_r, diff_tol_a=diff_tol_a, min_iters=min_iters, max_iters=max_iters, dist_tol=dist_tol, diff_tol_step_r=diff_tol_step_r, diff_tol_step = diff_tol_step)
 
 instantiator_operated_on_u3s = False
 

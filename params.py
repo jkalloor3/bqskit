@@ -40,6 +40,9 @@ def make_argparser():
     parser.add_argument('--diff_tol_a', type=float,  default=1e-10)
     parser.add_argument('--dist_tol', type=float,  default=1e-10) 
     
+    
+    parser.add_argument('--diff_tol_step_r', type=float,  default=0.1) 
+    parser.add_argument('--diff_tol_step', type=int,  default=100) 
 
 
 

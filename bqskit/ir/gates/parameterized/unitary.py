@@ -70,13 +70,13 @@ class VariableUnitaryGate(
         self,
         env_matrix: npt.NDArray[np.complex128],
         get_untry: bool = False,
+        prev_utry = None,
     ) -> list[float] | UnitaryMatrix:
         """
         Return the optimal parameters with respect to an environment matrix.
 
         See :class:`LocallyOptimizableUnitary` for more info.
         """
-
         self.check_env_matrix(env_matrix)
         U, _, Vh = sp.linalg.svd(env_matrix)
         utry = Vh.conj().T @ U.conj().T
