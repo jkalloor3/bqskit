@@ -30,7 +30,7 @@ class VariableUnitaryGateAcc(VariableUnitaryGate):
         x = real + imag
         return UnitaryMatrixJax.closest_to(jnp.reshape(x, self.shape), self.radixes)
 
-    def optimize(self, env_matrix, get_untry: bool = False, prev_utry=None) -> list[float] | UnitaryMatrixJax:
+    def optimize(self, env_matrix, get_untry: bool = False, prev_utry=None, beta:float=0.0) -> list[float] | UnitaryMatrixJax:
         """
         Return the optimal parameters with respect to an environment matrix.
 
@@ -42,8 +42,8 @@ class VariableUnitaryGateAcc(VariableUnitaryGate):
         # print(type(prev_utry._utry))
         # print("****************************")
 
-        sf = 0.7
-        U, _, Vh = jla.svd((1-sf) * env_matrix + sf*prev_utry._utry.conj().T)
+        
+        U, _, Vh = jla.svd((1-beta) * env_matrix + beta*prev_utry._utry.conj().T)
         utry = Vh.conj().T @ U.conj().T
 
         if get_untry:
