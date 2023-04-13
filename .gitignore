@@ -17,4 +17,4 @@ build
 scratch/
 
 QFT/
-*logs/
+*logs*/
