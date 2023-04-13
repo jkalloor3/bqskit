@@ -18,3 +18,8 @@ scratch/
 
 QFT/
 *logs*/
+*.pdf
+*.qasm
+*.txt
+*.npy*
+*.log*
