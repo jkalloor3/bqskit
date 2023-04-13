@@ -8,6 +8,7 @@ filename = './del_gates_4_3.csv'
 filename = './del_gates_4_5.csv'
 filename = './del_gates_4_7.csv'
 filename = './del_gates_4_10.csv'
+filename = './del_gates_4_12.csv'
 
 
 orig_circuits_props = {
