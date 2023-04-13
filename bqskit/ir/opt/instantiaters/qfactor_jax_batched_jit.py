@@ -46,8 +46,8 @@ class QFactor_jax_batched_jit(Instantiater):
         n: int = 40,
         plateau_windows_size: int = 8,
         diff_tol_step_r: float = 0.1,
-        diff_tol_step: int = 500,
-        sd: float = 0.5,
+        diff_tol_step: int = 200,
+        beta: float = 0.0,
 
     ):
 
@@ -75,6 +75,7 @@ class QFactor_jax_batched_jit(Instantiater):
         self.plateau_windows_size = plateau_windows_size
         self.diff_tol_step_r = diff_tol_step_r
         self.diff_tol_step = diff_tol_step
+        self.beta = beta
 
     def instantiate(
         self,
@@ -135,7 +136,7 @@ class QFactor_jax_batched_jit(Instantiater):
         res_var = _sweep2_jited(
             target, locations, gates, untrys, self.n, self.dist_tol,
             self.diff_tol_a, self.diff_tol_r, self.plateau_windows_size,
-            self.max_iters, self.min_iters, num_starts, self.diff_tol_step_r, self.diff_tol_step
+            self.max_iters, self.min_iters, num_starts, self.diff_tol_step_r, self.diff_tol_step, self.beta
         )
         
         it = res_var['iteration_counts'][0]
@@ -268,7 +269,7 @@ def _initilize_circuit_tensor(
 
 def _single_sweep(
     locations, gates, amount_of_gates, target_untry_builder,
-    untrys,
+    untrys, beta=0
 ):
     # from right to left
     for k in reversed(range(amount_of_gates)):
@@ -284,7 +285,7 @@ def _single_sweep(
         # Update current gate
         if gate.num_params > 0:
             env = target_untry_builder.calc_env_matrix(location)
-            untry = gate.optimize(env, get_untry=True, prev_utry=untry)
+            untry = gate.optimize(env, get_untry=True, prev_utry=untry, beta=beta)
             untrys[k] = untry
 
             # Add updated gate to left of circuit tensor
@@ -306,7 +307,7 @@ def _single_sweep(
         # Update current gate
         if gate.num_params > 0:
             env = target_untry_builder.calc_env_matrix(location)
-            untry = gate.optimize(env, get_untry=True, prev_utry=untry)
+            untry = gate.optimize(env, get_untry=True, prev_utry=untry, beta=beta)
             untrys[k] = untry
 
             # Add updated gate to right of circuit tensor
@@ -320,7 +321,7 @@ def _single_sweep(
 
 def _single_sweep_sim(
     locations, gates, amount_of_gates, target_untry_builder,
-    untrys,
+    untrys, beta=0
 ):
     
     new_untrys = []
@@ -340,7 +341,7 @@ def _single_sweep_sim(
             env = target_untry_builder.calc_env_matrix(location)
             # print("****************")
             # print(jnp.trace(env@untry._utry))
-            new_untrys.append(gate.optimize(env, get_untry=True, prev_utry=untry))
+            new_untrys.append(gate.optimize(env, get_untry=True, prev_utry=untry, beta=beta))
             # untrys[k] = untry
         else:
             new_untrys.append(untry)
@@ -391,7 +392,7 @@ def Loop_vars(
 def _sweep2(
     target, locations, gates, untrys, n, dist_tol, diff_tol_a,
     diff_tol_r, plateau_windows_size, max_iters, min_iters,
-    amount_of_starts, diff_tol_step_r, diff_tol_step
+    amount_of_starts, diff_tol_step_r, diff_tol_step, beta
 ):
     c1s = jnp.array([1.0] * amount_of_starts)
     plateau_windows = jnp.array(
@@ -454,7 +455,7 @@ def _sweep2(
 
             
             untrys = _single_sweep_sim(
-                locations, gates, amount_of_gates, target_untry_builder, untrys,
+                locations, gates, amount_of_gates, target_untry_builder, untrys, beta
             )
 
             target_untry_builder_tensor = _initilize_circuit_tensor(
@@ -488,7 +489,7 @@ def _sweep2(
             iteration_count = iteration_count + 1
 
             target_untry_builder, untrys = _single_sweep(
-                locations, gates, amount_of_gates, target_untry_builder, untrys,
+                locations, gates, amount_of_gates, target_untry_builder, untrys, beta
             )
         
         c2 = c1
@@ -585,6 +586,6 @@ if 'NO_JIT_QFACTOR' in os.environ:
 else:
     _sweep2_jited = jax.jit(
         _sweep2, static_argnums=(
-            1, 2, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13
+            1, 2, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14
         ),
     )
