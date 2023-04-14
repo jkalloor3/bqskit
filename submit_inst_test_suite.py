@@ -66,15 +66,16 @@ results = []
 i = 0
 already_sent_skiped = 0
 for qubits_count, circuits_dict in test_suite.items():
-    if qubits_count != '9':
-        continue
+    # if qubits_count != '9':
+        # continue
     for circuit_name, partitions_to_test in circuits_dict.items():
-        if circuit_name != 'qpe12':
-            continue
+        # if circuit_name != 'qpe12':
+            # continue
         for block_name in partitions_to_test:
             qasm_file_path = f'{partitions_base_dir}/{circuit_name}.qasm.{qubits_count}/{block_name}'
             # for inst_name in ['CERES', 'LBFGS', 'QFACTOR-RUST', 'QFACTOR-JAX']:
-            for inst_name in ['CERES']:
+            for inst_name in ['CERES_P', 'LBFGS_P', 'QFACTOR-RUST_P', 'QFACTOR-JAX']:
+            # for inst_name in ['CERES']:
                 time_limit = '00:10:00'
                 to_write = open(job_script_name, 'w')
                 i += 1

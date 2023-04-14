@@ -32,7 +32,7 @@ def make_argparser():
     parser.add_argument('--detached_server_port', type=int, default=default_server_port)
 
 
-    parser.add_argument('--instantiator', type=str, choices=['CERES', 'QFACTOR-RUST', 'QFACTOR-JAX', 'LBFGS'], required=True)
+    parser.add_argument('--instantiator', type=str, choices=['CERES', 'QFACTOR-RUST', 'QFACTOR-JAX', 'LBFGS', 'CERES_P', 'QFACTOR-RUST_P',  'LBFGS_P'], required=True)
     parser.add_argument('--multistarts', type=int, default=16)
     parser.add_argument('--max_iters', type=int,  default=10000000)
     parser.add_argument('--min_iters', type=int,  default=0)
