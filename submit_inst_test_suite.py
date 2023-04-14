@@ -91,7 +91,8 @@ for qubits_count, circuits_dict in test_suite.items():
                         job_name += f'_{beta}_{diff_tol_step}_{diff_tol_step_r}'
                         env_vars += " XLA_PYTHON_CLIENT_PREALLOCATE=false"
                     else:
-                        time_limit = '00:50:00'
+                        pass
+                        # time_limit = '00:50:00'
                 
                 for k,v in other_inst_args.items():
                     command_args += f' --{k} {v}'
