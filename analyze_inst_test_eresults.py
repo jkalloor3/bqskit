@@ -57,48 +57,50 @@ for circ_name in df_avg_time['orig_circ_name'].unique():
     
     # set y-axis to log scale
     plt.yscale('log')
+
+    plt.savefig(circ_name + '_runtime.pdf', bbox_inches='tight')
     
 # show all the plots
 plt.show()
 
 # %%
 
-import pandas as pd
-import numpy as np
-import matplotlib.pyplot as plt
+# import pandas as pd
+# import numpy as np
+# import matplotlib.pyplot as plt
 
 
-# Filter out the rows where inst_succsed is NaN
-# Group the data by orig_circ_name, inst_name, and qubit_count
-grouped = df[df["inst_succsed"].notna()].groupby(["orig_circ_name", "inst_name", "qubit_count"])
+# # Filter out the rows where inst_succsed is NaN
+# # Group the data by orig_circ_name, inst_name, and qubit_count
+# grouped = df[df["inst_succsed"].notna()].groupby(["orig_circ_name", "inst_name", "qubit_count"])
 
 
 
-# Iterate over each orig_circ_name and create a separate plot for each one
-for orig_circ_name, group in grouped:
-    # Set up the plot
-    fig, ax = plt.subplots(figsize=(10, 8))
-    ax.set_xlabel("Qubit Count", fontsize=14)
-    ax.set_ylabel("Success Rate", fontsize=14)
-    ax.set_title(f"Success Rate vs Qubit Count for {orig_circ_name}", fontsize=16)
+# # Iterate over each orig_circ_name and create a separate plot for each one
+# for orig_circ_name, group in grouped:
+#     # Set up the plot
+#     fig, ax = plt.subplots(figsize=(10, 8))
+#     ax.set_xlabel("Qubit Count", fontsize=14)
+#     ax.set_ylabel("Success Rate", fontsize=14)
+#     ax.set_title(f"Success Rate vs Qubit Count for {orig_circ_name}", fontsize=16)
 
-    # Iterate over each inst_name and plot the data
-    for inst_name, inst_group in group.groupby("inst_name"):
-        # Calculate the mean success rate for each qubit count
-        # success_rate = inst_group["inst_succsed"].value_counts(normalize=True).loc[:, True]
-        success_rate = inst_group["inst_succsed"].value_counts(normalize=True).loc[True]
+#     # Iterate over each inst_name and plot the data
+#     for inst_name, inst_group in group.groupby("inst_name"):
+#         # Calculate the mean success rate for each qubit count
+#         # success_rate = inst_group["inst_succsed"].value_counts(normalize=True).loc[:, True]
+#         success_rate = inst_group["inst_succsed"].value_counts(normalize=True).loc[True]
 
-        success_rate_mean = success_rate.groupby("qubit_count").mean()
+#         success_rate_mean = success_rate.groupby("qubit_count").mean()
 
-        # Convert the index to integers
-        success_rate_mean.index = success_rate_mean.index.astype(int)
+#         # Convert the index to integers
+#         success_rate_mean.index = success_rate_mean.index.astype(int)
 
-        # Plot the data as a scatter plot with a line connecting the points
-        ax.plot(success_rate_mean.index, success_rate_mean, "-o", label=inst_name)
+#         # Plot the data as a scatter plot with a line connecting the points
+#         ax.plot(success_rate_mean.index, success_rate_mean, "-o", label=inst_name)
 
-    # Add a legend and show the plot
-    ax.legend()
-    plt.show()
+#     # Add a legend and show the plot
+#     ax.legend()
+#     plt.show()
 
 
 #%%
@@ -135,8 +137,6 @@ for orig_circ_name, df_orig in success_rate.groupby("orig_circ_name"):
 
         ax.bar(x_pos,  df_inst["success_rate"], width=bar_width, label=inst, color=plt.cm.tab10(i), hatch='/', edgecolor='black')
 
-        # ax.bar(df_inst["qubit_count"], df_inst["success_rate"], label=inst_name)
-        # ax.plot(df_inst["qubit_count"], df_inst["success_rate"], label=inst_name, marker='x')
 
     # Set the axis labels and title
     ax.set_xlabel("qubit_count")
@@ -146,6 +146,7 @@ for orig_circ_name, df_orig in success_rate.groupby("orig_circ_name"):
     ax.set_xticks(df_orig["qubit_count"].unique())
     ax.legend()
 
+    plt.savefig(orig_circ_name + '_success_rate.pdf', bbox_inches='tight')
 plt.show()
 
 # %%
