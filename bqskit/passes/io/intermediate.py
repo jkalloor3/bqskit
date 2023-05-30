@@ -85,6 +85,9 @@ class SaveIntermediatePass(BasePass):
         block_skeleton = self.pathdir + self.projname + '/block_'
         num_digits = len(str(len(blocks_to_save)))
 
+        with open(self.pathdir + self.projname + '/data.pickle', 'wb') as data_f:
+            pickle.dump(data, data_f)
+
         structure_list: list[list[int]] = []
         # NOTE: Block numbers are gotten by iterating through the circuit so
         # there is no guarantee that the blocks were partitioned in that order.
@@ -135,15 +138,20 @@ class RestoreIntermediatePass(BasePass):
                 `structure.pickle` is invalid.
         """
         self.proj_dir = project_directory
+        self.do_something = True
         if not exists(self.proj_dir):
-            raise TypeError(
-                f"Project directory '{self.proj_dir}' does not exist.",
-            )
+            self.do_something = False
+            return
+            # raise TypeError(
+            #     f"Project directory '{self.proj_dir}' does not exist.",
+            # )
         if not exists(self.proj_dir + '/structure.pickle'):
-            raise TypeError(
-                f'Project directory `{self.proj_dir}` does not '
-                'contain `structure.pickle`.',
-            )
+            self.do_something = False
+            return
+            # raise TypeError(
+            #     f'Project directory `{self.proj_dir}` does not '
+            #     'contain `structure.pickle`.',
+            # )
 
         with open(self.proj_dir + '/structure.pickle', 'rb') as f:
             self.structure = pickle.load(f)
@@ -179,7 +187,13 @@ class RestoreIntermediatePass(BasePass):
             ValueError: if a block file and the corresponding index in
                 `structure.pickle` are differnt lengths.
         """
+        if not self.do_something:
+            return
         # If the circuit is empty, just append blocks in order
+        with open(self.proj_dir + '/data.pickle', 'rb') as data_f:
+            new_data = pickle.load(data_f)
+            data.update(new_data)
+        
         if circuit.depth == 0:
             for block in self.block_list:
                 # Get block

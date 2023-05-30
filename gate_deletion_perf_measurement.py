@@ -97,6 +97,10 @@ else:
 
 in_circuit = Circuit.from_file(file_path)
 
+while_scanning_removal = [WhileLoopPass(ChangePredicate(), [RestoreIntermediatePass("int_blocks/unnamed_project"), 
+                                                            OneGateRemovalPass(instantiate_options=instantiate_options), 
+                                                            SaveIntermediatePass("int_blocks", save_as_qasm=False)])]
+
 operations_to_perfrom_on_block = [
                     ScanningGateRemovalPass(instantiate_options=instantiate_options),  
                 ]
