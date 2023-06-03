@@ -119,6 +119,7 @@ class ForEachBlockPass(BasePass):
         # Preprocess blocks
         subcircuits: list[Circuit] = []
         block_datas: list[PassData] = []
+        print(len(blocks))
         for i, (cycle, op) in enumerate(blocks):
 
             # Form Subcircuit
@@ -144,6 +145,7 @@ class ForEachBlockPass(BasePass):
             block_data['model'] = submodel
             block_data['point'] = CircuitPoint(cycle, op.location[0])
             block_data['calculate_error_bound'] = self.calculate_error_bound
+            block_data['block_num'] = i
 
             subcircuits.append(subcircuit)
             block_datas.append(block_data)

@@ -20,9 +20,9 @@ from bqskit import enable_logging, enable_dashboard
 file_path = "adder9.qasm"
 in_circuit = Circuit.from_file(file_path)
 
-while_scanning_removal = [WhileLoopPass(ChangePredicate(), [ #RestoreIntermediatePass("int_blocks/scan"), 
+while_scanning_removal = [WhileLoopPass(ChangePredicate(), [ RestoreIntermediatePass("int_blocks/scan"), 
                                                             OneGateRemovalPass(), 
-                                                            #SaveIntermediatePass("int_blocks", "scan", save_as_qasm=False)
+                                                            SaveIntermediatePass("int_blocks", "scan", save_as_qasm=False)
                                                             ])]
 
 operations_to_perfrom_on_block = [
