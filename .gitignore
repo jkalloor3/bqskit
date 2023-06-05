@@ -23,3 +23,5 @@ QFT/
 *.txt
 *.npy*
 *.log*
+*.circ
+*.data

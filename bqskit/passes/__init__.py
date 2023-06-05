@@ -44,7 +44,6 @@ synthesis pass to convert the circuit to native gates.
     IterativeScanningGateRemovalPass
     Rebase2QuditGatePass
     ScanningGateRemovalPass
-    OneGateRemovalPass
     SubstitutePass
 
 .. rubric:: Control Passes
@@ -209,7 +208,6 @@ from bqskit.passes.processing.exhaustive import ExhaustiveGateRemovalPass
 from bqskit.passes.processing.iterative import IterativeScanningGateRemovalPass
 from bqskit.passes.processing.rebase import Rebase2QuditGatePass
 from bqskit.passes.processing.scan import ScanningGateRemovalPass
-from bqskit.passes.processing.onescan import OneGateRemovalPass
 from bqskit.passes.processing.substitute import SubstitutePass
 from bqskit.passes.rules.ch2cnot import CHToCNOTPass
 from bqskit.passes.rules.cnot2ch import CNOTToCHPass
@@ -277,7 +275,6 @@ __all__ = [
     'UpdateDataPass',
     'ToU3Pass',
     'ScanningGateRemovalPass',
-    'OneGateRemovalPass',
     'SimpleLayerGenerator',
     'AStarHeuristic',
     'GreedyHeuristic',
