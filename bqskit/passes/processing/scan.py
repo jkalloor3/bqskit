@@ -135,7 +135,6 @@ class ScanningGateRemovalPass(BasePass):
                 with open(save_circuit_file, "rb") as cf:
                     circuit_copy = pickle.load(cf)
                 start_ind = min(data.get("ind", 0), len(all_ops) - 1)
-                print("len(subcircuit) ", len(all_ops))
                 all_ops = all_ops[start_ind:]
                 print("starting at ", start_ind)
             else:
