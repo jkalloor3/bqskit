@@ -7,6 +7,7 @@ from bqskit.ir.opt.cost.functions.cost.hilbertschmidt import HilbertSchmidtCostG
 from bqskit.ir.opt.instantiaters import QFactor_jax_batched_jit
 from bqskit.ir.opt.minimizers.lbfgs import LBFGSMinimizer
 from bqskit.passes import *
+from os.path import join
 
 
 
@@ -20,6 +21,8 @@ from bqskit import enable_logging, enable_dashboard
 
 # enable_logging(True)
 import params
+
+CHECKPOINT_DIR = "removal_checkpoints"
 
 run_params = params.get_params()
 print(run_params)
@@ -97,12 +100,9 @@ else:
 
 in_circuit = Circuit.from_file(file_path)
 
-while_scanning_removal = [WhileLoopPass(ChangePredicate(), [RestoreIntermediatePass("int_blocks/unnamed_project"), 
-                                                            OneGateRemovalPass(instantiate_options=instantiate_options), 
-                                                            SaveIntermediatePass("int_blocks", save_as_qasm=False)])]
-
+checkpoint_proj_dir = join(CHECKPOINT_DIR, file_name.split(".")[0])
 operations_to_perfrom_on_block = [
-                    ScanningGateRemovalPass(instantiate_options=instantiate_options),  
+                    ScanningGateRemovalPass(instantiate_options=instantiate_options, checkpoint_proj=checkpoint_proj_dir),  
                 ]
 
 if perform_while:

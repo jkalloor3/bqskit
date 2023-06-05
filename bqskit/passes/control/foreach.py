@@ -119,7 +119,6 @@ class ForEachBlockPass(BasePass):
         # Preprocess blocks
         subcircuits: list[Circuit] = []
         block_datas: list[PassData] = []
-        print(len(blocks))
         for i, (cycle, op) in enumerate(blocks):
 
             # Form Subcircuit
