@@ -43,7 +43,8 @@ def make_argparser():
     
     parser.add_argument('--diff_tol_step_r', type=float,  default=0.1) 
     parser.add_argument('--diff_tol_step', type=int,  default=100) 
-    parser.add_argument('--beta', type=float,  default=0.0) 
+    parser.add_argument('--beta', type=float,  default=0.0)
+    parser.add_argument('--blocks_to_run', nargs='+', default=[])
 
 
 
@@ -51,6 +52,6 @@ def make_argparser():
 
 def get_params():
     parser = make_argparser()
-    print(parser)
+    # print(parser)
 
     return parser

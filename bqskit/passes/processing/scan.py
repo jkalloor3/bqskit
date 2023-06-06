@@ -101,6 +101,7 @@ class ScanningGateRemovalPass(BasePass):
         }
         self.instantiate_options.update(instantiate_options)
         self.checkpoint_proj = checkpoint_proj
+        print("CHECKPOINT DIR", self.checkpoint_proj)
         if (self.checkpoint_proj and not exists(self.checkpoint_proj)):
             mkdir(self.checkpoint_proj)
 
@@ -124,9 +125,10 @@ class ScanningGateRemovalPass(BasePass):
 
         # Things needed for saving data
         if self.checkpoint_proj:
+            print("Checkpointing!")
             save_num = data.get("block_num", 0)
             save_data_file = join(self.checkpoint_proj, f"block_{save_num}.data")
-            save_circuit_file = join(self.checkpoint_proj, f"block_{save_num}.circ")
+            save_circuit_file = join(self.checkpoint_proj, f"block_{save_num}.pickle")
             if exists(save_data_file):
                 # Reload ind from
                 with open(save_data_file, "rb") as df:

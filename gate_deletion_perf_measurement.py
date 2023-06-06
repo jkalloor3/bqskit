@@ -22,10 +22,10 @@ from bqskit import enable_logging, enable_dashboard
 # enable_logging(True)
 import params
 
-CHECKPOINT_DIR = "removal_checkpoints"
+CHECKPOINT_DIR = "checkpoints"
 
 run_params = params.get_params()
-print(run_params)
+# print(run_params)
 
 file_path = run_params.input_qasm
 file_name = file_path.split("/")[-1]
@@ -53,7 +53,7 @@ diff_tol_step_r = run_params.diff_tol_step_r
 diff_tol_step = run_params.diff_tol_step
 beta = run_params.beta
 
-partition_size = run_params.partitions_size
+blocks_to_run = run_params.blocks_to_run if len(run_params.blocks_to_run) > 0 else None
 perform_while = run_params.perform_while
 
 print(f"Will compile {file_path}")
@@ -98,12 +98,22 @@ else:
 
 
 
-in_circuit = Circuit.from_file(file_path)
+orig_circuit = Circuit.from_file(file_path)
+
+in_circuit = Circuit(orig_circuit.num_qudits)
 
 checkpoint_proj_dir = join(CHECKPOINT_DIR, file_name.split(".")[0])
-operations_to_perfrom_on_block = [
-                    ScanningGateRemovalPass(instantiate_options=instantiate_options, checkpoint_proj=checkpoint_proj_dir),  
+
+print(checkpoint_proj_dir)
+
+operations_to_perfrom_on_block = [FromU3ToVariablePass(),
+                                  ScanningGateRemovalPass(instantiate_options=instantiate_options, 
+                                                          checkpoint_proj=checkpoint_proj_dir),  
                 ]
+
+if instantiator_operated_on_u3s:
+    operations_to_perfrom_on_block = [operations_to_perfrom_on_block[-1]]
+
 
 if perform_while:
     operations_to_perfrom_on_block = [
@@ -113,20 +123,9 @@ if perform_while:
         ]     
 
 passes =         [
-        # Convert U3's to VU
-        FromU3ToVariablePass(),
-
-        QuickPartitioner(partition_size),
-        ForEachBlockPass(operations_to_perfrom_on_block),
-        UnfoldPass(),
-        
-        # Convert back to u3 the VU
-        ToU3Pass()
-        ]
-
-
-if instantiator_operated_on_u3s:
-    passes = passes[1:-1] # no need to convert to variable and then back to U3s
+        RestoreIntermediatePass(checkpoint_proj_dir, as_circuit_gate=True),
+        ForEachBlockPass(operations_to_perfrom_on_block, blocks_to_run=blocks_to_run),
+]
 
 task = CompilationTask(in_circuit.copy(), passes)
 
@@ -146,8 +145,4 @@ print(
     f"Partitioning + Synthesis took {run_time}"
     f"seconds using the { instantiator } instantiation method."
 )
-print(f"Circuit finished with gates: {out_circuit.gate_counts}.")
-final_gates_count_by_qudit_number = {g.num_qudits:v for g,v in out_circuit.gate_counts.items()}
-print(f"True,{instantiator},{file_name},{num_multistarts},{partition_size},{in_circuit.num_qudits},{run_time},{final_gates_count_by_qudit_number[1]},{final_gates_count_by_qudit_number[2]},{print_amount_of_nodes},{amount_of_workers},{amount_gpus_per_node}")
-
 compiler.close()

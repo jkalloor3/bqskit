@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Callable
+from typing import Callable, List
 
 from bqskit.compiler.basepass import _sub_do_work
 from bqskit.compiler.basepass import BasePass
@@ -40,6 +40,7 @@ class ForEachBlockPass(BasePass):
         collection_filter: Callable[[Operation], bool] | None = None,
         replace_filter: Callable[[Circuit, Operation], bool] | None = None,
         batch_size: int | None = None,
+        blocks_to_run: List[int] = None,
     ) -> None:
         """
         Construct a ForEachBlockPass.
@@ -82,6 +83,7 @@ class ForEachBlockPass(BasePass):
         self.collection_filter = collection_filter or default_collection_filter
         self.replace_filter = replace_filter or default_replace_filter
         self.workflow = Workflow(loop_body)
+        self.blocks_to_run = blocks_to_run
 
         if not callable(self.collection_filter):
             raise TypeError(
@@ -103,9 +105,13 @@ class ForEachBlockPass(BasePass):
 
         # Collect blocks
         blocks: list[tuple[int, Operation]] = []
-        for cycle, op in circuit.operations_with_cycles():
+        for i, (cycle, op) in enumerate(circuit.operations_with_cycles()):
             if self.collection_filter(op):
-                blocks.append((cycle, op))
+                if self.blocks_to_run:
+                    if i in self.blocks_to_run:
+                        blocks.append((cycle, op))
+                else:
+                    blocks.append((cycle, op))
 
         # No blocks, no work
         if len(blocks) == 0:
