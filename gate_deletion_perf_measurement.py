@@ -54,6 +54,8 @@ diff_tol_step = run_params.diff_tol_step
 beta = run_params.beta
 
 blocks_to_run = run_params.blocks_to_run if len(run_params.blocks_to_run) > 0 else None
+if blocks_to_run:
+     blocks_to_run = [int(x) for x in blocks_to_run]
 perform_while = run_params.perform_while
 
 print(f"Will compile {file_path}")
@@ -121,6 +123,8 @@ if perform_while:
             GateCountPredicate(CXGate()),
             operations_to_perfrom_on_block),
         ]     
+
+print(blocks_to_run)
 
 passes =         [
         RestoreIntermediatePass(checkpoint_proj_dir, as_circuit_gate=True),

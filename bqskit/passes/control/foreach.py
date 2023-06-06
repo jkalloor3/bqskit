@@ -40,7 +40,7 @@ class ForEachBlockPass(BasePass):
         collection_filter: Callable[[Operation], bool] | None = None,
         replace_filter: Callable[[Circuit, Operation], bool] | None = None,
         batch_size: int | None = None,
-        blocks_to_run: List[int] = None,
+        blocks_to_run: List[int] = [],
     ) -> None:
         """
         Construct a ForEachBlockPass.
@@ -83,8 +83,7 @@ class ForEachBlockPass(BasePass):
         self.collection_filter = collection_filter or default_collection_filter
         self.replace_filter = replace_filter or default_replace_filter
         self.workflow = Workflow(loop_body)
-        self.blocks_to_run = blocks_to_run
-
+        self.blocks_to_run = sorted(blocks_to_run)
         if not callable(self.collection_filter):
             raise TypeError(
                 'Expected callable method that maps Operations to booleans for'
@@ -105,12 +104,16 @@ class ForEachBlockPass(BasePass):
 
         # Collect blocks
         blocks: list[tuple[int, Operation]] = []
+        if (len(self.blocks_to_run) == 0):
+            # TODO: This is buggy, need to fix to work with collection filter
+            self.blocks_to_run = list(range(circuit.num_operations))
+
+        block_ids = self.blocks_to_run.copy()
+        next_id = block_ids.pop(0)
         for i, (cycle, op) in enumerate(circuit.operations_with_cycles()):
-            if self.collection_filter(op):
-                if self.blocks_to_run:
-                    if i in self.blocks_to_run:
-                        blocks.append((cycle, op))
-                else:
+            if self.collection_filter(op) and i == next_id:
+                    if len(block_ids) > 0:
+                        next_id = block_ids.pop(0)
                     blocks.append((cycle, op))
 
         # No blocks, no work
@@ -150,7 +153,7 @@ class ForEachBlockPass(BasePass):
             block_data['model'] = submodel
             block_data['point'] = CircuitPoint(cycle, op.location[0])
             block_data['calculate_error_bound'] = self.calculate_error_bound
-            block_data['block_num'] = i
+            block_data['block_num'] = self.blocks_to_run[i]
 
             subcircuits.append(subcircuit)
             block_datas.append(block_data)
