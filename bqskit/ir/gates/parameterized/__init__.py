@@ -1,6 +1,7 @@
 """This package contains parameterized gates."""
 from __future__ import annotations
 
+from bqskit.ir.gates.parameterized.ccp import CCPGate
 from bqskit.ir.gates.parameterized.cp import CPGate
 from bqskit.ir.gates.parameterized.crx import CRXGate
 from bqskit.ir.gates.parameterized.cry import CRYGate
@@ -26,6 +27,7 @@ from bqskit.ir.gates.parameterized.unitary import VariableUnitaryGate
 from bqskit.ir.gates.parameterized.unitary_acc import VariableUnitaryGateAcc
 
 __all__ = [
+    'CCPGate',
     'CPGate',
     'CRXGate',
     'CRYGate',

@@ -27,8 +27,8 @@ class BasePass(abc.ABC):
 
     Examples:
         >>> class PrintCNOTCountPass(BasePass):
-        ...     def run(self, circ: Circuit, }one:
-        ...         print(f"Number of CNOTs: {circ.count(CNOTGate())}")
+        ...     async def run(self, circuit: Circuit, data: PassData) -> None:
+        ...         print(f"Number of CNOTs: {circuit.count(CNOTGate())}")
     """
 
     @property

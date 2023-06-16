@@ -238,6 +238,17 @@ class Circuit(DifferentiableUnitary, StateVectorMap, Collection[Operation]):
         return set(self._gate_info.keys())
 
     @property
+    def gate_set_no_blocks(self) -> set[Gate]:
+        """The set of gates in the circuit, recurses into circuit gates."""
+        gates = set()
+        for g, _ in self._gate_info.items():
+            if isinstance(g, CircuitGate):
+                gates.update(g._circuit.gate_set)
+            else:
+                gates.add(g)
+        return gates
+
+    @property
     def gate_counts(self) -> dict[Gate, int]:
         """The count of each type of gate in the circuit."""
         return {gate: self.count(gate) for gate in self.gate_set}
@@ -2369,14 +2380,14 @@ class Circuit(DifferentiableUnitary, StateVectorMap, Collection[Operation]):
                 f'Expected a circuit point iterable, got {type(points)}.',
             )
 
-        ops: set[tuple[int, Operation]] = set()
+        ops: list[tuple[int, Operation]] = list()
         for point in points:
             try:
-                ops.add((point[0], self.get_operation(point)))
+                ops.append((point[0], self.get_operation(point)))
             except IndexError:
                 continue
 
-        return [op_and_cycle[1] for op_and_cycle in ops]
+        return [op_and_cycle[1] for op_and_cycle in list(dict.fromkeys(ops))]
 
     def get_slice(self, points: Sequence[CircuitPointLike]) -> Circuit:
         """Return a copy of a slice of this circuit."""
@@ -2535,10 +2546,48 @@ class Circuit(DifferentiableUnitary, StateVectorMap, Collection[Operation]):
 
         return utry.get_unitary()
 
-    def get_statevector(self, in_state: StateLike) -> StateVector:
-        """Calculate the output state given the `in_state` input state."""
-        # TODO: Can be made a lot more efficient.
-        return self.get_unitary().get_statevector(in_state)
+    def get_statevector(
+        self,
+        in_state: StateLike,
+        params: RealVector = [],
+    ) -> StateVector:
+        """
+        Return the result of applying `self` to `in_state`
+
+        Args:
+            params (RealVector): Optionally specify parameters
+                overriding the ones stored in the circuit. (Default:
+                use parameters already in circuit.)
+
+        Returns:
+            The StateVector object for the new state after the circuit
+
+        Raises:
+            ValueError: If parameters are specified and invalid.
+
+        Examples:
+            >>> circ = Circuit(1)
+            >>> op = Operation(H(), [0])
+            >>> circ.append(op)
+            >>> V = StateVector([1,0])
+            >>> circ.get_statevector(V).numpy == np.array([1,1])/np.sqrt(2)
+            True
+        """
+        if len(params) != 0:
+            self.check_parameters(params)
+            param_index = 0
+
+        new_state = StateVector(in_state)
+
+        for op in self:
+            if len(params) != 0:
+                gparams = params[param_index:param_index + op.num_params]
+                new_state.apply(op.get_unitary(gparams), op.location)
+                param_index += op.num_params
+            else:
+                new_state.apply(op.get_unitary(), op.location)
+
+        return new_state
 
     def get_grad(self, params: RealVector = []) -> npt.NDArray[np.complex128]:
         """Return the gradient of the circuit."""
@@ -2762,7 +2811,8 @@ class Circuit(DifferentiableUnitary, StateVectorMap, Collection[Operation]):
         instantiater = cast(Instantiater, instantiater)
 
         # Instantiate
-        return instantiater.multi_start_instantiate(self, target, multistarts)
+        instantiater.multi_start_instantiate_inplace(self, target, multistarts)
+        return self
 
     def minimize(self, cost: CostFunction, **kwargs: Any) -> None:
         """

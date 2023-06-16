@@ -57,6 +57,7 @@ def compile(
     error_threshold: float | None = None,
     error_sim_size: int = 8,
     compiler: Compiler | None = None,
+    seed: int | None = None,
     *compiler_args: Any,
     **compiler_kwargs: Any,
 ) -> Circuit:
@@ -102,6 +103,9 @@ def compile(
         compiler (Compiler | None): Pass a :class:`Compiler` to prevent
             creating one. Save on startup time by passing a compiler in
             when calling `compile` multiple times. (Default: None)
+
+        seed (int | None): Set a seed for the compile function for
+            better reproducibility. If left as None, will not set seed.
 
         compiler_args (Any): Passed directly to BQSKit compiler construction.
             Arguments for connecting to a cluster can go here.
@@ -263,6 +267,10 @@ def compile(
             f'maximum synthesis size: {error_sim_size} < {max_synthesis_size}.',
         )
 
+    # Check `seed`
+    if seed is not None and not is_integer(seed):
+        raise TypeError(f'Expected integer for seed, got {type(seed)}.')
+
     # Build workflow
     if isinstance(input, Circuit):
         if input.num_qudits > max_synthesis_size:
@@ -284,6 +292,7 @@ def compile(
             max_synthesis_size,
             error_threshold,
             error_sim_size,
+            seed,
         )
 
     elif isinstance(input, UnitaryMatrix):
@@ -303,6 +312,7 @@ def compile(
             max_synthesis_size,
             error_threshold,
             error_sim_size,
+            seed,
         )
 
     elif isinstance(input, StateVector):
@@ -322,6 +332,7 @@ def compile(
             max_synthesis_size,
             error_threshold,
             error_sim_size,
+            seed,
         )
 
     elif isinstance(input, StateSystem):
@@ -341,6 +352,7 @@ def compile(
             max_synthesis_size,
             error_threshold,
             error_sim_size,
+            seed,
         )
 
     # Connect to or construct a Compiler
@@ -390,6 +402,7 @@ def _circuit_workflow(
     max_synthesis_size: int = 4,
     error_threshold: float | None = None,
     error_sim_size: int = 8,
+    seed: int | None = None,
 ) -> CompilationTask:
     """Build standard workflow for circuit compilation."""
     workflow_builders = [
@@ -399,7 +412,8 @@ def _circuit_workflow(
         _opt4_workflow,
     ]
     workflow_builder = workflow_builders[optimization_level - 1]
-    workflow = [UnfoldPass(), ExtractMeasurements()]
+    workflow: list[BasePass] = [] if seed is None else [SetRandomSeedPass(seed)]
+    workflow += [UnfoldPass(), ExtractMeasurements()]
     workflow += workflow_builder(
         circuit,
         model,
@@ -443,7 +457,7 @@ def _opt1_workflow(
             if g.num_qudits != 1
         )
         non_native_gates = [
-            g for g in circuit.gate_set
+            g for g in circuit.gate_set_no_blocks
             if g not in model.gate_set
         ]
         non_native_tq_gates = [
@@ -454,7 +468,7 @@ def _opt1_workflow(
             non_native_tq_gates.append(SwapGate(model.radixes[0]))
         native_tq_gates = [g for g in model.gate_set if g.num_qudits == 2]
 
-        all_gates = model.gate_set.union(circuit.gate_set)
+        all_gates = model.gate_set.union(circuit.gate_set_no_blocks)
         if any(g.num_qudits > 2 for g in all_gates):
             multi_qudit_gate_rebase: BasePass = direct_synthesis
         else:
@@ -580,7 +594,7 @@ def _opt2_workflow(
             if g.num_qudits != 1
         )
         non_native_gates = [
-            g for g in circuit.gate_set
+            g for g in circuit.gate_set_no_blocks
             if g not in model.gate_set
         ]
         non_native_tq_gates = [
@@ -591,7 +605,7 @@ def _opt2_workflow(
             non_native_tq_gates.append(SwapGate(model.radixes[0]))
         native_tq_gates = [g for g in model.gate_set if g.num_qudits == 2]
 
-        all_gates = model.gate_set.union(circuit.gate_set)
+        all_gates = model.gate_set.union(circuit.gate_set_no_blocks)
         if any(g.num_qudits > 2 for g in all_gates):
             multi_qudit_gate_rebase: BasePass = direct_synthesis
         else:
@@ -733,7 +747,7 @@ def _opt3_workflow(
             if g.num_qudits != 1
         )
         non_native_gates = [
-            g for g in circuit.gate_set
+            g for g in circuit.gate_set_no_blocks
             if g not in model.gate_set
         ]
         non_native_tq_gates = [
@@ -745,7 +759,7 @@ def _opt3_workflow(
         native_tq_gates = [g for g in model.gate_set if g.num_qudits == 2]
         native_mq_gates = [g for g in model.gate_set if g.num_qudits >= 2]
 
-        all_gates = model.gate_set.union(circuit.gate_set)
+        all_gates = model.gate_set.union(circuit.gate_set_no_blocks)
         if any(g.num_qudits > 2 for g in all_gates):
             multi_qudit_gate_rebase: BasePass = direct_synthesis
         else:
@@ -897,6 +911,7 @@ def _stateprep_workflow(
     max_synthesis_size: int = 4,
     error_threshold: float | None = None,
     error_sim_size: int = 8,
+    seed: int | None = None,
 ) -> CompilationTask:
     """Build a workflow for state preparation."""
     circuit = Circuit(1)
@@ -966,7 +981,8 @@ def _stateprep_workflow(
         cost=HilbertSchmidtCostGenerator(),
     )
 
-    workflow = [
+    workflow: list[BasePass] = [] if seed is None else [SetRandomSeedPass(seed)]
+    workflow += [
         SetModelPass(model),
         SetTargetPass(state),
         synthesis,
@@ -984,6 +1000,7 @@ def _statemap_workflow(
     max_synthesis_size: int = 4,
     error_threshold: float | None = None,
     error_sim_size: int = 8,
+    seed: int | None = None,
 ) -> CompilationTask:
     """Build a workflow for state preparation."""
     circuit = Circuit(1)
@@ -1050,7 +1067,8 @@ def _statemap_workflow(
         instantiate_options=inst_ops,
     )
 
-    workflow = [
+    workflow: list[BasePass] = [] if seed is None else [SetRandomSeedPass(seed)]
+    workflow += [
         SetModelPass(model),
         SetTargetPass(state),
         synthesis,
