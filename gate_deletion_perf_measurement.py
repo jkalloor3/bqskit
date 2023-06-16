@@ -53,6 +53,8 @@ diff_tol_step_r = run_params.diff_tol_step_r
 diff_tol_step = run_params.diff_tol_step
 beta = run_params.beta
 
+partition_size = run_params.partitions_size
+
 blocks_to_run = run_params.blocks_to_run if len(run_params.blocks_to_run) > 0 else None
 if blocks_to_run:
      blocks_to_run = [int(x) for x in blocks_to_run]
@@ -104,7 +106,10 @@ orig_circuit = Circuit.from_file(file_path)
 
 in_circuit = Circuit(orig_circuit.num_qudits)
 
-checkpoint_proj_dir = join(CHECKPOINT_DIR, file_name.split(".")[0])
+
+proj_name = file_name.split(".")[0]
+
+checkpoint_proj_dir = join(CHECKPOINT_DIR, f"{proj_name}_{partition_size}")
 
 print(checkpoint_proj_dir)
 

@@ -66,7 +66,6 @@ sleep 2
 
 """
 
-
 attached_runtime_header="""#!/bin/bash
 #SBATCH --job-name=syn{i}_{cir_name}_{instantiator}_attached_runtime
 #SBATCH -A m4141_g
@@ -97,6 +96,48 @@ nvidia-cuda-mps-control -d
 echo "will run {env_vars} python  ./{python_file}  --diff_tol_a 0 {command_args} "
 
 {env_vars} python  ./{python_file}  --diff_tol_a 0 {command_args}
+
+sleep 1
+echo "Trying to stop MPS on all nodes"
+echo quit | nvidia-cuda-mps-control
+
+# {amount_of_workers_per_gpu}
+
+"""
+
+attached_runtime_header_loop="""#!/bin/bash
+#SBATCH --job-name=syn{i}_{cir_name}_{instantiator}_attached_runtime
+#SBATCH -A m4141_g
+#SBATCH -C gpu
+#SBATCH -q regular
+#SBATCH -t 11:55:00
+#SBATCH -n {nodes}
+#SBATCH --mem=0
+#SBATCH --ntasks-per-node=1
+#SBATCH --gpus-per-task={amount_of_gpus_per_node}
+#SBATCH --output=./logs_tol_a_0/{cir_name}_{partitions_size}p_{instantiator}_attached_runtime_{nodes}_nodes_{num_multistarts}_starts-%j.txt
+
+
+
+#alon --output=./logs_qfactor_jax_new_termination_cond/{cir_name}_{partitions_size}p_{instantiator}_attached_runtime_{nodes}_nodes_{num_multistarts}_starts-%j.txt
+
+date
+uname -a
+module load python
+conda activate my_env
+# conda activate dev_env
+
+module load nvidia
+
+echo "starting MPS server on node"
+nvidia-cuda-mps-control -d
+
+echo "will run {env_vars} python  ./{python_file}  --diff_tol_a 0 {command_args} "
+
+{env_vars} timeout 11.15h python  ./{python_file}  --diff_tol_a 0 {command_args}
+if [[ $? == 124 ]]; then 
+  scontrol requeue $SLURM_JOB_ID
+fi
 
 sleep 1
 echo "Trying to stop MPS on all nodes"

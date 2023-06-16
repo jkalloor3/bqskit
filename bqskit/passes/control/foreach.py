@@ -112,9 +112,9 @@ class ForEachBlockPass(BasePass):
         next_id = block_ids.pop(0)
         for i, (cycle, op) in enumerate(circuit.operations_with_cycles()):
             if self.collection_filter(op) and i == next_id:
-                    if len(block_ids) > 0:
-                        next_id = block_ids.pop(0)
-                    blocks.append((cycle, op))
+                if len(block_ids) > 0:
+                    next_id = block_ids.pop(0)
+                blocks.append((cycle, op))
 
         # No blocks, no work
         if len(blocks) == 0:

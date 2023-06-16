@@ -39,11 +39,9 @@ file_dir_name = file_name.split(".")[0]
 
 in_circuit = Circuit.from_file(file_path)
 
-checkpoint_proj_dir = join(CHECKPOINT_DIR, file_name.split(".")[0])
-
 passes =         [
         QuickPartitioner(partition_size),
-        SaveIntermediatePass(CHECKPOINT_DIR, file_dir_name, save_as_qasm=False)
+        SaveIntermediatePass(CHECKPOINT_DIR, f"{file_dir_name}_{partition_size}", save_as_qasm=False)
         ]
 
 
