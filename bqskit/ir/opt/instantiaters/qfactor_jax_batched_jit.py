@@ -96,6 +96,7 @@ class QFactor_jax_batched_jit(Instantiater):
             return circuit
 
         in_c = circuit
+        ret_c = circuit.copy()
         circuit = circuit.copy()
 
         # A very ugly casting
@@ -184,9 +185,110 @@ class QFactor_jax_batched_jit(Instantiater):
                     _remove_padding_and_create_matrix(untry, gate),
                 ),
             )
-        in_c.set_params(np.array(params))
+        ret_c.set_params(np.array(params))
 
-        return in_c
+        return ret_c
+
+    def multi_start_instantiate_inplace(
+            self,
+            circuit: Circuit,
+            target: UnitaryLike | StateLike | StateSystemLike,
+            num_starts: int,
+        ) -> None:
+            if len(circuit) == 0:
+                return circuit
+
+            in_c = circuit
+            circuit = circuit.copy()
+
+            # A very ugly casting
+            for op in circuit:
+                g = op.gate
+                if isinstance(g, VariableUnitaryGate):
+                    g.__class__ = VariableUnitaryGateAcc
+
+            """Instantiate `circuit`, see Instantiater for more info."""
+            target = UnitaryMatrixJax(self.check_target(target))
+            locations = tuple([op.location for op in circuit])
+            gates = tuple([op.gate for op in circuit])
+            biggest_gate_size = max(gate.num_qudits for gate in gates)
+
+            untrys = []
+
+            for gate in gates:
+                size_of_untry = 2**gate.num_qudits
+
+                if isinstance(gate, VariableUnitaryGateAcc):
+                    pre_padding_untrys = [
+                        unitary_group.rvs(size_of_untry) for
+                        _ in range(num_starts)
+                    ]
+                else:
+                    pre_padding_untrys = [
+                        gate.get_unitary().numpy for
+                        _ in range(num_starts)
+                    ]
+
+                untrys.append([
+                    _apply_padding_and_flatten(
+                        pre_padd, gate, biggest_gate_size,
+                    ) for pre_padd in pre_padding_untrys
+                ])
+
+            untrys = jnp.array(np.stack(untrys, axis=1))
+            res_var = _sweep2_jited(
+                target, locations, gates, untrys, self.n, self.dist_tol,
+                self.diff_tol_a, self.diff_tol_r, self.plateau_windows_size,
+                self.max_iters, self.min_iters, num_starts, self.diff_tol_step_r, self.diff_tol_step, self.beta
+            )
+            
+            it = res_var['iteration_counts'][0]
+            c1s = res_var['c1s']
+            untrys = res_var['untrys']
+            best_start = jnp.argmin(jnp.abs(c1s))
+
+            if any(res_var['curr_reached_required_tol_l']):
+                _logger.debug(
+                    f'Terminated: {it} c1 = {c1s} <= dist_tol.\n'
+                    f'Best start is {best_start}',
+                )
+            elif all(res_var['curr_plateau_calc_l']):
+                _logger.debug(
+                    'Terminated: |c1 - c2| = '
+                    ' <= diff_tol_a + diff_tol_r * |c1|.',
+                )
+
+                _logger.debug(
+                    f'Terminated: {it} c1 = {c1s} Reached plateuo.\n'
+                    f'Best start is {best_start}',
+                )
+            elif all(res_var['curr_step_calc_l']):
+                _logger.debug(
+                    'Terminated: |prev_step_c1| - |c1| '
+                    ' <= diff_tol_step_r * |prev_step_c1|.',
+                )
+                _logger.debug(
+                    f'Terminated: {it} c1 = {c1s} Reached plateuo.\n'
+                    f'Best start is {best_start}',
+                )
+
+            elif it >= self.max_iters:
+                _logger.debug('Terminated: iteration limit reached.')
+                
+            else:
+                _logger.error(
+                    f'Terminated with no good reason after {it} iterstion '
+                    f'with c1s {c1s}.',
+                )
+            params = []
+            for untry, gate in zip(untrys[best_start], gates):
+                params.extend(
+                    gate.get_params(
+                        _remove_padding_and_create_matrix(untry, gate),
+                    ),
+                )
+
+            in_c.set_params(np.array(params))
 
     @staticmethod
     def get_method_name() -> str:

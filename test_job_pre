@@ -1,0 +1,24 @@
+#!/bin/bash
+#SBATCH --job-name=syn_QFACTOR_JAX_attached_runtime
+#SBATCH -A m4141
+#SBATCH -C cpu
+#SBATCH -q regular
+#SBATCH -t 00:30:00
+#SBATCH -n 1
+#SBATCH --mem=0
+#SBATCH --ntasks-per-node=1
+#SBATCH --output=./slurm_outputs/adder63_pre.txt
+
+
+date
+uname -a
+module load python
+source activate jax310
+
+echo "will run python ./gate_deletion_preproccesing.py  --diff_tol_a 0 --partitions_size 4w4
+"
+python ./gate_deletion_preproccesing.py  --diff_tol_a 0 --partitions_size 7 --input_qasm qce23_qfactor_benchmarks/adder63.qasm --instantiator QFACTOR-RUST
+
+sleep 1
+
+# {amount_of_workers_per_gpu}

@@ -89,6 +89,7 @@ class SaveIntermediatePass(BasePass):
         # NOTE: Block numbers are gotten by iterating through the circuit so
         # there is no guarantee that the blocks were partitioned in that order.
         for enum, block in blocks_to_save:
+            enum = str(enum).zfill(num_digits)  # type: ignore
             structure_list.append(block.location)  # type: ignore
             subcircuit = Circuit(block.num_qudits)
             subcircuit.append_gate(
@@ -165,6 +166,7 @@ class RestoreIntermediatePass(BasePass):
             `structure.pickle`.
         """
         files = sorted(listdir(self.proj_dir))
+        print(files)
         self.block_list = [f for f in files if 'block_' in f]
         self.block_list = [f for f in self.block_list if ".pickle" in f]
         if len(self.block_list) > len(self.structure):

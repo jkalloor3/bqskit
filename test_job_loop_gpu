@@ -1,0 +1,46 @@
+#!/bin/bash
+#SBATCH -q preempt
+#SBATCH -A m4141_g
+#SBATCH -C gpu
+#SBATCH --time=24:00:00
+#SBATCH -N 1
+#SBATCH --mem=0
+#SBATCH --requeue
+#SBATCH --comment=96:00:00  #desired time limit
+#SBATCH --signal=B:USR1@1  #sig_time (1 second) should match your checkpoint overhead time
+#SBATCH --job-name=syn6_qae13_QFACTOR-RUST_attached_runtime
+#SBATCH --output=./slurm_outputs/adder63__7_perf_gpu_5.txt
+#SBATCH --open-mode=append
+
+date
+uname -a
+module load nvidia
+module load python
+
+conda activate /global/common/software/m4141/justin_env_2
+# conda activate dev_env
+
+echo "starting MPS server on node"
+nvidia-cuda-mps-control -d
+
+echo "will run  TF_CPP_MIN_LOG_LEVEL=0 XLA_PYTHON_CLIENT_PREALLOCATE=false CUDA_VISIBLE_DEVICES=0 python  ./gate_deletion_perf_measurement.py  --diff_tol_a 0 --input_qasm qae13.qasm --multistarts 32 --partitions_size 8 --print_amount_of_nodes 1 --instantiator QFACTOR-JAX --amount_of_workers 6 --amount_gpus_per_node 1 "
+
+echo $SLURM_JOB_ID
+TF_CPP_MIN_LOG_LEVEL=0 XLA_PYTHON_CLIENT_PREALLOCATE=false CUDA_VISIBLE_DEVICES=0 python ./gate_deletion_perf_measurement.py  --diff_tol_a 0 --partitions_size 7 --print_amount_of_nodes 1 --multistarts 32 --input_qasm qce23_qfactor_benchmarks/adder63.qasm --instantiator QFACTOR-JAX --blocks_to_run 54 55 56 57 --amount_of_workers 6 --amount_gpus_per_node 1
+
+
+# XLA_PYTHON_CLIENT_MEM_FRACTION=.20
+# XLA_PYTHON_CLIENT_PREALLOCATE=false
+# if [[ $? == 124 ]]; then 
+#     echo "Running from Checkpoint"
+#     scontrol requeue $SLURM_JOB_ID
+# fi
+
+sleep 1
+echo "Trying to stop MPS on all nodes"
+echo quit | nvidia-cuda-mps-control
+
+sleep 1
+
+
+# {amount_of_workers_per_gpu}

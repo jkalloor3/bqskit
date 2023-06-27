@@ -100,7 +100,7 @@ class ScanningGateRemovalPass(BasePass):
         }
         self.instantiate_options.update(instantiate_options)
         self.checkpoint_proj = checkpoint_proj
-        print("CHECKPOINT DIR", self.checkpoint_proj)
+        _logger.debug("CHECKPOINT DIR", self.checkpoint_proj)
         if (self.checkpoint_proj and not exists(self.checkpoint_proj)):
             mkdir(self.checkpoint_proj)
 
@@ -124,8 +124,10 @@ class ScanningGateRemovalPass(BasePass):
 
         # Things needed for saving data
         if self.checkpoint_proj:
-            print("Checkpointing!")
             save_num = data.get("block_num", 0)
+            num_digits = data.get("num_digits", 1)
+            save_num = str(save_num).zfill(num_digits)
+            _logger.debug(f"Checkpointing block {save_num}!")
             save_data_file = join(self.checkpoint_proj, f"block_{save_num}.data")
             save_circuit_file = join(self.checkpoint_proj, f"block_{save_num}.pickle")
             if exists(save_data_file):
@@ -135,16 +137,20 @@ class ScanningGateRemovalPass(BasePass):
                     data.update(new_data)
                 with open(save_circuit_file, "rb") as cf:
                     circuit_copy = pickle.load(cf)
-                start_ind = min(data.get("ind", 0), len(all_ops) - 1)
-                all_ops = all_ops[start_ind:]
-                print("starting at ", start_ind)
+                start_ind = data.get("ind", 0)
+                if start_ind >= len(all_ops):
+                    all_ops = []
+                    _logger.debug("Block is already finished!")
+                else:
+                    all_ops = all_ops[start_ind:]
+                    _logger.debug("starting at ", start_ind)
             else:
                 # Initial checkpoint
                 with open(save_data_file, "wb") as df:
                     data["ind"] = 0
                     pickle.dump(data, df)
                 with open(save_circuit_file, "wb") as cf:
-                        pickle.dump(circuit_copy, cf)
+                    pickle.dump(circuit_copy, cf)
 
 
         for i, (cycle, op) in enumerate(all_ops):

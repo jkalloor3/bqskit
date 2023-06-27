@@ -9,6 +9,9 @@ from bqskit.ir.opt.minimizers.lbfgs import LBFGSMinimizer
 from bqskit.passes import *
 from os.path import join
 
+import logging
+_logger = logging.getLogger(__name__)
+
 
 
 import jax
@@ -19,7 +22,7 @@ jax.config.update('jax_enable_x64', True)
 from bqskit import enable_logging, enable_dashboard
 
 
-# enable_logging(True)
+enable_logging(True)
 import params
 
 CHECKPOINT_DIR = "checkpoints"
@@ -60,7 +63,7 @@ if blocks_to_run:
      blocks_to_run = [int(x) for x in blocks_to_run]
 perform_while = run_params.perform_while
 
-print(f"Will compile {file_path}")
+_logger.debug(f"Will compile {file_path}")
 
 batched_instantiation = QFactor_jax_batched_jit(diff_tol_r=diff_tol_r, diff_tol_a=diff_tol_a, min_iters=min_iters, max_iters=max_iters, dist_tol=dist_tol, diff_tol_step_r=diff_tol_step_r, diff_tol_step = diff_tol_step, beta=beta)
 
@@ -129,7 +132,7 @@ if perform_while:
             operations_to_perfrom_on_block),
         ]     
 
-print(blocks_to_run)
+_logger.info(blocks_to_run)
 
 passes =         [
         RestoreIntermediatePass(checkpoint_proj_dir, as_circuit_gate=True),
@@ -143,14 +146,14 @@ if not use_detached:
 else:
     compiler = Compiler(detached_server_ip, detached_server_port)
 
-print(f"Starting {instantiator}")
+_logger.info(f"Starting {instantiator}")
 start = timer()
 
 out_circuit = compiler.compile(task)
 
 end = timer()
 run_time = end - start
-print(
+_logger.info(
     f"Partitioning + Synthesis took {run_time}"
     f"seconds using the { instantiator } instantiation method."
 )

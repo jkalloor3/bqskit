@@ -33,13 +33,13 @@ print(run_params)
 
 file_path = run_params.input_qasm
 file_name = file_path.split("/")[-1]
-file_dir_name = file_name.split(".")[0]
+file_dir_name = file_name.split(".")[0] + f"_{partition_size}"
 
 
 orig_circuit = Circuit.from_file(file_path)
 in_circuit = Circuit(orig_circuit.num_qudits)
 
-checkpoint_proj_dir = join(CHECKPOINT_DIR, file_name.split(".")[0])
+checkpoint_proj_dir = join(CHECKPOINT_DIR, file_dir_name)
 
 passes =         [
         RestoreIntermediatePass(checkpoint_proj_dir, as_circuit_gate=True),

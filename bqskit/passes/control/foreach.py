@@ -113,6 +113,7 @@ class ForEachBlockPass(BasePass):
 
         block_ids = self.blocks_to_run.copy()
         next_id = block_ids.pop(0)
+        num_digits = len(str(circuit.num_operations))
         for i, (cycle, op) in enumerate(circuit.operations_with_cycles()):
             if self.collection_filter(op) and i == next_id:
                 if len(block_ids) > 0:
@@ -132,7 +133,6 @@ class ForEachBlockPass(BasePass):
         subcircuits: list[Circuit] = []
         block_datas: list[PassData] = []
         for i, (cycle, op) in enumerate(blocks):
-
             # Form Subcircuit
             if isinstance(op.gate, CircuitGate):
                 subcircuit = op.gate._circuit.copy()
@@ -157,6 +157,7 @@ class ForEachBlockPass(BasePass):
             block_data['point'] = CircuitPoint(cycle, op.location[0])
             block_data['calculate_error_bound'] = self.calculate_error_bound
             block_data['block_num'] = self.blocks_to_run[i]
+            block_data["num_digits"] = num_digits
             for key in data:
                 if key.startswith(self.pass_down_key_prefix):
                     block_data[key] = data[key]
