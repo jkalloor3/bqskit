@@ -8,7 +8,7 @@ circuit = "adder63"
 compiler = "QFACTOR-JAX"
 log_dir = "logs_tol_a_0"
 checkpoint_dir = "checkpoints"
-GMT_tz = pytz.timezone("Etc/GMT-1:00")
+GMT_tz = pytz.timezone("Etc/GMT")
 
 failure_dict = {"Preempted": [], "Nvidia failure": set(), "other": set()}
 
@@ -84,8 +84,8 @@ if __name__ == '__main__':
     # print(num_blocks)
     # for i in failure_dict:
     #     failure_dict[i] = sorted(failure_dict[i].intersection(blocks_left))
-    print(failure_dict)
+    # print(failure_dict)
 
-    # print(len(blocks_left))
+    print(len(blocks_left))
     # print(len(failure_dict["Preempted"]))
     # print(len(failure_dict["Nvidia failure"]))

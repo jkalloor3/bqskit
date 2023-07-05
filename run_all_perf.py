@@ -168,7 +168,7 @@ def create_and_run_a_job(cir_path, partitions_size, python_file,
         str_group = [str(x) for x in group]
         group_str = " ".join(str_group)
         group_name = "_".join(str_group)
-        print(cir_name, group_str)
+        print(cir_name, group_str, group_name)
         block_args = f' --blocks_to_run {group_str}'
         to_write = open(file_name, 'w')
         to_write.write(header_to_use.format(i=global_i,
@@ -227,7 +227,7 @@ if __name__ == '__main__':
     # instantiators = ['CERES', 'LBFGS']
     # instantiators = ['LBFGS']
 
-    partisions_size_l = [8]
+    partisions_size_l = [9]
     #partisions_size_l = [3,4,5,6,7,8]
     # partisions_size_l = [3,4,5,6,7,8, 9,11,12]
     # partisions_size_l = [5, 6, 7,8, 9]
