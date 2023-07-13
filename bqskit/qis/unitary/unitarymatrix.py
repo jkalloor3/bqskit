@@ -10,7 +10,7 @@ from typing import Union
 import numpy as np
 import numpy.typing as npt
 import scipy as sp
-from scipy.stats import unitary_group
+from scipy.stats import unitary_group, entropy
 
 from bqskit.qis.state.state import StateLike
 from bqskit.qis.state.state import StateVector
@@ -139,11 +139,17 @@ class UnitaryMatrix(Unitary, StateVectorMap, NDArrayOperatorsMixin):
     def dtype(self) -> np.typing.DTypeLike:
         """The NumPy data type of the unitary."""
         return self._utry.dtype
-
+  
     @property
     def T(self) -> UnitaryMatrix:
         """The transpose of the unitary."""
         return UnitaryMatrix(self._utry.T, self.radixes, False)
+
+
+    @property
+    def schmidt_coefficients(self) -> np.ndarray:
+        _, D , _ = np.linalg.svd(self._utry)
+        return np.square(D)
 
     @property
     def dagger(self) -> UnitaryMatrix:
@@ -183,6 +189,36 @@ class UnitaryMatrix(Unitary, StateVectorMap, NDArrayOperatorsMixin):
             radixes_acm += utry.radixes
 
         return UnitaryMatrix(utry_acm, radixes_acm)
+
+    def entanglement_entropy(self) -> float:
+        '''
+        Calculate the Schmidt strength of unitary matrix.
+        This is the Shannon entropy of the Schmidt 
+        coefficients.
+        '''
+        coefs = self.schmidt_coefficients
+        N = self.shape[0]
+        coefs_prob = coefs / N
+        return entropy(coefs_prob)
+    
+    def vn_ent_entropy(self) -> float:
+        '''
+        Calculate the Von Nuemann entropy of the Unitary when applied to the 
+        ground state |0>^n
+        '''
+        # Get final
+        max_entropy = 0
+        N = self.shape[0]
+        for i in range(N):
+            final_state = self._utry[:, i]
+            density_matrix = np.outer(final_state, final_state)
+            _, D, _ = np.linalg.svd(density_matrix)
+            coefs = np.square(np.abs(D)) / N
+            entrop = entropy(coefs)
+            print(coefs)
+            print(entrop)
+            max_entropy = max(entrop, max_entropy)
+        return max_entropy
 
     def get_unitary(self, params: RealVector = []) -> UnitaryMatrix:
         """Return the same object, satisfies the :class:`Unitary` API."""

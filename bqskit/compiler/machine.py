@@ -16,6 +16,8 @@ from bqskit.qis.graph import CouplingGraphLike
 from bqskit.utils.typing import is_integer
 from bqskit.utils.typing import is_valid_radixes
 
+import numpy as np
+
 if TYPE_CHECKING:
     from bqskit.ir.circuit import Circuit
 
@@ -29,6 +31,9 @@ default_qutrit_gate_set: set[Gate] = {
     U8Gate(),
 }
 
+DEFAULT_1_QUBIT_LATENCY = 200
+DEFAULT_2_QUBIT_LATENCY = 400
+
 
 class MachineModel:
     """A model of a quantum processing unit."""
@@ -39,6 +44,10 @@ class MachineModel:
         coupling_graph: CouplingGraphLike | None = None,
         gate_set: set[Gate] | None = None,
         radixes: Sequence[int] = [],
+        single_qubit_fidelity: float = 0.999,
+        two_qubit_fidelity: float = 0.99,
+        fidelities: dict[Sequence[int], float] | None = None,
+        gate_latencies: dict[Gate, float] | None = None
     ) -> None:
         """
         MachineModel Constructor.
@@ -59,6 +68,16 @@ class MachineModel:
             radixes (Sequence[int]): A sequence with its length equal
                 to `num_qudits`. Each element specifies the base of a
                 qudit. Defaults to qubits.
+
+            single_qubit_fidelity (float): General single qubit fidelity, will 
+            be overridden by all values in fidelities
+
+            two_qubit_fidelity (float): General 2-qubit fidelity, is also overriden
+            by all values in fidelities
+                
+            fidelieties (dict[Sequence[int], float]): A mapping from qubit -> fidelity or
+            (qubit, qubit) -> 2-qubit gate fidelit for all qubits in the machine. If
+            left as none, will construct from 1-q and 2-q fidelity values
 
         Raises:
             ValueError: If `num_qudits` is nonpositive.
@@ -114,6 +133,27 @@ class MachineModel:
         self.coupling_graph = CouplingGraph(coupling_graph)
         self.num_qudits = num_qudits
 
+        # Construct default fidelities
+        self.fidelities = {}
+        self.single_qubit_fidelity = single_qubit_fidelity
+        self.two_qubit_fidelity = two_qubit_fidelity
+        for q in range(num_qudits):
+            self.fidelities[(q,)] = single_qubit_fidelity
+
+        for edge in coupling_graph:
+            self.fidelities[edge] = two_qubit_fidelity
+
+        # Use user inputted fidelities if not none
+        if fidelities:
+            self.fidelities.update(fidelities)
+
+        if gate_latencies:
+            self.gate_latencies = gate_latencies
+        else:
+            self.gate_latencies = {}
+            for gate in self.gate_set:
+                self.gate_latencies[gate] = 100
+
     def get_locations(self, block_size: int) -> list[CircuitLocation]:
         """Return all `block_size` connected blocks of qudit indicies."""
         return self.coupling_graph.get_subgraphs_of_size(block_size)
@@ -138,3 +178,26 @@ class MachineModel:
             return False
 
         return True
+    
+    def calculate_fidelity(self, circuit: Circuit):
+        fid = 1
+        for op in circuit:
+            if op.gate.name != "barrier":
+                if len(op.location) > 2:
+                    # Just default to two qubit fidelity for now
+                    fid *= self.two_qubit_fidelity
+                else:
+                    fid *= self.fidelities[tuple(sorted(op.location))]
+        return fid
+    
+    def calculate_latency(self, circuit: Circuit):
+        latencies = np.zeros(circuit.num_qudits, dtype=int)
+        for op in circuit:
+            default_latency = DEFAULT_1_QUBIT_LATENCY
+            if len(op.location) == 2:
+                default_latency = DEFAULT_2_QUBIT_LATENCY
+            gate_latency = self.gate_latencies.get(op.gate, default_latency)
+            for qubit in op.location:
+                latencies[qubit] += gate_latency
+
+        return np.max(latencies)

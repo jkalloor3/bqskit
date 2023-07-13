@@ -32,7 +32,7 @@ class IToffoliGate(ConstantGate, QubitGate):
     """
 
     _num_qudits = 3
-    _qasm_name = 'iccx'
+    _qasm_name = 'ccx'
     _utry = UnitaryMatrix(
         [
             [1, 0, 0, 0, 0, 0, 0, 0],

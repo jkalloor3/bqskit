@@ -83,7 +83,11 @@ class ForEachBlockPass(BasePass):
 
         self.calculate_error_bound = calculate_error_bound
         self.collection_filter = collection_filter or default_collection_filter
-        self.replace_filter = replace_filter or default_replace_filter
+        if (replace_filter == "gate"):
+            self.replace_filter = gate_replace_filter
+            _logger.debug("USING GATE FILTER!!")
+        else:
+            self.replace_filter = replace_filter or default_replace_filter
         self.workflow = Workflow(loop_body)
 
         if not callable(self.collection_filter):
@@ -215,6 +219,23 @@ def default_collection_filter(op: Operation) -> bool:
         ),
     )
 
-
 def default_replace_filter(circuit: Circuit, op: Operation) -> bool:
     return True
+
+
+def gate_replace_filter(new: Circuit, old: Operation) -> bool:
+    # return true if old doesn't satisfy model
+    if not isinstance(old.gate, CircuitGate):
+        return True
+
+    org = old.gate._circuit
+
+    # else pick shortest circuit
+    org_sq_n = sum(org.count(g) for g in org.gate_set if g.num_qudits == 1)
+    org_mq_n = sum(org.count(g) for g in org.gate_set if g.num_qudits >= 2)
+    new_sq_n = sum(new.count(g) for g in new.gate_set if g.num_qudits == 1)
+    new_mq_n = sum(new.count(g) for g in new.gate_set if g.num_qudits >= 2)
+
+    _logger.debug(f"Old gate count: {org_mq_n}, New gate count: {new_mq_n}")
+
+    return (new_mq_n, new_sq_n) < (org_mq_n, org_sq_n)
