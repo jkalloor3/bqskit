@@ -40,6 +40,7 @@ BQSKit Gates (:mod:`bqskit.ir.gates`)
     HGate
     IdentityGate
     ISwapGate
+    NRootCNOTGate
     IToffoliGate
     PermutationGate
     SGate
