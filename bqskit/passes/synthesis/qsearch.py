@@ -175,6 +175,9 @@ class QSearchSynthesisPass(SynthesisPass):
             # Generate successors
             successors = self.layer_gen.gen_successors(top_circuit, data)
 
+            if len(successors) == 0:
+                continue
+
             # Instantiate successors
             circuits = await get_runtime().map(
                 Circuit.instantiate,
@@ -194,9 +197,10 @@ class QSearchSynthesisPass(SynthesisPass):
                     return circuit
 
                 if dist < best_dist:
+                    plural = '' if layer == 0 else 's'
                     _logger.debug(
-                        'New best circuit found with %d layer%s and cost: %e.'
-                        % (layer + 1, '' if layer == 0 else 's', dist),
+                        f'New best circuit found with {layer + 1} layer{plural}'
+                        f' and cost: {dist:.12e}.',
                     )
                     best_dist = dist
                     best_circ = circuit

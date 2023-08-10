@@ -10,14 +10,14 @@ from typing import Sequence
 from bqskit.compiler.basepass import BasePass
 from bqskit.compiler.machine import MachineModel
 from bqskit.compiler.passdata import PassData
-from bqskit.ir import Circuit
+from bqskit.ir.circuit import Circuit
 from bqskit.passes.control.foreach import ForEachBlockPass
 from bqskit.qis.graph import CouplingGraph
 from bqskit.utils.typing import is_integer
 
 
 def powerset(iterable: Iterable[Any]) -> Iterable[Any]:
-    """powerset([1,2,3]) --> () (1,) (2,) (3,) (1,2) (1,3) (2,3) (1,2,3)"""
+    """Powerset([1,2,3]) --> () (1,) (2,) (3,) (1,2) (1,3) (2,3) (1,2,3)"""
     s = list(iterable)
     all_combos = (it.combinations(s, r) for r in range(len(s) + 1))
     return it.chain.from_iterable(all_combos)

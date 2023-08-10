@@ -7,9 +7,9 @@ from typing import Sequence
 
 from bqskit.compiler.basepass import BasePass
 from bqskit.compiler.passdata import PassData
-from bqskit.ir import Gate
 from bqskit.ir.circuit import Circuit
-from bqskit.ir.gates import U3Gate
+from bqskit.ir.gate import Gate
+from bqskit.ir.gates.parameterized.u3 import U3Gate
 from bqskit.ir.opt.cost.functions import HilbertSchmidtResidualsGenerator
 from bqskit.ir.opt.cost.generator import CostFunctionGenerator
 from bqskit.ir.point import CircuitPoint as Point
@@ -168,6 +168,10 @@ class Rebase2QuditGatePass(BasePass):
             prev_count = circuit.count(g)
 
             while g in circuit.gate_set:
+                # Change the seed every iteration to prevent stalls
+                if instantiate_options['seed'] is not None:
+                    instantiate_options['seed'] += 1
+
                 # Check if we made progress from last loop
                 gates_left = circuit.count(g)
                 if prev_count == gates_left:

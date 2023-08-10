@@ -110,6 +110,10 @@ are involved the qubit mapping process.
     GeneralizedSabreRoutingPass
     SetModelPass
     ApplyPlacement
+    SubtopologySelectionPass
+    PAMLayoutPass
+    PAMRoutingPass
+    EmbedAllPermutationsPass
 
 .. rubric:: Utility Passes
 
@@ -123,6 +127,7 @@ are involved the qubit mapping process.
     UnfoldPass
     UpdateDataPass
     ToU3Pass
+    ToVariablePass
     BlockConversionPass
     LogPass
     ExtendBlockSizePass
@@ -191,11 +196,15 @@ from bqskit.passes.io.checkpoint import SaveCheckpointPass
 from bqskit.passes.io.intermediate import RestoreIntermediatePass
 from bqskit.passes.io.intermediate import SaveIntermediatePass
 from bqskit.passes.mapping.apply import ApplyPlacement
+from bqskit.passes.mapping.embed import EmbedAllPermutationsPass
+from bqskit.passes.mapping.layout.pam import PAMLayoutPass
 from bqskit.passes.mapping.layout.sabre import GeneralizedSabreLayoutPass
 from bqskit.passes.mapping.placement.greedy import GreedyPlacementPass
 from bqskit.passes.mapping.placement.trivial import TrivialPlacementPass
+from bqskit.passes.mapping.routing.pam import PAMRoutingPass
 from bqskit.passes.mapping.routing.sabre import GeneralizedSabreRoutingPass
 from bqskit.passes.mapping.setmodel import SetModelPass
+from bqskit.passes.mapping.topology import SubtopologySelectionPass
 from bqskit.passes.measure import ExtractMeasurements
 from bqskit.passes.measure import RestoreMeasurements
 from bqskit.passes.noop import NOOPPass
@@ -231,6 +240,7 @@ from bqskit.passes.search.heuristics.astar import AStarHeuristic
 from bqskit.passes.search.heuristics.dijkstra import DijkstraHeuristic
 from bqskit.passes.search.heuristics.greedy import GreedyHeuristic
 from bqskit.passes.synthesis.leap import LEAPSynthesisPass
+from bqskit.passes.synthesis.pas import PermutationAwareSynthesisPass
 from bqskit.passes.synthesis.qfast import QFASTDecompositionPass
 from bqskit.passes.synthesis.qpredict import QPredictDecompositionPass
 from bqskit.passes.synthesis.qsearch import QSearchSynthesisPass
@@ -239,6 +249,7 @@ from bqskit.passes.synthesis.target import SetTargetPass
 from bqskit.passes.util.compress import CompressPass
 from bqskit.passes.util.conversion import BlockConversionPass
 from bqskit.passes.util.converttou3 import ToU3Pass
+from bqskit.passes.util.converttovar import ToVariablePass
 from bqskit.passes.util.extend import ExtendBlockSizePass
 from bqskit.passes.util.fill import FillSingleQuditGatesPass
 from bqskit.passes.util.log import LogErrorPass
@@ -328,4 +339,10 @@ __all__ = [
     'CNOTToCYPass',
     'CYToCNOTPass',
     'SetTargetPass',
+    'PAMLayoutPass',
+    'PAMRoutingPass',
+    'EmbedAllPermutationsPass',
+    'SubtopologySelectionPass',
+    'PermutationAwareSynthesisPass',
+    'ToVariablePass',
 ]
