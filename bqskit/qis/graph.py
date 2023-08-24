@@ -72,6 +72,11 @@ class CouplingGraph(Collection[Tuple[int, int]]):
             self._mat[q1][q2] = 1
             self._mat[q2][q1] = 1
 
+    def is_qubit_connected(self, qubit: int) -> bool:
+        """Return true if qubit is connected to one another node"""
+        return len(self._adj[qubit]) > 0
+
+
     def is_fully_connected(self) -> bool:
         """Return true if the graph is fully connected."""
         frontier: set[int] = {0}
@@ -501,6 +506,30 @@ class CouplingGraph(Collection[Tuple[int, int]]):
             if (q1, q2) in self._edges or (q2, q1) in self._edges:
                 subgraph.append((min([q1, q2]), max([q1, q2])))
         return subgraph
+
+    def remove_random_edge(self) -> CouplingGraph:
+        """ 
+        Removes an edge from a fully connected graph
+        To return a fully connected graph
+        If all edges are needed for full connectivity, then returns none 
+        """
+
+        # Get random edges
+        random_edges_inds = np.random.choice(np.arange(len(self._edges)), len(self._edges), replace=False)
+        edges_list = list(self._edges)
+        random_edges = [edges_list[x] for x in random_edges_inds]
+        i = 0
+        while (len(random_edges) > 0):
+            random_edge = random_edges[i]
+            new_edges = self._edges.copy()
+            new_edges.remove(random_edge)
+            new_top = CouplingGraph(new_edges, self.num_qudits)
+            if (new_top.is_qubit_connected(random_edge[0]) and new_top.is_qubit_connected(random_edge[1])):
+                return new_top
+            i += 1
+
+        # Is minimally connected
+        return None
 
     def relabel_subgraph(
         graph: CouplingGraphLike,
