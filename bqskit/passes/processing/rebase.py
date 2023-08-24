@@ -9,6 +9,7 @@ from bqskit.compiler.basepass import BasePass
 from bqskit.compiler.passdata import PassData
 from bqskit.ir.circuit import Circuit
 from bqskit.ir.gate import Gate
+from bqskit.ir.gates.constant import NRootCNOTGate
 from bqskit.ir.gates.parameterized.u3 import U3Gate
 from bqskit.ir.opt.cost.functions import HilbertSchmidtResidualsGenerator
 from bqskit.ir.opt.cost.generator import CostFunctionGenerator
@@ -17,6 +18,12 @@ from bqskit.runtime import get_runtime
 from bqskit.utils.typing import is_integer
 from bqskit.utils.typing import is_real_number
 from bqskit.utils.typing import is_sequence
+from math import ceil
+from os.path import exists, join
+from os import mkdir
+import time
+import pickle
+
 _logger = logging.getLogger(__name__)
 
 
@@ -37,6 +44,8 @@ class Rebase2QuditGatePass(BasePass):
         cost: CostFunctionGenerator = HilbertSchmidtResidualsGenerator(),
         instantiate_options: dict[str, Any] = {},
         single_qudit_gate: Gate = U3Gate(),
+        checkpoint_proj: str = None,
+        time_limit: float = 10
     ) -> None:
         """
         Construct a Rebase2QuditGatePass.
@@ -153,6 +162,13 @@ class Rebase2QuditGatePass(BasePass):
         self.sq = single_qudit_gate
         self.generate_new_gate_templates()
 
+        self.checkpoint_proj = checkpoint_proj
+        self.start_time = time.time()
+        if (self.checkpoint_proj and not exists(self.checkpoint_proj)):
+            mkdir(self.checkpoint_proj)
+        
+        self.time_limit = time_limit * 60 * 60
+
     async def run(self, circuit: Circuit, data: PassData) -> None:
         """Perform the pass's operation, see :class:`BasePass` for more."""
         instantiate_options = self.instantiate_options.copy()
@@ -161,6 +177,17 @@ class Rebase2QuditGatePass(BasePass):
         _logger.debug(f'Rebasing gates from {self.gates} to {self.ngates}.')
 
         target = self.get_target(circuit, data)
+
+        # Things needed for saving data
+        if self.checkpoint_proj:
+            save_num = data.get("block_num", 0)
+            num_digits = data.get("num_digits", 1)
+            save_num = str(save_num).zfill(num_digits)
+            _logger.debug(f"Checkpointing block {save_num}!")
+            save_circuit_file = join(self.checkpoint_proj, f"block_{save_num}.pickle")
+            if exists(save_circuit_file):
+                with open(save_circuit_file, "rb") as cf:
+                    circuit = pickle.load(cf)
 
         for g in self.gates:
             # Track retries to check for no progress
@@ -190,7 +217,8 @@ class Rebase2QuditGatePass(BasePass):
 
                 # If we have exceeded the number of retries, up the max depth
                 if self.max_retries >= 0 and num_retries > self.max_retries:
-                    _logger.debug('Exceeded max retries, increasing depth.')
+                    circuits_with_new_gate = []
+                    # _logger.debug('Exceeded max retries, increasing depth.')
                     circuit_copy = circuit.copy()
                     circuit_copy.replace_with_circuit(point, self.overdrive)
                     circuits_with_new_gate.append(circuit_copy)
@@ -212,13 +240,45 @@ class Rebase2QuditGatePass(BasePass):
                         if self.counts[i] < best_count:
                             best_index = i
                             best_count = self.counts[i]
-
+                        
                 if best_index is None:
-                    circuit.unfold(point)
-                    continue
+                    if self.max_retries >= 0 and num_retries > self.max_retries:
+                        # Using rule ...
+                        # Even overdrive does not work, do straight replacement
+                        _logger.debug("USING RULE!!!!")
+                        old_circ: Circuit = circuit[point].gate._circuit
 
-                _logger.debug(self.replaced_log_messages[best_index])
-                circuit.become(instantiated_circuits[best_index])
+                        new_circ = Circuit(old_circ.num_qudits)
+                        for cycle, op in old_circ.operations_with_cycles():
+                            if op.gate in self.gates:
+                                for i in range(8):
+                                    new_circ.append_gate(NRootCNOTGate(4), op.location)
+                            else:
+                                new_circ.append(op)
+                        # print()
+                        print(old_circ.gate_counts)
+                        print(new_circ.gate_counts)
+                        print(circuits_with_new_gate[-1].gate_counts)
+                        circuit.replace_with_circuit(point, new_circ)
+                        print(circuit.gate_counts)
+                    else:
+                        circuit.unfold(point)
+                else:
+                    # _logger.debug(self.replaced_log_messages[best_index])
+                    _logger.debug("Replacing!!")
+                    circuit.become(instantiated_circuits[best_index])
+
+                # _logger.debug(f'Current Time: {time.time() - self.start_time}, Time Limit: {self.time_limit}')
+                if (time.time() - self.start_time) > self.time_limit and self.checkpoint_proj:
+                    # Checkpoint
+                    with open(save_circuit_file, "wb") as cf:
+                        pickle.dump(circuit, cf)
+
+                    if g in circuit.gate_set:
+                        data["finished"] = False
+                    break
+        
+        print(f"FINISHED: {circuit.gate_counts}")
 
     def group_near_gates(self, circuit: Circuit, center: Point) -> Point:
         """Group gates similar to the gate at center on the same qubits."""
@@ -292,7 +352,7 @@ class Rebase2QuditGatePass(BasePass):
         self.counts.append(0)
 
         for g in self.ngates:
-            for i in range(1, self.max_depth + 1):
+            for i in range(1, self.max_depth + 1, ceil(self.max_depth / 4)):
                 circ = Circuit(2, self.ngates[0].radixes)
                 circ.append_gate(self.sq, 0)
                 circ.append_gate(self.sq, 1)
