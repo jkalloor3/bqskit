@@ -43,5 +43,7 @@ class NRootCNOTGate(ConstantGate, QubitGate):
             [0, 0, nrootx[1][0], nrootx[1][1]]
         ])
 
-        
-
+    @property
+    def name(self) -> str:
+        """The name of this gate."""
+        return f"{self.root}thRootCNOTGate"
