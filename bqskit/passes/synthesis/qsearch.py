@@ -20,6 +20,10 @@ from bqskit.qis.unitary import UnitaryMatrix
 from bqskit.runtime import get_runtime
 from bqskit.utils.typing import is_integer
 from bqskit.utils.typing import is_real_number
+from os import mkdir
+import time
+from os.path import exists, join
+import pickle
 
 
 _logger = logging.getLogger(__name__)
@@ -45,6 +49,8 @@ class QSearchSynthesisPass(SynthesisPass):
         store_partial_solutions: bool = False,
         partials_per_depth: int = 25,
         instantiate_options: dict[str, Any] = {},
+        checkpoint_proj: str = None,
+        time_limit: float = 10
     ) -> None:
         """
         Construct a search-based synthesis pass.
@@ -135,6 +141,12 @@ class QSearchSynthesisPass(SynthesisPass):
         self.instantiate_options.update(instantiate_options)
         self.store_partial_solutions = store_partial_solutions
         self.partials_per_depth = partials_per_depth
+        self.checkpoint_proj = checkpoint_proj
+        self.start_time = time.time()
+        if (self.checkpoint_proj and not exists(self.checkpoint_proj)):
+            mkdir(self.checkpoint_proj)
+        
+        self.time_limit = time_limit * 60 * 60
 
     async def synthesize(
         self,
@@ -147,7 +159,6 @@ class QSearchSynthesisPass(SynthesisPass):
             instantiate_options['seed'] = data.seed
 
         frontier = Frontier(utry, self.heuristic_function)
-
         # Seed the search with an initial layer
         initial_layer = self.layer_gen.gen_initial_layer(utry, data)
         initial_layer.instantiate(utry, **instantiate_options)
@@ -160,13 +171,41 @@ class QSearchSynthesisPass(SynthesisPass):
 
         # Track partial solutions
         psols: dict[int, list[tuple[Circuit, float]]] = {}
+        
+        # Things needed for saving data
+        if self.checkpoint_proj:
+            save_num = data.get("block_num", 0)
+            num_digits = data.get("num_digits", 1)
+            save_num = str(save_num).zfill(num_digits)
+            _logger.debug(f"Checkpointing block {save_num}!")
+            save_frontier_file = join(self.checkpoint_proj, f"block_{save_num}.data")
 
+            if exists(save_frontier_file):
+                with open(save_frontier_file, "rb") as cf:
+                    print(save_frontier_file)
+                    pkl_data = pickle.load(cf)
+                    frontier: Frontier = pkl_data["frontier"]
+                    best_circ: Circuit = pkl_data["best_circ"]
+                    best_dist: float = pkl_data["best_dist"]
+                    best_layer: int = pkl_data["best_layer"]
+                    psols: dict[int, list[tuple[Circuit, float]]] = pkl_data["psols"]
+            else:
+                with open(save_frontier_file, "wb") as cf:
+                    pkl_data = {}
+                    pkl_data["frontier"] = frontier
+                    pkl_data["best_circ"] = best_circ
+                    pkl_data["best_dist"] = best_dist
+                    pkl_data["best_layer"] = best_layer
+                    pkl_data["psols"] = psols
+                    pickle.dump(pkl_data, cf)
+        
         _logger.debug(f'Search started, initial layer has cost: {best_dist}.')
 
         # Evalute initial layer
         if best_dist < self.success_threshold:
+            save_num = data.get("block_num", 0)
             _logger.debug('Successful synthesis.')
-            return initial_layer
+            return best_circ
 
         # Main loop
         while not frontier.empty():
@@ -192,6 +231,7 @@ class QSearchSynthesisPass(SynthesisPass):
 
                 if dist < self.success_threshold:
                     _logger.debug('Successful synthesis.')
+                    data["finished"] = True
                     if self.store_partial_solutions:
                         data['psols'] = psols
                     return circuit
@@ -219,7 +259,21 @@ class QSearchSynthesisPass(SynthesisPass):
                 if self.max_layer is None or layer + 1 < self.max_layer:
                     frontier.add(circuit, layer + 1)
 
+            # _logger.debug(f'Current Time: {time.time() - self.start_time}, Time Limit: {self.time_limit}')
+            if (time.time() - self.start_time) > self.time_limit and self.checkpoint_proj:
+                # Checkpoint
+                with open(save_frontier_file, "wb") as cf:
+                    pkl_data = {}
+                    pkl_data["frontier"] = frontier
+                    pkl_data["best_circ"] = best_circ
+                    pkl_data["best_dist"] = best_dist
+                    pkl_data["best_layer"] = best_layer
+                    pkl_data["psols"] = psols
+                    pickle.dump(pkl_data, cf)
+                break
+
         _logger.warning('Frontier emptied.')
+        data["finished"] = False
         _logger.warning(
             'Returning best known circuit with %d layer%s and cost: %e.'
             % (best_layer, '' if best_layer == 1 else 's', best_dist),
@@ -228,3 +282,16 @@ class QSearchSynthesisPass(SynthesisPass):
             data['psols'] = psols
 
         return best_circ
+
+    async def run(self, circuit: Circuit, data: PassData) -> None:
+        """Perform the pass's operation, see :class:`BasePass` for more."""
+        new_circ = await self.synthesize(data.target, data)
+        dist = self.cost.calc_cost(new_circ, data.target)
+        self.max_layer = circuit.multi_qudit_depth + 1
+        # Make sure that max_layer only goes until current circuit's max 2q depth, we will just use old circuit
+        # otherwise
+        if dist < self.success_threshold:
+            _logger.debug(f"Using new circuit! Has {new_circ.gate_counts}")
+            circuit.become(new_circ)
+        else:
+            _logger.debug(f"Reverting back to original circuit with {circuit.gate_counts}")

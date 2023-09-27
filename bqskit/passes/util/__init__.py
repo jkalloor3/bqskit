@@ -13,6 +13,7 @@ from bqskit.passes.util.random import SetRandomSeedPass
 from bqskit.passes.util.record import RecordStatsPass
 from bqskit.passes.util.unfold import UnfoldPass
 from bqskit.passes.util.update import UpdateDataPass
+from bqskit.passes.util.replacewithcx import ReplaceWithCXPass
 
 __all__ = [
     'CompressPass',
@@ -21,10 +22,11 @@ __all__ = [
     'UnfoldPass',
     'UpdateDataPass',
     'ToU3Pass',
+    'ReplaceWithCXPass'
     'BlockConversionPass',
     'LogPass',
     'ExtendBlockSizePass',
     'LogErrorPass',
     'FillSingleQuditGatesPass',
-    'ToVariablePass',
+    'ToVariablePass'
 ]

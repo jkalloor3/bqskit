@@ -167,6 +167,7 @@ class RestoreIntermediatePass(BasePass):
         """
         files = sorted(listdir(self.proj_dir))
         self.block_list = [f for f in files if 'block_' in f]
+        self.block_list = [f for f in self.block_list if f.endswith(".pickle")]
         print(self.block_list)
         if len(self.block_list) > len(self.structure):
             raise ValueError(

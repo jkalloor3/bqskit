@@ -127,6 +127,7 @@ are involved the qubit mapping process.
     UnfoldPass
     UpdateDataPass
     ToU3Pass
+    ReplaceWithCXPass
     ToVariablePass
     BlockConversionPass
     LogPass
@@ -249,6 +250,7 @@ from bqskit.passes.synthesis.target import SetTargetPass
 from bqskit.passes.util.compress import CompressPass
 from bqskit.passes.util.conversion import BlockConversionPass
 from bqskit.passes.util.converttou3 import ToU3Pass
+from bqskit.passes.util.replacewithcx import ReplaceWithCXPass
 from bqskit.passes.util.converttovar import ToVariablePass
 from bqskit.passes.util.extend import ExtendBlockSizePass
 from bqskit.passes.util.fill import FillSingleQuditGatesPass
@@ -284,6 +286,7 @@ __all__ = [
     'UnfoldPass',
     'UpdateDataPass',
     'ToU3Pass',
+    'ReplaceWithCXPass',
     'ScanningGateRemovalPass',
     'SimpleLayerGenerator',
     'AStarHeuristic',

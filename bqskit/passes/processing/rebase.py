@@ -251,16 +251,12 @@ class Rebase2QuditGatePass(BasePass):
                         new_circ = Circuit(old_circ.num_qudits)
                         for cycle, op in old_circ.operations_with_cycles():
                             if op.gate in self.gates:
-                                for i in range(8):
+                                for i in range(4):
                                     new_circ.append_gate(NRootCNOTGate(4), op.location)
                             else:
                                 new_circ.append(op)
                         # print()
-                        print(old_circ.gate_counts)
-                        print(new_circ.gate_counts)
-                        print(circuits_with_new_gate[-1].gate_counts)
                         circuit.replace_with_circuit(point, new_circ)
-                        print(circuit.gate_counts)
                     else:
                         circuit.unfold(point)
                 else:
