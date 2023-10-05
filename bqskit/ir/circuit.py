@@ -23,7 +23,6 @@ import numpy.typing as npt
 
 from bqskit.ir.gate import Gate
 from bqskit.ir.gates.circuitgate import CircuitGate
-from bqskit.ir.gates.composed.daggergate import DaggerGate
 from bqskit.ir.gates.constant.unitary import ConstantUnitaryGate
 from bqskit.ir.gates.measure import MeasurementPlaceholder
 from bqskit.ir.iterator import CircuitIterator
@@ -122,16 +121,17 @@ class Circuit(DifferentiableUnitary, StateVectorMap, Collection[Operation]):
             >>> circ = Circuit(2, [2, 3])  # Creates one qubit and one qutrit.
 
             >>> circ = Circuit(2)
+            >>> from bqskit.ir.gates import HGate, CXGate, HGate
             >>> circ.append_gate(HGate(), 0)
             >>> circ.append_gate(CXGate(), (0, 1))
             >>> circ.append_gate(HGate(), 1)
             >>> circ.get_unitary()
-            ... array([[ 0.5+0.j,  0.5+0.j,  0.5+0.j,  0.5+0.j],
-            ...        [ 0.5+0.j, -0.5+0.j,  0.5+0.j, -0.5+0.j],
-            ...        [ 0.5+0.j,  0.5+0.j, -0.5+0.j, -0.5+0.j],
-            ...        [-0.5+0.j,  0.5+0.j,  0.5+0.j, -0.5+0.j]])
+            array([[ 0.5+0.j,  0.5+0.j,  0.5+0.j,  0.5+0.j],
+                   [ 0.5+0.j, -0.5+0.j,  0.5+0.j, -0.5+0.j],
+                   [ 0.5+0.j,  0.5+0.j, -0.5+0.j, -0.5+0.j],
+                   [-0.5+0.j,  0.5+0.j,  0.5+0.j, -0.5+0.j]])
             >>> circ.get_statevector([1, 0, 0, 0])
-            ... array([ 0.5+0.j,  0.5+0.j,  0.5+0.j, -0.5+0.j])
+            array([ 0.5+0.j,  0.5+0.j,  0.5+0.j, -0.5+0.j])
         """
 
         if not is_integer(num_qudits):
@@ -271,14 +271,16 @@ class Circuit(DifferentiableUnitary, StateVectorMap, Collection[Operation]):
     @property
     def active_qudits(self) -> list[int]:
         """The qudits involved in at least one operation."""
-        active_qudits = set()  # TODO: add test case for single-qudit gates
-        for edge in self._graph_info.keys():
-            active_qudits.add(edge[0])
-            active_qudits.add(edge[1])
+        active_qudits = set()
         for qudit, point in self._front.items():
             if point is not None:
                 active_qudits.add(qudit)
         return list(sorted(active_qudits))
+
+    @property
+    def is_empty(self) -> bool:
+        """If there are no operations in the Circuit."""
+        return self.num_operations == 0
 
     def is_differentiable(self) -> bool:
         """Check if all gates are differentiable."""
@@ -451,7 +453,9 @@ class Circuit(DifferentiableUnitary, StateVectorMap, Collection[Operation]):
         for cycle_index, cycle in enumerate(self._circuit):
             if cycle[qudit_index] is not None:
                 points.append((cycle_index, qudit_index))
-        self.batch_pop(points)
+
+        if len(points) > 0:
+            self.batch_pop(points)
 
         # Update circuit properties
         self._num_qudits -= 1
@@ -747,6 +751,7 @@ class Circuit(DifferentiableUnitary, StateVectorMap, Collection[Operation]):
             IndexError: If `cycle_index` is out of range.
 
         Examples:
+            >>> from bqskit.ir.gates import HGate, XGate, ZGate
             >>> circuit = Circuit(2)
             >>> circuit.append_gate(HGate(), [0])
             >>> circuit.append_gate(XGate(), [0])
@@ -795,6 +800,7 @@ class Circuit(DifferentiableUnitary, StateVectorMap, Collection[Operation]):
             ValueError: If no available cycle exists.
 
         Examples:
+            >>> from bqskit.ir.gates import HGate, XGate, ZGate
             >>> circuit = Circuit(2)
             >>> circuit.append_gate(HGate(), [0])
             >>> circuit.find_available_cycle([1])
@@ -935,11 +941,12 @@ class Circuit(DifferentiableUnitary, StateVectorMap, Collection[Operation]):
             Operation: The operation at `point`.
 
         Examples:
+            >>> from bqskit.ir.gates import HGate, CNOTGate
             >>> circuit = Circuit(2)
             >>> circuit.append_gate(HGate(), [0])
             >>> circuit.append_gate(CNOTGate(), [0, 1])
             >>> circuit.get_operation((1, 0))
-            ... CNOTGate()@(0, 1)
+            CNOTGate@(0, 1)
         """
         if not self.is_point_in_range(point):
             raise IndexError('Out-of-range or invalid point.')
@@ -981,12 +988,14 @@ class Circuit(DifferentiableUnitary, StateVectorMap, Collection[Operation]):
                 due to either an invalid location or gate radix mismatch.
 
         Examples:
+            >>> from bqskit.ir.gates import HGate, XGate
             >>> circuit = Circuit(1)
             >>> opH = Operation(HGate(), [0])
             >>> circuit.append(opH)
             >>> circuit.point(opH)
             (0, 0)
             >>> opX = Operation(XGate(), [0])
+            >>> circuit.append(opX)
             >>> circuit.point(opX)
             (1, 0)
         """
@@ -1043,6 +1052,7 @@ class Circuit(DifferentiableUnitary, StateVectorMap, Collection[Operation]):
             order but it implies `op` is in the last cycle of circuit.
 
         Examples:
+            >>> from bqskit.ir.gates import HGate
             >>> circ = Circuit(1)
             >>> op = Operation(HGate(), [0])
             >>> circ.append(op) # Appends a Hadamard gate to qudit 0.
@@ -1101,9 +1111,10 @@ class Circuit(DifferentiableUnitary, StateVectorMap, Collection[Operation]):
                 (Default: all zeros)
 
         Examples:
+            >>> from bqskit.ir.gates import HGate
             >>> circ = Circuit(1)
             >>> # Append a Hadamard gate to qudit 0.
-            >>> circ.append_gate(H(), [0])
+            >>> circ.append_gate(HGate(), 0)
 
         See Also:
             :func:`append`
@@ -1169,14 +1180,15 @@ class Circuit(DifferentiableUnitary, StateVectorMap, Collection[Operation]):
             ops (Operation): The operations to append.
 
         Examples:
+            >>> from bqskit.ir.gates import HGate, XGate
             >>> circ = Circuit(1)
-            >>> opH = Operation(H(), [0])
-            >>> opX = Operation(X(), [0])
+            >>> opH = Operation(HGate(), [0])
+            >>> opX = Operation(XGate(), [0])
             >>> circ.extend([opH, opX])
-            >>> circ.index(opH)
-            0
-            >>> circ.index(opX)
-            1
+            >>> circ.point(opH)
+            (0, 0)
+            >>> circ.point(opX)
+            (1, 0)
 
         Notes:
             See `append` for more info.
@@ -1204,12 +1216,13 @@ class Circuit(DifferentiableUnitary, StateVectorMap, Collection[Operation]):
                 either an invalid location or gate radix mismatch.
 
         Examples:
+            >>> from bqskit.ir.gates import HGate, XGate
             >>> circ = Circuit(1)
-            >>> opX = Operation(X(), [0])
-            >>> opH = Operation(H(), [0])
+            >>> opX = Operation(XGate(), [0])
+            >>> opH = Operation(HGate(), [0])
             >>> circ.append(opX)
-            >>> circ.insert(opH, 0)
-            >>> circ.cycle(opH)
+            >>> circ.insert(0, opH)
+            >>> circ.point(opH).cycle
             0
 
         Notes:
@@ -1419,8 +1432,9 @@ class Circuit(DifferentiableUnitary, StateVectorMap, Collection[Operation]):
                 due to either an invalid location or gate radix mismatch.
 
         Examples:
+            >>> from bqskit.ir.gates import HGate
             >>> circ = Circuit(1)
-            >>> op = Operation(H(), [0])
+            >>> op = Operation(HGate(), [0])
             >>> circ.append(op)
             >>> circ.num_operations
             1
@@ -1467,8 +1481,9 @@ class Circuit(DifferentiableUnitary, StateVectorMap, Collection[Operation]):
                 due to either an invalid location or gate radix mismatch.
 
         Examples:
+            >>> from bqskit.ir.gates import HGate
             >>> circ = Circuit(1)
-            >>> op = Operation(H(), [0])
+            >>> op = Operation(HGate(), [0])
             >>> circ.append(op)
             >>> circ.count(op)
             1
@@ -1512,12 +1527,14 @@ class Circuit(DifferentiableUnitary, StateVectorMap, Collection[Operation]):
                 exists at `point`.
 
         Examples:
+            >>> from bqskit.ir.gates import HGate
             >>> circ = Circuit(1)
             >>> circ.append_gate(HGate(), [0])
-            >>> circ.get_num_gates()
+            >>> circ.num_operations
             1
-            >>> circ.pop(0, 0)
-            >>> circ.get_num_gates()
+            >>> circ.pop((0, 0))
+            HGate@(0,)
+            >>> circ.num_operations
             0
         """
 
@@ -2494,9 +2511,10 @@ class Circuit(DifferentiableUnitary, StateVectorMap, Collection[Operation]):
             IndexError: If the param_index is invalid.
 
         Examples:
+            >>> from bqskit.ir.gates import U3Gate
             >>> circ = Circuit(1)
-            >>> circ.append_gate(U3(), [0])
-            >>> circ.append_gate(U3(), [0])
+            >>> circ.append_gate(U3Gate(), [0])
+            >>> circ.append_gate(U3Gate(), [0])
             >>> circ.num_params
             6
             >>> circ.get_param_location(4)
@@ -2522,13 +2540,7 @@ class Circuit(DifferentiableUnitary, StateVectorMap, Collection[Operation]):
         """Return the circuit's inverse circuit."""
         circuit = Circuit(self.num_qudits, self.radixes)
         for op in reversed(self):
-            circuit.append(
-                Operation(
-                    DaggerGate(op.gate),
-                    op.location,
-                    op.params,
-                ),
-            )
+            circuit.append(op.get_inverse())
         return circuit
 
     def get_unitary(self, params: RealVector = []) -> UnitaryMatrix:
@@ -2547,10 +2559,11 @@ class Circuit(DifferentiableUnitary, StateVectorMap, Collection[Operation]):
             ValueError: If parameters are specified and invalid.
 
         Examples:
+            >>> from bqskit.ir.gates import HGate
             >>> circ = Circuit(1)
-            >>> op = Operation(H(), [0])
+            >>> op = Operation(HGate(), [0])
             >>> circ.append(op)
-            >>> circ.get_unitary() == H().get_unitary()
+            >>> circ.get_unitary() == HGate().get_unitary()
             True
         """
         if len(params) != 0:
@@ -2589,11 +2602,12 @@ class Circuit(DifferentiableUnitary, StateVectorMap, Collection[Operation]):
             ValueError: If parameters are specified and invalid.
 
         Examples:
+            >>> from bqskit.ir.gates import HGate
             >>> circ = Circuit(1)
-            >>> op = Operation(H(), [0])
+            >>> op = Operation(HGate(), [0])
             >>> circ.append(op)
             >>> V = StateVector([1,0])
-            >>> circ.get_statevector(V).numpy == np.array([1,1])/np.sqrt(2)
+            >>> np.allclose(circ.get_statevector(V), np.array([1,1])/np.sqrt(2))
             True
         """
         if len(params) != 0:

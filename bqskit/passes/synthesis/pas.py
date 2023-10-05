@@ -51,6 +51,7 @@ class PermutationAwareSynthesisPass(SynthesisPass):
                 score the permuted circuits. The smallest score wins.
                 (Default: :func:`op_count`)
         """
+        # TODO: Add option to choose first returned result
         if not isinstance(inner_synthesis, SynthesisPass):
             bad_type = type(inner_synthesis)
             raise TypeError(f'Expected SynthesisPass object, got {bad_type}.')
@@ -71,12 +72,24 @@ class PermutationAwareSynthesisPass(SynthesisPass):
         data: PassData,
     ) -> Circuit:
         """Synthesize `utry`, see :class:`SynthesisPass` for more."""
+        if not all(r == utry.radixes[0] for r in utry.radixes):
+            raise NotImplementedError(
+                'PermutationAwareSynthesisPass only supports unitaries '
+                'with the same radix on all qudits currently.',
+            )
+
         # Calculate all permuted targets
         width = utry.num_qudits
         perms = list(it.permutations(range(width)))
         no_perm = [tuple(range(width))]
-        Pis = [PermutationMatrix.from_qubit_location(width, p) for p in perms]
-        Pos = [PermutationMatrix.from_qubit_location(width, p) for p in perms]
+        Pis = [
+            PermutationMatrix.from_qudit_location(width, utry.radixes[0], p)
+            for p in perms
+        ]
+        Pos = [
+            PermutationMatrix.from_qudit_location(width, utry.radixes[0], p)
+            for p in perms
+        ]
 
         if self.input_perm and self.output_perm:
             permsbyperms = list(it.product(perms, perms))
