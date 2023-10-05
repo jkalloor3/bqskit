@@ -287,7 +287,7 @@ class QSearchSynthesisPass(SynthesisPass):
         """Perform the pass's operation, see :class:`BasePass` for more."""
         new_circ = await self.synthesize(data.target, data)
         dist = self.cost.calc_cost(new_circ, data.target)
-        self.max_layer = circuit.multi_qudit_depth + 1
+        self.max_layer = sum(y for x,y  in circuit.gate_counts.items() if x.num_qudits >= 2) + 1
         # Make sure that max_layer only goes until current circuit's max 2q depth, we will just use old circuit
         # otherwise
         if dist < self.success_threshold:
