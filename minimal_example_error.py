@@ -36,18 +36,18 @@ synthesis_pass = lambda x: QSearchSynthesisPass(layer_generator=layer_generator(
 
 if __name__ == '__main__':
 
-    num_qubits = 7
-    circuit = Circuit(num_qubits)
-    all_qubits = list(range(num_qubits))
+    # num_qubits = 7
+    # circuit = Circuit(num_qubits)
+    # all_qubits = list(range(num_qubits))
 
-    for i in range(num_qubits):
-        qubits = np.random.choice(all_qubits, 2, replace=False)
-        circuit.append_gate(BGate(), tuple(qubits))
-        circuit.append_gate(U3Gate(), qubits[0], np.random.random(3) * np.pi)
+    # for i in range(num_qubits):
+    #     qubits = np.random.choice(all_qubits, 2, replace=False)
+    #     circuit.append_gate(BGate(), tuple(qubits))
+    #     circuit.append_gate(U3Gate(), qubits[0], np.random.random(3) * np.pi)
 
-    # circuit = pickle.load(open("min_example.pkl", "rb"))
+    circuit = pickle.load(open("min_example_error.pkl", "rb"))
 
-    pickle.dump(circuit, open("min_example_error.pkl", "wb"))
+    # pickle.dump(circuit, open("min_example_error.pkl", "wb"))
 
     print('Initial Gate Counts:', circuit.gate_counts)
     print(circuit.num_qudits)
