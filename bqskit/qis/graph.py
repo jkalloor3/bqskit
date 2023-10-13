@@ -15,6 +15,7 @@ from typing import Tuple
 from typing import TYPE_CHECKING
 from typing import Union
 
+import networkx as nx
 import numpy as np
 
 if TYPE_CHECKING:
@@ -377,6 +378,11 @@ class CouplingGraph(Collection[Tuple[int, int]]):
             if i < (num_rows - 1) * num_cols:
                 edges.add((i, i + num_cols))
 
+        return CouplingGraph(edges)
+
+    @staticmethod
+    def from_nx_graph(nx_graph: nx.Graph) -> CouplingGraph:
+        edges = nx_graph.edges(data=False)
         return CouplingGraph(edges)
 
     def maximal_matching(
