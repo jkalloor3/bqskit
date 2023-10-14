@@ -382,7 +382,9 @@ class CouplingGraph(Collection[Tuple[int, int]]):
 
     @staticmethod
     def from_nx_graph(nx_graph: nx.Graph) -> CouplingGraph:
-        edges = nx_graph.edges(data=False)
+        # Make sure edges are numbered one through num_nodes
+        new_graph = nx.convert_node_labels_to_integers(nx_graph)
+        edges = new_graph.edges(data=False)
         return CouplingGraph(edges)
 
     def maximal_matching(
