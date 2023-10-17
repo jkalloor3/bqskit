@@ -261,6 +261,7 @@ from bqskit.passes.processing.substitute import SubstitutePass
 from bqskit.passes.retarget.auto import AutoRebase2QuditGatePass
 from bqskit.passes.retarget.general import GeneralSQDecomposition
 from bqskit.passes.retarget.two import Rebase2QuditGatePass
+from bqskit.passes.retarget.twonroot import Rebase2QuditGateNRootPass
 from bqskit.passes.rules.ch2cnot import CHToCNOTPass
 from bqskit.passes.rules.cnot2ch import CNOTToCHPass
 from bqskit.passes.rules.cnot2cy import CNOTToCYPass
@@ -373,6 +374,7 @@ __all__ = [
     'PhysicalPredicate',
     'SinglePhysicalPredicate',
     'Rebase2QuditGatePass',
+    'Rebase2QuditGateNRootPass',
     'LogPass',
     'ExtractMeasurements',
     'RestoreMeasurements',

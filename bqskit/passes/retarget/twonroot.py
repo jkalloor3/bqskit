@@ -9,7 +9,7 @@ from bqskit.compiler.basepass import BasePass
 from bqskit.compiler.passdata import PassData
 from bqskit.ir.circuit import Circuit
 from bqskit.ir.gate import Gate
-from bqskit.ir.gates.constant import NRootCNOTGate
+from bqskit.ir.gates.constant import NRootCNOTGate, CNOTGate
 from bqskit.ir.gates.parameterized.u3 import U3Gate
 from bqskit.ir.opt.cost.functions import HilbertSchmidtResidualsGenerator
 from bqskit.ir.opt.cost.generator import CostFunctionGenerator
@@ -27,7 +27,7 @@ import pickle
 _logger = logging.getLogger(__name__)
 
 
-class Rebase2QuditGatePass(BasePass):
+class Rebase2QuditGateNRootPass(BasePass):
     """
     The Rebase2QuditGatePass class.
 
@@ -36,8 +36,8 @@ class Rebase2QuditGatePass(BasePass):
 
     def __init__(
         self,
-        gate_in_circuit: Gate | Sequence[Gate],
-        new_gate: Gate | Sequence[Gate],
+        gate_in_circuit: CNOTGate,
+        new_gate: NRootCNOTGate,
         max_depth: int = 3,
         max_retries: int = -1,
         success_threshold: float = 1e-8,
@@ -87,28 +87,16 @@ class Rebase2QuditGatePass(BasePass):
             ValueError: if `max_depth` is nonnegative.
         """
 
-        if is_sequence(gate_in_circuit):
-            if any(not isinstance(g, Gate) for g in gate_in_circuit):
-                raise TypeError('Expected Gate or Gate list.')
+        if not isinstance(gate_in_circuit, CNOTGate):
+            raise ValueError('Expected CNOT in circuit')
 
-        elif not isinstance(gate_in_circuit, Gate):
-            raise TypeError(f'Expected Gate, got {type(gate_in_circuit)}.')
+        if not isinstance(new_gate, NRootCNOTGate):
+            raise ValueError('Expected new gate to be NRootCNOT')
+        
 
-        else:
-            gate_in_circuit = [gate_in_circuit]
-
-        if any(g.num_qudits != 2 for g in gate_in_circuit):
-            raise ValueError('Expected 2-qudit gate.')
-
-        if is_sequence(new_gate):
-            if any(not isinstance(g, Gate) for g in new_gate):
-                raise TypeError('Expected Gate or Gate list.')
-
-        elif not isinstance(new_gate, Gate):
-            raise TypeError(f'Expected Gate, got {type(new_gate)}.')
-
-        else:
-            new_gate = [new_gate]
+        gate_in_circuit = [gate_in_circuit]
+        nroot = new_gate.root
+        new_gate = [new_gate]
 
         if any(g.num_qudits != 2 for g in new_gate):
             raise ValueError('Expected 2-qudit gate.')
@@ -150,6 +138,7 @@ class Rebase2QuditGatePass(BasePass):
 
         self.gates: list[Gate] = list(gate_in_circuit)
         self.ngates = new_gate
+        self.nroot = nroot
         self.max_depth = max_depth  # TODO: Compute from weyl chamber coords
         self.max_retries = max_retries
         self.success_threshold = success_threshold
@@ -247,7 +236,23 @@ class Rebase2QuditGatePass(BasePass):
                             best_count = self.counts[i]
 
                 if best_index is None:
-                    circuit.unfold(point)
+                    if self.max_retries >= 0 and num_retries > self.max_retries:
+                        # Using rule ...
+                        # Even overdrive does not work, do straight replacement
+                        _logger.debug("USING RULE!!!!")
+                        old_circ: Circuit = circuit[point].gate._circuit
+
+                        new_circ = Circuit(old_circ.num_qudits)
+                        for cycle, op in old_circ.operations_with_cycles():
+                            if op.gate in self.gates:
+                                for i in range(self.nroot):
+                                    new_circ.append_gate(NRootCNOTGate(self.nroot), op.location)
+                            else:
+                                new_circ.append(op)
+                        # print()
+                        circuit.replace_with_circuit(point, new_circ)
+                    else:
+                        circuit.unfold(point)
                     continue
 
                 _logger.debug(self.replaced_log_messages[best_index])
@@ -261,7 +266,6 @@ class Rebase2QuditGatePass(BasePass):
                     if g in circuit.gate_set:
                         data["finished"] = False
                     break
-                
     def group_near_gates(
         self,
         circuit: Circuit,
