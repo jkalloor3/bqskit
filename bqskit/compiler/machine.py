@@ -178,6 +178,42 @@ class MachineModel:
                     fid *= self.fidelities[tuple(sorted(op.location))]
         return fid
     
+
+    def calculate_cb_fidelity(self, circuit: Circuit, topology_penalty = False):
+        fid = 1
+        degs = self.coupling_graph.get_qudit_degrees()
+        # Convert from avg. fidelity to process fideliy factor
+        avg_to_proc = (2 ** circuit.num_qudits + 1) / (2 ** circuit.num_qudits)
+        for cycle in range(circuit.num_cycles):
+            single_gate_errors = {}
+            multi_gate_errors = {}
+            for qud in range(circuit.num_qudits):
+                try:
+                    op = circuit.get_operation((cycle, qud))
+                    if op.num_qudits > 1:
+                        multi_gate_errors[tuple(sorted(op.location))] = (1 - self.fidelities[tuple(sorted(op.location))]) * (avg_to_proc)
+                    else:
+                        single_gate_errors[tuple(sorted(op.location))] = (1 - self.fidelities[tuple(sorted(op.location))]) * (avg_to_proc)
+                except:
+                    continue
+            
+            # Calculate process infidelity
+            single_gate_cycle_fidelity = 1 - sum(single_gate_errors.values())
+
+            # Calculate the process infidelity for the 2-qubit
+            total_error = 0
+            for gate in multi_gate_errors:
+                if topology_penalty:
+                    total_error += (degs[gate[0]] + degs[gate[1]]) * multi_gate_errors[gate]
+                else:
+                    total_error += multi_gate_errors[gate] * len(gate)
+
+            multi_gate_cycle_fidelity = 1 - total_error
+
+            fid *= (single_gate_cycle_fidelity * multi_gate_cycle_fidelity)
+
+        return fid
+
     def calculate_latency(self, circuit: Circuit):
         latencies = np.zeros(circuit.num_qudits, dtype=int)
         for op in circuit:
