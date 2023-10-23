@@ -45,7 +45,7 @@ if __name__ == '__main__':
     #     circuit.append_gate(BGate(), tuple(qubits))
     #     circuit.append_gate(U3Gate(), qubits[0], np.random.random(3) * np.pi)
 
-    circuit = pickle.load(open("min_example_error.pkl", "rb"))
+    circuit = pickle.load(open("min_example_err2.pkl", "rb"))
 
     # pickle.dump(circuit, open("min_example_error.pkl", "wb"))
 
@@ -54,9 +54,9 @@ if __name__ == '__main__':
 
     compiler = Compiler()
 
-    gate_set = GateSet([BGate(), U3Gate()])
+    gate_set = GateSet([CZGate(), U3Gate()])
 
-    machine_model = mesh_model(5, 2, gate_set)
+    machine_model = mesh_model(3, 2, gate_set)
 
     print(machine_model.num_qudits)
     print(machine_model.gate_set)
