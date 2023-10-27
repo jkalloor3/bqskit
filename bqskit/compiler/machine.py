@@ -214,6 +214,39 @@ class MachineModel:
 
         return fid
 
+    def get_cb_fid_eqn(circuit: Circuit):
+        def cb_fid(x: float, y: float):
+            # Convert from avg. fidelity to process fideliy factor
+            avg_to_proc = (2 ** circuit.num_qudits + 1) / (2 ** circuit.num_qudits)
+            fid = 1
+            for cycle in range(circuit.num_cycles):
+                single_gate_errors = {}
+                multi_gate_errors = {}
+                for qud in range(circuit.num_qudits):
+                    try:
+                        op = circuit.get_operation((cycle, qud))
+                        if op.num_qudits > 1:
+                            multi_gate_errors[tuple(sorted(op.location))] = (1 - y) * (avg_to_proc)
+                        else:
+                            single_gate_errors[tuple(sorted(op.location))] = (1 - x) * (avg_to_proc)
+                    except:
+                        continue
+                
+                # Calculate process infidelity
+                single_gate_cycle_fidelity = 1 - sum(single_gate_errors.values())
+
+                # Calculate the process infidelity for the 2-qubit
+                total_error = 0
+                for gate in multi_gate_errors:
+                    total_error += multi_gate_errors[gate] * len(gate)
+
+                multi_gate_cycle_fidelity = 1 - total_error
+
+                fid *= (single_gate_cycle_fidelity * multi_gate_cycle_fidelity)
+            return fid
+    
+        return cb_fid
+
     def calculate_latency(self, circuit: Circuit):
         latencies = np.zeros(circuit.num_qudits, dtype=int)
         for op in circuit:

@@ -304,6 +304,7 @@ from bqskit.passes.util.record import RecordStatsPass
 from bqskit.passes.util.structure import StructureAnalysisPass
 from bqskit.passes.util.unfold import UnfoldPass
 from bqskit.passes.util.update import UpdateDataPass
+from bqskit.passes.util.get_unitaries import GetUnitariesPass
 
 
 __all__ = [
@@ -408,4 +409,5 @@ __all__ = [
     'CalculatePAMErrorsPass',
     'UnTagPAMBlockDataPass',
     'PAMVerificationSequence',
+    'GetUnitariesPass'
 ]

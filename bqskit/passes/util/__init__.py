@@ -15,6 +15,7 @@ from bqskit.passes.util.structure import StructureAnalysisPass
 from bqskit.passes.util.unfold import UnfoldPass
 from bqskit.passes.util.update import UpdateDataPass
 from bqskit.passes.util.replacewithcx import ReplaceWithCXPass
+from bqskit.passes.util.get_unitaries import GetUnitariesPass
 
 __all__ = [
     'CompressPass',
@@ -23,7 +24,7 @@ __all__ = [
     'UnfoldPass',
     'UpdateDataPass',
     'ToU3Pass',
-    'ReplaceWithCXPass'
+    'ReplaceWithCXPass',
     'BlockConversionPass',
     'LogPass',
     'ExtendBlockSizePass',
@@ -31,4 +32,5 @@ __all__ = [
     'FillSingleQuditGatesPass',
     'ToVariablePass',
     'StructureAnalysisPass',
+    'GetUnitariesPass'
 ]

@@ -214,6 +214,18 @@ class Circuit(DifferentiableUnitary, StateVectorMap, Collection[Operation]):
             new_depth = max(qudit_depths[list(op.location)]) + 1
             qudit_depths[list(op.location)] = new_depth
         return int(max(qudit_depths))
+    
+    @property
+    def single_qudit_depth(self) -> int:
+        """The length of the critical path excluding single-qudit gates."""
+        qudit_depths = np.zeros(self.num_qudits, dtype=int)
+        for op in self:
+            if op.num_qudits == 1:
+                new_depth = max(qudit_depths[list(op.location)]) + 1
+                qudit_depths[list(op.location)] = new_depth
+            else:
+                continue
+        return int(max(qudit_depths))
 
     @property
     def parallelism(self) -> float:

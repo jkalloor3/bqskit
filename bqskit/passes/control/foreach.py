@@ -259,6 +259,7 @@ class ForEachBlockPass(BasePass):
         points: list[CircuitPoint] = []
         ops: list[Operation] = []
         error_sum = 0.0
+        all_unitaries = []
         for i, (cycle, op) in enumerate(blocks):
             subcircuit = completed_subcircuits[i]
             block_data = completed_block_datas[i]
@@ -280,12 +281,16 @@ class ForEachBlockPass(BasePass):
                 error_sum += block_data.error
             else:
                 block_data['replaced'] = False
+            if "block_unitaries" in block_data:
+                all_unitaries.extend(block_data["block_unitaries"])
 
         # Replace blocks
         circuit.batch_replace(points, ops)
 
         # Record block data into pass data
         data[self.key].append(completed_block_datas)
+
+        data["unitaries"] = all_unitaries
 
         # Record error
         data.update_error_mul(error_sum)
