@@ -13,7 +13,6 @@ import numpy as np
 import pickle
 from bqskit.qis.permutation import PermutationMatrix
 
-
 def mesh_model(n_rows, n_cols, gate_set):
     return MachineModel(n_cols * n_rows, coupling_graph=CouplingGraph.grid(n_rows, n_cols), gate_set=gate_set)
 
@@ -61,10 +60,7 @@ if __name__ == '__main__':
     print(machine_model.num_qudits)
     print(machine_model.gate_set)
 
-    # Embed into larger circuit
-    new_circuit = Circuit(machine_model.num_qudits)
-    new_circuit.append_circuit(circuit=circuit, location=tuple(range(circuit.num_qudits)))
-    circuit.become(new_circuit)
+
 
     print(circuit.num_operations)
     print(circuit.num_qudits)
@@ -81,13 +77,19 @@ if __name__ == '__main__':
     print(f"Upper Bound Error: {upper_bound_error}")
 
     # Calculate actual error
-
+    new_circuit = Circuit(machine_model.num_qudits)
+    new_circuit.append_circuit(circuit=circuit, location=tuple(range(circuit.num_qudits)))
+    circuit.become(new_circuit)
     un1 = circuit.get_unitary()
+    
     pi = data['initial_mapping']
     pf = data['final_mapping']
 
     PI = PermutationMatrix.from_qubit_location(out_circuit.num_qudits, pi)
     PF = PermutationMatrix.from_qubit_location(out_circuit.num_qudits, pf)
+
+    print("Total PI: ", pi)
+    print("Total PF: ", pf)
 
     un2 = out_circuit.get_unitary()
 
