@@ -58,9 +58,6 @@ class CalculatePAMErrorsPass(BasePass):
                 pf = op.gate.tag['post_perm']
                 in_utry = op.gate.tag['original_utry']
                 n = in_utry.num_qudits
-                assert(n == op.gate.num_qudits)
-                print("PI: ", pi)
-                print("PF: ", pf)
 
                 exact_circuit.append_gate(PermutationGate(n, CalculatePAMErrorsPass.get_opp_perm(pi)), op.location)
                 exact_circuit.append_gate(ConstantUnitaryGate(in_utry),  op.location)
