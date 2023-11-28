@@ -10,6 +10,8 @@ from bqskit.ir.point import CircuitPoint
 from bqskit.passes import *
 from bqskit.runtime import get_runtime
 import pickle
+from bqskit.ir.opt.cost.functions import HilbertSchmidtResidualsGenerator, HilbertSchmidtCostGenerator
+from bqskit.ir.opt.minimizers.lbfgs import LBFGSMinimizer
 
 from pathlib import Path
 
@@ -36,6 +38,7 @@ def parse_data(
 # Circ 
 if __name__ == '__main__':
     circ_type = argv[1]
+    method = argv[2]
 
     if circ_type == "TFIM":
         target = np.loadtxt("/pscratch/sd/j/jkalloor/bqskit/ensemble_benchmarks/tfim_4-1.unitary", dtype=np.complex128)
@@ -67,56 +70,44 @@ if __name__ == '__main__':
 
 
     # Just use LEAP
-    # method = "leap"
-    # synthesis_pass = LEAPSynthesisPass(
-    #     store_partial_solutions=True,
-    #     success_threshold = 1e-10,
-    #     partial_success_threshold=1e-3
-    # )
+    if method == "leap":
+        synthesis_pass = LEAPSynthesisPass(
+            store_partial_solutions=True,
+            success_threshold = 1e-10,
+            partial_success_threshold=1e-6,
+            cost=HilbertSchmidtCostGenerator(),
+            instantiate_options={
+                'min_iters': 100,
+                'cost_fn_gen': HilbertSchmidtCostGenerator(),
+                'method': 'minimization',
+                'minimizer': LBFGSMinimizer(),
+            }
+        )
+        
+        out_circ, data = compiler.compile(initial_circ, [synthesis_pass, 
+                                                                CreateEnsemblePass(success_threshold=1e-6, 
+                                                                                num_circs=20)], True)
+    elif method == "treescan":
+        method = "treescan"
+        workflow = [
+            QFASTDecompositionPass(success_threshold=1e-14),
+            TreeScanningGateRemovalPass(success_threshold=1e-3, store_all_solutions=True, tree_depth=8),
+            CreateEnsemblePass(success_threshold=1e-3, num_circs=20)
+        ]
+
+        out_circ, data = compiler.compile(initial_circ, workflow=workflow, request_data=True)
     
-    # out_circ, data = compiler.compile(initial_circ, [synthesis_pass, 
-    #                                                         CreateEnsemblePass(success_threshold=1e-3, 
-    #                                                                            num_circs=500)], True)
-    
-    # approx_circuits: list[Circuit] = data["ensemble"]
-    # # ensemble_dists = data["ensemble_dists"]
-
-    # utries = [x.get_unitary() for x in approx_circuits]
-
-    # dists = [x.get_distance_from(target) for x in utries]
-    # dists = [x[1] for x in approx_circuits]
-
-
-
-    # # data = data[ForEachBlockPass.key]
-    # psols, pts = parse_data(blocked_circuit, data)
-
-    # print(len(psols))
-
-
-    # Use QFAST and Scanning Gate to get solutions
-    method = "scan"
-    workflow = [
-        QFASTDecompositionPass(success_threshold=1e-12),
-        ScanningGateRemovalPass(success_threshold=1e-3, store_all_solutions=True),
-        CreateEnsemblePass(success_threshold=1e-3, num_circs=500)
-    ]
-
-    out_circ, data = compiler.compile(initial_circ, workflow=workflow, request_data=True)
-
-    print("Finished Compiling!")
     approx_circuits: list[Circuit] = data["ensemble"]
     # ensemble_dists = data["ensemble_dists"]
 
     utries = [x.get_unitary() for x in approx_circuits]
 
-    dists = [x.get_distance_from(target) for x in utries]
+    dists = [x.get_distance_from(target, 1) for x in utries[:10]]
+    dists2 = [HilbertSchmidtCostGenerator().calc_cost(x, target) for x in approx_circuits[:10]]
     # dists = [x[1] for x in approx_circuits]
 
-
-
     # Store approximate solutions
-    dir = f"ensemble_approx_circuits/{method}/{circ_type}/"
+    dir = f"ensemble_approx_circuits/{method}_tightest/{circ_type}/"
 
     Path(dir).mkdir(parents=True, exist_ok=True)
 
@@ -126,6 +117,7 @@ if __name__ == '__main__':
 
     print(len(approx_circuits))
     print(dists)
+    print(dists2)
 
 
 

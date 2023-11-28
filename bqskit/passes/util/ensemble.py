@@ -8,7 +8,8 @@ from bqskit.compiler.passdata import PassData
 from bqskit.ir.circuit import Circuit
 from bqskit.runtime import get_runtime
 from typing import Any
-from bqskit.ir.opt.cost.functions import HilbertSchmidtResidualsGenerator
+from bqskit.ir.opt.cost.functions import HilbertSchmidtResidualsGenerator, HilbertSchmidtCostGenerator
+from bqskit.ir.opt.minimizers.lbfgs import LBFGSMinimizer
 from bqskit.ir.opt.cost.generator import CostFunctionGenerator
 
 _logger = logging.getLogger(__name__)
@@ -19,7 +20,7 @@ class CreateEnsemblePass(BasePass):
 
     def __init__(self, success_threshold = 1e-4, 
                  num_circs = 1000,
-                 cost: CostFunctionGenerator = HilbertSchmidtResidualsGenerator(),) -> None:
+                 cost: CostFunctionGenerator = HilbertSchmidtCostGenerator(),) -> None:
         """
         Construct a ToU3Pass.
 
@@ -31,10 +32,18 @@ class CreateEnsemblePass(BasePass):
         self.success_threshold = success_threshold
         self.num_circs = num_circs
         self.cost = cost
+        # self.instantiate_options: dict[str, Any] = {
+        #     'dist_tol': self.success_threshold,
+        #     'min_iters': 100,
+        #     'cost_fn_gen': self.cost,
+        # }
+
         self.instantiate_options: dict[str, Any] = {
             'dist_tol': self.success_threshold,
             'min_iters': 100,
             'cost_fn_gen': self.cost,
+            'method': 'minimization',
+            'minimizer': LBFGSMinimizer(),
         }
 
     async def run(self, circuit: Circuit, data: PassData) -> None:

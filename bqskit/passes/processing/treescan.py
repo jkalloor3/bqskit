@@ -9,11 +9,13 @@ from bqskit.compiler.basepass import BasePass
 from bqskit.compiler.passdata import PassData
 from bqskit.ir.circuit import Circuit
 from bqskit.ir.operation import Operation
-from bqskit.ir.opt.cost.functions import HilbertSchmidtResidualsGenerator
+from bqskit.ir.opt.cost.functions import HilbertSchmidtResidualsGenerator, HilbertSchmidtCostGenerator
+from bqskit.ir.opt.minimizers.lbfgs import LBFGSMinimizer
 from bqskit.ir.opt.cost.generator import CostFunctionGenerator
 from bqskit.utils.typing import is_real_number
 import time
 from bqskit.runtime import get_runtime
+
 
 _logger = logging.getLogger(__name__)
 
@@ -34,10 +36,11 @@ class TreeScanningGateRemovalPass(BasePass):
         self,
         start_from_left: bool = True,
         success_threshold: float = 1e-8,
-        cost: CostFunctionGenerator = HilbertSchmidtResidualsGenerator(),
+        cost: CostFunctionGenerator = HilbertSchmidtCostGenerator(),
         instantiate_options: dict[str, Any] = {},
         tree_depth: int = 1,
         collection_filter: Callable[[Operation], bool] | None = None,
+        store_all_solutions: bool = False
     ) -> None:
         """
         Construct a ScanningGateRemovalPass.
@@ -98,10 +101,13 @@ class TreeScanningGateRemovalPass(BasePass):
         self.start_from_left = start_from_left
         self.success_threshold = success_threshold
         self.cost = cost
+        self.store_all_solutions = True
         self.instantiate_options: dict[str, Any] = {
             'dist_tol': self.success_threshold,
             'min_iters': 100,
             'cost_fn_gen': self.cost,
+            'method': 'minimization',
+            'minimizer': LBFGSMinimizer(),
         }
         self.instantiate_options.update(instantiate_options)
 
@@ -147,6 +153,8 @@ class TreeScanningGateRemovalPass(BasePass):
 
         ops_left = list(circuit.operations_with_cycles(reverse=reverse_iter))
 
+        all_sols = []
+
         while ops_left:
             chunk, ops_left = ops_left[:self.tree_depth], ops_left[self.tree_depth:]
 
@@ -175,6 +183,14 @@ class TreeScanningGateRemovalPass(BasePass):
             dists = [self.cost(c, target) for c in instantiated_circuits]
             _logger.debug(f'Distances: {dists}')
 
+
+            if self.store_all_solutions:
+                # Pick least count with least dist
+                for i, dist in enumerate(dists):
+                    c = instantiated_circuits[i]
+                    if dist < self.success_threshold:
+                        all_sols.append((c, dist))
+
             # Pick least count with least dist
             for i, dist in enumerate(dists):
                 if dist < self.success_threshold:
@@ -183,6 +199,7 @@ class TreeScanningGateRemovalPass(BasePass):
                     break
 
         circuit.become(circuit_copy)
+        data["scan_sols"] = all_sols
         print(f"Num Instantiations: {TreeScanningGateRemovalPass.num_instantiations}")
         print(f"Instantiation Time: {TreeScanningGateRemovalPass.instantiation_time}")
         print(f"Creation Time: {TreeScanningGateRemovalPass.tree_creation_time}")
