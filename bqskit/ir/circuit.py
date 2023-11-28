@@ -3138,6 +3138,7 @@ class Circuit(DifferentiableUnitary, StateVectorMap, Collection[Operation]):
             if r1 != r2:
                 return False
 
+        print("Comparing Circs!")
         return all(op1 == op2 for op1, op2 in zip(self, rhs))
 
     def __ne__(self, rhs: object) -> bool:

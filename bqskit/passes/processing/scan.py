@@ -29,6 +29,7 @@ class ScanningGateRemovalPass(BasePass):
         cost: CostFunctionGenerator = HilbertSchmidtResidualsGenerator(),
         instantiate_options: dict[str, Any] = {},
         collection_filter: Callable[[Operation], bool] | None = None,
+        store_all_solutions: bool = True
     ) -> None:
         """
         Construct a ScanningGateRemovalPass.
@@ -93,6 +94,7 @@ class ScanningGateRemovalPass(BasePass):
             'min_iters': 100,
             'cost_fn_gen': self.cost,
         }
+        self.store_all_solutions = store_all_solutions
         self.instantiate_options.update(instantiate_options)
 
     async def run(self, circuit: Circuit, data: PassData) -> None:
@@ -105,6 +107,7 @@ class ScanningGateRemovalPass(BasePass):
         _logger.debug(f'Starting scanning gate removal on the {start}.')
 
         target = self.get_target(circuit, data)
+        all_solutions = []
 
         circuit_copy = circuit.copy()
         reverse_iter = not self.start_from_left
@@ -128,9 +131,15 @@ class ScanningGateRemovalPass(BasePass):
             working_copy.pop((cycle, op.location[0]))
             working_copy.instantiate(target, **instantiate_options)
 
-            if self.cost(working_copy, target) < self.success_threshold:
+            working_cost = self.cost(working_copy, target)
+            if working_cost < self.success_threshold:
+                if self.store_all_solutions:
+                    all_solutions.append((working_copy.copy(), working_cost))
                 _logger.debug('Successfully removed operation.')
                 circuit_copy = working_copy
+
+        if self.store_all_solutions:
+            data["scan_sols"] = all_solutions
 
         circuit.become(circuit_copy)
 

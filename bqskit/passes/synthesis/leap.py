@@ -50,6 +50,7 @@ class LEAPSynthesisPass(SynthesisPass):
         partials_per_depth: int = 25,
         min_prefix_size: int = 3,
         instantiate_options: dict[str, Any] = {},
+        partial_success_threshold: float = 1e-3,
     ) -> None:
         """
         Construct a search-based synthesis pass.
@@ -149,6 +150,7 @@ class LEAPSynthesisPass(SynthesisPass):
         self.heuristic_function = heuristic_function
         self.layer_gen = layer_generator
         self.success_threshold = success_threshold
+        self.partial_success_threshold = partial_success_threshold
         self.cost = cost
         self.max_layer = max_layer
         self.min_prefix_size = min_prefix_size
@@ -191,6 +193,7 @@ class LEAPSynthesisPass(SynthesisPass):
 
         # Track partial solutions
         psols: dict[int, list[tuple[Circuit, float]]] = {}
+        scan_sols: list[tuple[Circuit, float]] = []
 
         _logger.debug(f'Search started, initial layer has cost: {best_dist}.')
 
@@ -225,6 +228,7 @@ class LEAPSynthesisPass(SynthesisPass):
                     _logger.debug('Successful synthesis.')
                     if self.store_partial_solutions:
                         data['psols'] = psols
+                        data['scan_sols'] = scan_sols
                     return circuit
 
                 if self.check_new_best(layer + 1, dist, best_layer, best_dist):
@@ -251,6 +255,9 @@ class LEAPSynthesisPass(SynthesisPass):
                             frontier.add(circuit, layer + 1)
 
                 if self.store_partial_solutions:
+                    if dist < self.partial_success_threshold:
+                        scan_sols.append((circuit.copy(), dist))
+
                     if layer not in psols:
                         psols[layer] = []
 
@@ -270,6 +277,7 @@ class LEAPSynthesisPass(SynthesisPass):
         )
         if self.store_partial_solutions:
             data['psols'] = psols
+            data['scan_sols'] = scan_sols
 
         return best_circ
 

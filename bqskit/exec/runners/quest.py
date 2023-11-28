@@ -90,7 +90,19 @@ class QuestRunner(CircuitRunner):
 
     def run(self, circuit: Circuit) -> RunnerResults:
         """Execute the circuit, see CircuitRunner.run for more info."""
+        # 3. Approximate circuit
+        approx_circuits = self.get_all_circuits(circuit)
 
+        # 4. Run circuits
+        results = [self.sub_runner.run(c) for c in approx_circuits]
+
+        # 5. Average and return results
+        probs = np.sum(np.array([result.probs for result in results]), axis=0)
+        probs /= self.sample_size
+        return RunnerResults(circuit.num_qudits, circuit.radixes, probs)
+
+
+    def get_all_circuits(self, circuit: Circuit) -> list[Circuit]:
         # 1. Compile the circuit
         synthesis_pass = LEAPSynthesisPass(
             store_partial_solutions=True,
@@ -112,9 +124,21 @@ class QuestRunner(CircuitRunner):
             circuit.copy(), pass_list, True,
         )
 
+        print("Finished Synthesizing!!!")
+
+        final_circ = blocked_circuit.copy()
+
+        final_circ.unfold_all()
+
+        print([x for x in final_circ.operations()])
+
         # 2. Gather partial solutions
         data = data[ForEachBlockPass.key]
-        psols, pts = self.parse_data(blocked_circuit, data)
+        psols, pts = QuestRunner.parse_data(blocked_circuit, data)
+
+        print("Num Blocks", len(pts))
+
+        print(len(psols))
         # psols: psols[i] = list[[circuit, dist]] -> block i's partial solutions
         # pts: pts[i] = CircuitPoint -> block i's locations
 
@@ -124,17 +148,9 @@ class QuestRunner(CircuitRunner):
 
         # 3. Approximate circuit
         approx_circuits = self.approximate_circuit(blocked_circuit, psols, pts)
-
-        # 4. Run circuits
-        results = [self.sub_runner.run(c) for c in approx_circuits]
-
-        # 5. Average and return results
-        probs = np.sum(np.array([result.probs for result in results]), axis=0)
-        probs /= self.sample_size
-        return RunnerResults(circuit.num_qudits, circuit.radixes, probs)
+        return approx_circuits
 
     def parse_data(
-        self,
         blocked_circuit: Circuit,
         data: dict[Any, Any],
     ) -> tuple[list[list[tuple[Circuit, float]]], list[CircuitPoint]]:
