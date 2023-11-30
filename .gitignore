@@ -22,4 +22,4 @@ scratch/
 **/*.txt
 **/*.sh 
 **/*.qasm
-
+**/summary.json

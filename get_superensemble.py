@@ -6,6 +6,7 @@ from bqskit import compile
 import numpy as np
 from bqskit.compiler.compiler import Compiler
 from bqskit.ir.point import CircuitPoint
+from bqskit.ir.gates import CNOTGate
 # Generate a super ensemble for some error bounds
 from bqskit.passes import *
 from bqskit.runtime import get_runtime
@@ -15,44 +16,51 @@ from bqskit.ir.opt.minimizers.lbfgs import LBFGSMinimizer
 
 from pathlib import Path
 
-def parse_data(
-    circuit: Circuit,
-    data: dict,
-) -> tuple[list[list[tuple[Circuit, float]]], list[CircuitPoint]]:
-    """Parse the data outputed from synthesis."""
-    psols: list[list[tuple[Circuit, float]]] = []
-    exact_block = circuit.copy()  # type: ignore  # noqa
-    exact_block.set_params(circuit.params)
-    exact_utry = exact_block.get_unitary()
-    psols.append([(exact_block, 0.0)])
+import json
 
-    for depth, psol_list in data['psols'].items():
-        for psol in psol_list:
-            dist = psol[0].get_unitary().get_distance_from(exact_utry)
-            psols[-1].append((psol[0], dist))
+# def parse_data(
+#     circuit: Circuit,
+#     data: dict,
+# ) -> tuple[list[list[tuple[Circuit, float]]], list[CircuitPoint]]:
+#     """Parse the data outputed from synthesis."""
+#     psols: list[list[tuple[Circuit, float]]] = []
+#     exact_block = circuit.copy()  # type: ignore  # noqa
+#     exact_block.set_params(circuit.params)
+#     exact_utry = exact_block.get_unitary()
+#     psols.append([(exact_block, 0.0)])
 
-    return psols
+#     for depth, psol_list in data['psols'].items():
+#         for psol in psol_list:
+#             dist = psol[0].get_unitary().get_distance_from(exact_utry)
+#             psols[-1].append((psol[0], dist))
 
-
+#     return psols
 
 # Circ 
 if __name__ == '__main__':
     circ_type = argv[1]
     method = argv[2]
+    tol = int(argv[3])
 
     if circ_type == "TFIM":
-        target = np.loadtxt("/pscratch/sd/j/jkalloor/bqskit/ensemble_benchmarks/tfim_4-1.unitary", dtype=np.complex128)
+        initial_circ = Circuit.from_file("/pscratch/sd/j/jkalloor/bqskit/ensemble_benchmarks/tfim_3.qasm")
+        # target = np.loadtxt("/pscratch/sd/j/jkalloor/bqskit/ensemble_benchmarks/tfim_4-1.unitary", dtype=np.complex128)
     elif circ_type == "Heisenberg":
-        target = np.loadtxt("/pscratch/sd/j/jkalloor/bqskit/ensemble_benchmarks/tfim_4-1.unitary", dtype=np.complex128)
+        initial_circ = Circuit.from_file("/pscratch/sd/j/jkalloor/bqskit/ensemble_benchmarks/heisenberg_3.qasm")
+        # target = np.loadtxt("/pscratch/sd/j/jkalloor/bqskit/ensemble_benchmarks/tfim_4-1.unitary", dtype=np.complex128)
     else:
         target = np.loadtxt("/pscratch/sd/j/jkalloor/bqskit/ensemble_benchmarks/qite_3.unitary", dtype=np.complex128)
+        initial_circ = Circuit.from_unitary(target)
+
+    target = initial_circ.get_unitary()
 
     synth_circs = []
 
-    err_thresh =1e-10
+    err_thresh = 10 ** (-1 * tol)
+    extra_err_thresh = err_thresh / 100
 
-    initial_circ = Circuit.from_unitary(target)
-
+    orig_depth = initial_circ.depth
+    orig_count = initial_circ.count(CNOTGate())
 
     # workflow = [
     #     QFASTDecompositionPass(),
@@ -68,13 +76,14 @@ if __name__ == '__main__':
     # quest_runner = QuestRunner(SimulationRunner(), compiler=compiler, sample_size=1, approx_threshold=1e-4)
     # approx_circuits = quest_runner.get_all_circuits(circ)
 
+    approx_circuits: list[Circuit] = []
 
     # Just use LEAP
     if method == "leap":
         synthesis_pass = LEAPSynthesisPass(
             store_partial_solutions=True,
-            success_threshold = 1e-10,
-            partial_success_threshold=1e-6,
+            success_threshold = extra_err_thresh,
+            partial_success_threshold=err_thresh,
             cost=HilbertSchmidtCostGenerator(),
             instantiate_options={
                 'min_iters': 100,
@@ -85,29 +94,28 @@ if __name__ == '__main__':
         )
         
         out_circ, data = compiler.compile(initial_circ, [synthesis_pass, 
-                                                                CreateEnsemblePass(success_threshold=1e-6, 
-                                                                                num_circs=20)], True)
+                                                                CreateEnsemblePass(success_threshold=err_thresh, 
+                                                                                num_circs=10000)], True)
+        approx_circuits: list[Circuit] = data["ensemble"]
     elif method == "treescan":
-        method = "treescan"
         workflow = [
-            QFASTDecompositionPass(success_threshold=1e-14),
-            TreeScanningGateRemovalPass(success_threshold=1e-3, store_all_solutions=True, tree_depth=8),
-            CreateEnsemblePass(success_threshold=1e-3, num_circs=20)
+            TreeScanningGateRemovalPass(success_threshold=err_thresh, store_all_solutions=True, tree_depth=2),
+            CreateEnsemblePass(success_threshold=err_thresh, num_circs=10000)
         ]
 
         out_circ, data = compiler.compile(initial_circ, workflow=workflow, request_data=True)
-    
-    approx_circuits: list[Circuit] = data["ensemble"]
-    # ensemble_dists = data["ensemble_dists"]
+        approx_circuits: list[Circuit] = data["ensemble"]
+    elif method == "quest":
+        quest_runner = QuestRunner(SimulationRunner(), compiler=compiler, sample_size=20)
+        approx_circuits: list[Circuit] = quest_runner.get_all_circuits(circuit=initial_circ)
 
     utries = [x.get_unitary() for x in approx_circuits]
-
-    dists = [x.get_distance_from(target, 1) for x in utries[:10]]
-    dists2 = [HilbertSchmidtCostGenerator().calc_cost(x, target) for x in approx_circuits[:10]]
+    depths = [x.depth for x in approx_circuits]
+    counts = [x.count(CNOTGate()) for x in approx_circuits]
     # dists = [x[1] for x in approx_circuits]
 
     # Store approximate solutions
-    dir = f"ensemble_approx_circuits/{method}_tightest/{circ_type}/"
+    dir = f"ensemble_approx_circuits/{method}/{circ_type}/{tol}"
 
     Path(dir).mkdir(parents=True, exist_ok=True)
 
@@ -115,9 +123,20 @@ if __name__ == '__main__':
         file = f"{dir}/circ_{i}.pickle"
         pickle.dump(circ, open(file, "wb"))
 
+    summary = {}
+
+    summary["orig_depth"] = orig_depth
+    summary["orig_count"] = orig_count
+    summary["depths"] = depths
+    summary["counts"] = counts
+    summary["avg_depth"] = np.mean(depths)
+    summary["avg_count"] = np.mean(counts)
+
+    json.dump(summary, open(f"{dir}/summary.json", "w"), indent=4)
+
     print(len(approx_circuits))
-    print(dists)
-    print(dists2)
+    # print(dists)
+    # print(dists2)
 
 
 
