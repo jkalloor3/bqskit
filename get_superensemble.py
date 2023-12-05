@@ -11,8 +11,11 @@ from bqskit.ir.gates import CNOTGate
 from bqskit.passes import *
 from bqskit.runtime import get_runtime
 import pickle
-from bqskit.ir.opt.cost.functions import HilbertSchmidtResidualsGenerator, HilbertSchmidtCostGenerator
+from bqskit.ir.opt.cost.functions import HilbertSchmidtResidualsGenerator, HilbertSchmidtCostGenerator, FrobeniusCostGenerator
 from bqskit.ir.opt.minimizers.lbfgs import LBFGSMinimizer
+from bqskit.ir.opt.minimizers.scipy import ScipyMinimizer
+
+from bqskit import enable_logging
 
 from pathlib import Path
 
@@ -36,8 +39,21 @@ import json
 
 #     return psols
 
+from bqskit.ir.opt.cost.differentiable import DifferentiableCostFunction
+from bqskit.ir.opt.cost.generator import CostFunctionGenerator
+from bqskit.qis.state.state import StateVector
+from bqskit.qis.state.system import StateSystem
+
+from bqskit.ir.circuit import Circuit
+from bqskit.qis.unitary.unitarymatrix import UnitaryMatrix
+from bqskit.ir.opt.cost.function import CostFunction
+from bqskit.qis.unitary.unitary import RealVector
+import numpy.typing as npt
+
 # Circ 
 if __name__ == '__main__':
+    enable_logging(True)
+    np.set_printoptions(precision=4, threshold=np.inf, linewidth=np.inf)
     circ_type = argv[1]
     method = argv[2]
     tol = int(argv[3])
@@ -57,7 +73,7 @@ if __name__ == '__main__':
     synth_circs = []
 
     err_thresh = 10 ** (-1 * tol)
-    extra_err_thresh = err_thresh / 100
+    extra_err_thresh = 1e-8
 
     orig_depth = initial_circ.depth
     orig_count = initial_circ.count(CNOTGate())
@@ -68,7 +84,7 @@ if __name__ == '__main__':
     #     UnfoldPass(),
     # ]
 
-    compiler = Compiler()
+    compiler = Compiler(num_workers=1)
 
     # circ = compiler.compile(initial_circ, workflow=workflow)
 
@@ -78,28 +94,33 @@ if __name__ == '__main__':
 
     approx_circuits: list[Circuit] = []
 
+    generator = HilbertSchmidtCostGenerator()
+    # generator = FrobeniusCostGenerator()
+
     # Just use LEAP
     if method == "leap":
         synthesis_pass = LEAPSynthesisPass(
             store_partial_solutions=True,
             success_threshold = extra_err_thresh,
             partial_success_threshold=err_thresh,
-            cost=HilbertSchmidtCostGenerator(),
+            cost=generator,
             instantiate_options={
                 'min_iters': 100,
-                'cost_fn_gen': HilbertSchmidtCostGenerator(),
+                'cost_fn_gen': generator,
                 'method': 'minimization',
-                'minimizer': LBFGSMinimizer(),
+                'minimizer': ScipyMinimizer(),
+                'seed': 1
+                # 'multistarts': 1
             }
         )
         
         out_circ, data = compiler.compile(initial_circ, [synthesis_pass, 
                                                                 CreateEnsemblePass(success_threshold=err_thresh, 
-                                                                                num_circs=10000)], True)
+                                                                                num_circs=10)], True)
         approx_circuits: list[Circuit] = data["ensemble"]
     elif method == "treescan":
         workflow = [
-            TreeScanningGateRemovalPass(success_threshold=err_thresh, store_all_solutions=True, tree_depth=2),
+            TreeScanningGateRemovalPass(success_threshold=err_thresh, store_all_solutions=True, tree_depth=7),
             CreateEnsemblePass(success_threshold=err_thresh, num_circs=10000)
         ]
 
@@ -115,7 +136,7 @@ if __name__ == '__main__':
     # dists = [x[1] for x in approx_circuits]
 
     # Store approximate solutions
-    dir = f"ensemble_approx_circuits/{method}/{circ_type}/{tol}"
+    dir = f"ensemble_approx_circuits_frobenius/{method}/{circ_type}/{tol}"
 
     Path(dir).mkdir(parents=True, exist_ok=True)
 

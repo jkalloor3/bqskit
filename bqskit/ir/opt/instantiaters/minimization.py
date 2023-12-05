@@ -62,7 +62,12 @@ class Minimization(Instantiater):
         """Instantiate `circuit`, see Instantiater for more info."""
         cost = self.cost_fn_gen.gen_cost(circuit, target)
         # print(x0, circuit.num_params, circuit.gate_counts)
-        return self.minimizer.minimize(cost, x0)
+        print("STARTING")
+        final_cost =  self.minimizer.minimize(cost, x0)
+        print("FINAL Parameters", final_cost)
+        # Calculated grad
+        # print("Calculated Gradient", cost.get_cost_and_grad(x0)[1])
+        return final_cost
 
     @staticmethod
     def is_capable(circuit: Circuit) -> bool:

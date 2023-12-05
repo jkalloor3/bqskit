@@ -34,4 +34,4 @@ class ScipyMinimizer(Minimizer):
         """Solve the minimization problem by using scipy."""
         if len(x0) == 0:
             return np.array([])
-        return minimize(cost, x0, tol=self.tol).x
+        return minimize(cost, x0, tol=self.tol, jac=cost.get_grad).x

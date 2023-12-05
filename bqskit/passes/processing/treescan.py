@@ -108,6 +108,7 @@ class TreeScanningGateRemovalPass(BasePass):
             'cost_fn_gen': self.cost,
             'method': 'minimization',
             'minimizer': LBFGSMinimizer(),
+            'multistarts': 2
         }
         self.instantiate_options.update(instantiate_options)
 

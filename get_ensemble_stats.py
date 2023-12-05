@@ -15,7 +15,7 @@ import glob
 import matplotlib.pyplot as plt
 
 
-from bqskit.utils.math import canonical_unitary
+from bqskit.utils.math import canonical_unitary, global_phase
 
 def get_upperbound_error(unitaries: list[UnitaryMatrix], target):
     np_uns = [u.numpy for u in unitaries]
@@ -56,15 +56,21 @@ if __name__ == '__main__':
     np.set_printoptions(precision=2, threshold=np.inf, linewidth=np.inf)
 
     if circ_type == "TFIM":
-        target = np.loadtxt("ensemble_benchmarks/tfim_4-1.unitary", dtype=np.complex128)
+        initial_circ = Circuit.from_file("ensemble_benchmarks/tfim_3.qasm")
+        # target = np.loadtxt("/pscratch/sd/j/jkalloor/bqskit/ensemble_benchmarks/tfim_4-1.unitary", dtype=np.complex128)
     elif circ_type == "Heisenberg":
-        target = np.loadtxt("ensemble_benchmarks/tfim_4-1.unitary", dtype=np.complex128)
+        initial_circ = Circuit.from_file("ensemble_benchmarks/heisenberg_3.qasm")
+        # target = np.loadtxt("/pscratch/sd/j/jkalloor/bqskit/ensemble_benchmarks/tfim_4-1.unitary", dtype=np.complex128)
     else:
         target = np.loadtxt("ensemble_benchmarks/qite_3.unitary", dtype=np.complex128)
+        initial_circ = Circuit.from_unitary(target)
+
+    target = initial_circ.get_unitary()
 
     method = argv[2]
+    tol = int(argv[3])
     # Store approximate solutions
-    dir = f"ensemble_approx_circuits/{method}_tighest/{circ_type}/{circ_type}/*.pickle"
+    dir = f"ensemble_approx_circuits_correct/{method}/{circ_type}/{tol}/*.pickle"
 
     print(dir)
 
@@ -75,11 +81,22 @@ if __name__ == '__main__':
     all_circs = []
     all_utries = []
 
+    phase_diff = global_phase(target.numpy)
+
     for circ_file in circ_files:
         circ: Circuit = pickle.load(open(circ_file, "rb"))
         all_circs.append(circ)
-        all_utries.append(UnitaryMatrix(canonical_unitary(circ.get_unitary().numpy)))
+        utry = circ.get_unitary()
+        can_utry = UnitaryMatrix(canonical_unitary(utry.numpy))
+        fixed_utry = UnitaryMatrix(can_utry.numpy * phase_diff)
 
+        print(utry.get_distance_from(target, 2))
+        # print(can_utry.get_distance_from(target))
+        print(can_utry.get_frobenius_distance(canonical_unitary(target.numpy)))
+        print(fixed_utry.get_frobenius_distance(target))
+        print("--------------------")
+
+    exit(0)
     print(get_upperbound_error(all_utries, target))
 
 

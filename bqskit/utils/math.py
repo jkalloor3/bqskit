@@ -257,3 +257,34 @@ def canonical_unitary(
     correction_phase = 0 - std_phase
     std_correction = np.exp(1j * correction_phase)
     return std_correction * special_unitary
+
+def global_phase(
+    unitary: npt.NDArray[np.complex128],
+) -> np.complex128:
+    """
+    Computes the global phase w.r.t the canonical untiary
+
+    If unitary matrices V, W differ only by a global phase, then
+    canonical_unitary(V) == canonical_unitary(W).
+
+    Args:
+        unitary (npt.NDArray[np.complex128]): A unitary matrix.
+
+    Returns:
+        npt.NDArray[np.complex128]: A unitary matrix.
+
+    References:
+        https://arxiv.org/abs/2306.05622
+    """
+    determinant = np.linalg.det(unitary)
+    dimension = len(unitary)
+    # Compute special unitary
+    global_phase = np.angle(determinant) / dimension
+    global_phase = global_phase % (2 * np.pi / dimension)
+    global_phase_factor = np.exp(-1j * global_phase)
+    special_unitary = global_phase_factor * unitary
+    # Standardize speical unitary to account for exp(-i2pi/N) differences
+    first_row_mags = np.linalg.norm(special_unitary[0, :], ord=2)
+    index = np.argmax(first_row_mags)
+    std_phase = np.angle(special_unitary[0, index])
+    return np.exp(1j * std_phase)

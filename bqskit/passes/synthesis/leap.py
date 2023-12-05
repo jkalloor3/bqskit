@@ -181,6 +181,9 @@ class LEAPSynthesisPass(SynthesisPass):
         frontier = Frontier(utry, self.heuristic_function)
         initial_layer = layer_gen.gen_initial_layer(utry, data)
         initial_layer.instantiate(utry, **instantiate_options)
+        return
+
+
         frontier.add(initial_layer, 0)
 
         # Track best circuit, initially the initial layer

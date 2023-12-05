@@ -22,8 +22,8 @@ python get_superensemble.py {circ} {method} {tol}
 if __name__ == '__main__':
     # mesh_gates = ["cx", "ecr"]
     circs = ["TFIM", "Heisenberg"]
-    tols = range(3, 10)
-    methods = ["treescan"]
+    tols = range(1, 7)
+    methods = ["treescan", "leap"]
     # device_gates = ["cx-b"]
     part_sizes = [3]
     for circ in circs:

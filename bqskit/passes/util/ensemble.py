@@ -11,6 +11,8 @@ from typing import Any
 from bqskit.ir.opt.cost.functions import HilbertSchmidtResidualsGenerator, HilbertSchmidtCostGenerator
 from bqskit.ir.opt.minimizers.lbfgs import LBFGSMinimizer
 from bqskit.ir.opt.cost.generator import CostFunctionGenerator
+from bqskit.ir.gates import CNOTGate
+import numpy as np
 
 _logger = logging.getLogger(__name__)
 
@@ -52,12 +54,18 @@ class CreateEnsemblePass(BasePass):
 
         init_approx_circuits: list[tuple[Circuit, float]] = data["scan_sols"]
 
-        init_circs = [x[0] for x in init_approx_circuits]
+        # Only use the shortest distance / 10
+        num_init_circs = min(max(self.num_circs // 10, 4), len(init_approx_circuits))
+        all_init_circs = [x[0] for x in init_approx_circuits]
+        counts = [x.count(CNOTGate()) for x in all_init_circs]
+        sort_inds = np.argsort(counts)[:num_init_circs]
+
+        init_circs = [all_init_circs[i] for i in sort_inds]
 
         all_circs = [x for x in init_circs]
-        all_dists = set([x[1] for x in init_approx_circuits])
+        # all_dists = set([x[1] for x in init_approx_circuits])
 
-        print(all_dists)
+        # print(all_dists)
 
         target = self.get_target(circuit, data)
 
@@ -66,6 +74,14 @@ class CreateEnsemblePass(BasePass):
         fails = 0
 
         print("Init Circs!", len(init_circs))
+
+        num_workers = 512
+
+        num_multistarts = num_workers // len(init_circs)
+
+        if num_multistarts > 0: # Utilize workers better
+            self.instantiate_options["multistarts"] = num_multistarts
+
         while len(all_circs) < self.num_circs:
             # Pick all circuits
 
@@ -85,7 +101,7 @@ class CreateEnsemblePass(BasePass):
                     # if cost not in all_dists:
                     #     # Cheating way to check if unitary is new
                     all_circs.append(circ)
-                    all_dists.add(cost)
+                    # all_dists.add(cost)
                     added_circ = True
                     print(len(all_circs))
                 
