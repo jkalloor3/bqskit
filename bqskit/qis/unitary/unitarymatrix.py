@@ -219,6 +219,13 @@ class UnitaryMatrix(Unitary, StateVectorMap, NDArrayOperatorsMixin):
         dist = np.power(1 - (frac ** degree), 1.0 / degree)
         return dist if dist > 0.0 else 0.0
     
+
+    def get_frobenius_norm(self) -> float:
+        inner_product = np.real(np.trace(self.numpy.conj().T @ self.numpy))
+        # inner_product = np.abs(np.sum(np.einsum("ij,ij->", diff.conj().T, diff)))
+        return inner_product
+
+
     def get_frobenius_distance(self, other: UnitaryLike) -> float:
         """
         Return the distance between `self` and `other`.
@@ -241,9 +248,9 @@ class UnitaryMatrix(Unitary, StateVectorMap, NDArrayOperatorsMixin):
         """
         other = UnitaryMatrix(other, check_arguments=False)
         diff: UnitaryMatrix = self - other
-        inner_product = np.abs(np.trace(diff.conj().T @ diff))
+        inner_product = np.real(np.trace(diff.conj().T @ diff))
         # inner_product = np.abs(np.sum(np.einsum("ij,ij->", diff.conj().T, diff)))
-        return np.sqrt(inner_product)
+        return inner_product
 
     def get_statevector(self, in_state: StateLike) -> StateVector:
         """

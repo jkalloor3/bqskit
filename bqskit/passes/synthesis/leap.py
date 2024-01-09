@@ -181,8 +181,6 @@ class LEAPSynthesisPass(SynthesisPass):
         frontier = Frontier(utry, self.heuristic_function)
         initial_layer = layer_gen.gen_initial_layer(utry, data)
         initial_layer.instantiate(utry, **instantiate_options)
-        return
-
 
         frontier.add(initial_layer, 0)
 
@@ -227,8 +225,22 @@ class LEAPSynthesisPass(SynthesisPass):
             for circuit in circuits:
                 dist = self.cost.calc_cost(circuit, utry)
 
+
+                if self.store_partial_solutions:
+                    if dist < self.partial_success_threshold:
+                        scan_sols.append((circuit.copy(), dist))
+
+                    if layer not in psols:
+                        psols[layer] = []
+
+                    psols[layer].append((circuit.copy(), dist))
+
+                    if len(psols[layer]) > self.partials_per_depth:
+                        psols[layer].sort(key=lambda x: x[1])
+                        del psols[layer][-1]
+
                 if dist < self.success_threshold:
-                    _logger.debug('Successful synthesis.')
+                    _logger.debug(f'Successful synthesis with distance {dist:.6e}.')
                     if self.store_partial_solutions:
                         data['psols'] = psols
                         data['scan_sols'] = scan_sols
@@ -257,19 +269,6 @@ class LEAPSynthesisPass(SynthesisPass):
                         if self.max_layer is None or layer + 1 < self.max_layer:
                             frontier.add(circuit, layer + 1)
 
-                if self.store_partial_solutions:
-                    if dist < self.partial_success_threshold:
-                        scan_sols.append((circuit.copy(), dist))
-
-                    if layer not in psols:
-                        psols[layer] = []
-
-                    psols[layer].append((circuit.copy(), dist))
-
-                    if len(psols[layer]) > self.partials_per_depth:
-                        psols[layer].sort(key=lambda x: x[1])
-                        del psols[layer][-1]
-
                 if self.max_layer is None or layer + 1 < self.max_layer:
                     frontier.add(circuit, layer + 1)
 
@@ -281,6 +280,7 @@ class LEAPSynthesisPass(SynthesisPass):
         if self.store_partial_solutions:
             data['psols'] = psols
             data['scan_sols'] = scan_sols
+            print("NUMBER P SOLS", len(scan_sols))
 
         return best_circ
 

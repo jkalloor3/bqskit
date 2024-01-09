@@ -24,3 +24,5 @@ scratch/
 **/*.qasm
 **/summary.json
 slurm_logs/*
+*.png
+*.csv

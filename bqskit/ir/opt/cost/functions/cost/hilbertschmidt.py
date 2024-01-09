@@ -42,8 +42,8 @@ class FrobeniusCost(
         utry = self.circuit.get_unitary(params)
         diff = self.target - utry
         cost = np.real(np.trace(diff @ diff.conj().T))
-        print("Params:", params)
-        print("Cost:", cost)
+        # print("Params:", params)
+        # print("Cost:", cost)
         # print(cost)
         return cost
 
@@ -53,14 +53,19 @@ class FrobeniusCost(
 
         updates = []
         traces = []
+        # print("Target", self.target)
         for grad_i in grad:
             # grad_i is dU/di
+            # print("JI:", grad_i)
+            # print("MM:", self.target @ grad_i.conj().T)
             ji = np.trace(self.target @ grad_i.conj().T)
+            # print("Diag:", np.diag(self.target @ grad_i.conj().T))
+            # print("Trace:", ji)
             traces.append(ji)
             updates.append(-2 * np.real(ji))
 
-        print("Traces:", traces)
-        print("Updates:", updates)
+        # print("Traces:", traces)
+        # print("Updates:", updates)
         return updates
 
     def get_cost_and_grad(

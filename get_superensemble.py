@@ -52,28 +52,36 @@ import numpy.typing as npt
 
 # Circ 
 if __name__ == '__main__':
-    enable_logging(True)
+    # enable_logging(True)
     np.set_printoptions(precision=4, threshold=np.inf, linewidth=np.inf)
     circ_type = argv[1]
-    method = argv[2]
-    tol = int(argv[3])
+    timestep = int(argv[2])
+    method = argv[3]
+    tol = int(argv[4])
 
     if circ_type == "TFIM":
-        initial_circ = Circuit.from_file("/pscratch/sd/j/jkalloor/bqskit/ensemble_benchmarks/tfim_3.qasm")
+        initial_circ = Circuit.from_file(f"/pscratch/sd/j/jkalloor/bqskit/ensemble_benchmarks/TFIM_3_timesteps/TFIM_3_{timestep}.qasm")
+        initial_circ.remove_all_measurements()
         # target = np.loadtxt("/pscratch/sd/j/jkalloor/bqskit/ensemble_benchmarks/tfim_4-1.unitary", dtype=np.complex128)
     elif circ_type == "Heisenberg":
         initial_circ = Circuit.from_file("/pscratch/sd/j/jkalloor/bqskit/ensemble_benchmarks/heisenberg_3.qasm")
+    elif circ_type == "Heisenberg_7":
+        initial_circ = Circuit.from_file("/pscratch/sd/j/jkalloor/bqskit/ensemble_benchmarks/heisenberg7.qasm")
+    elif circ_type == "Hubbard":
+        initial_circ = Circuit.from_file("/pscratch/sd/j/jkalloor/bqskit/ensemble_benchmarks/hubbard_4.qasm")
         # target = np.loadtxt("/pscratch/sd/j/jkalloor/bqskit/ensemble_benchmarks/tfim_4-1.unitary", dtype=np.complex128)
     else:
         target = np.loadtxt("/pscratch/sd/j/jkalloor/bqskit/ensemble_benchmarks/qite_3.unitary", dtype=np.complex128)
         initial_circ = Circuit.from_unitary(target)
 
     target = initial_circ.get_unitary()
+    print(initial_circ)
 
     synth_circs = []
 
+    # TODO: Divide by number of blocks yo
     err_thresh = 10 ** (-1 * tol)
-    extra_err_thresh = 1e-8
+    extra_err_thresh = 1e-15
 
     orig_depth = initial_circ.depth
     orig_count = initial_circ.count(CNOTGate())
@@ -84,8 +92,8 @@ if __name__ == '__main__':
     #     UnfoldPass(),
     # ]
 
-    compiler = Compiler(num_workers=1)
-
+    compiler = Compiler(num_workers=-1)
+    
     # circ = compiler.compile(initial_circ, workflow=workflow)
 
     # # Using Quest
@@ -108,15 +116,21 @@ if __name__ == '__main__':
                 'min_iters': 100,
                 'cost_fn_gen': generator,
                 'method': 'minimization',
-                'minimizer': ScipyMinimizer(),
-                'seed': 1
-                # 'multistarts': 1
+                'minimizer': LBFGSMinimizer()
             }
         )
+
+        workflow = [
+            ScanPartitioner(3),
+            ForEachBlockPass([
+                synthesis_pass
+            ]),
+            CreateEnsemblePass(success_threshold=err_thresh, num_circs=20000)
+        ]
+
+        old_workflow = [synthesis_pass, CreateEnsemblePass(success_threshold=err_thresh, num_circs=10000)]
         
-        out_circ, data = compiler.compile(initial_circ, [synthesis_pass, 
-                                                                CreateEnsemblePass(success_threshold=err_thresh, 
-                                                                                num_circs=10)], True)
+        out_circ, data = compiler.compile(initial_circ, workflow, request_data=True)
         approx_circuits: list[Circuit] = data["ensemble"]
     elif method == "treescan":
         workflow = [
@@ -136,7 +150,7 @@ if __name__ == '__main__':
     # dists = [x[1] for x in approx_circuits]
 
     # Store approximate solutions
-    dir = f"ensemble_approx_circuits_frobenius/{method}/{circ_type}/{tol}"
+    dir = f"ensemble_approx_circuits_frobenius/{method}/{circ_type}/{tol}/{timestep}"
 
     Path(dir).mkdir(parents=True, exist_ok=True)
 
