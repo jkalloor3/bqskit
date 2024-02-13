@@ -8,6 +8,8 @@ import pickle
 
 from bqskit.qis.unitary import UnitaryMatrix
 
+from bqskit.ir.opt.cost.functions import HilbertSchmidtResidualsGenerator, HilbertSchmidtCostGenerator
+
 from pathlib import Path
 
 import glob
@@ -24,6 +26,7 @@ def get_upperbound_error_mean(unitaries: list[UnitaryMatrix], target):
 
     max_error = np.mean(errors)
     max_variance = np.mean([u.get_frobenius_distance(mean) for u in unitaries])
+
     return np.sqrt(max_error), np.sqrt(max_variance), mean
 
 def get_tvd_magnetization(ensemble: list[UnitaryMatrix], target):
@@ -52,6 +55,11 @@ def get_bias_var_covar(ensemble: list[UnitaryMatrix], target):
 
     return bias, var, covar
 
+def get_circ_unitary_jiggle(circ_file):
+    global basic_circ
+    params: Circuit = pickle.load(open(circ_file, "rb"))
+    return basic_circ.get_unitary(params)
+
 def get_circ_unitary(circ_file):
     circ: Circuit = pickle.load(open(circ_file, "rb"))
     return circ.get_unitary()
@@ -67,36 +75,36 @@ def get_bias_var_covar_fast(ensemble: list[UnitaryMatrix], target, true_mean):
     ensemble_mean = np.mean(ensemble, axis=0)
     # bias = UnitaryMatrix(target).get_frobenius_distance(ensemble_mean)
 
-    bias = (ensemble_mean - target)
+    # bias = (ensemble_mean - target)
 
-    mean_unitary = UnitaryMatrix(true_mean, check_arguments=False)
+    # mean_unitary = UnitaryMatrix(true_mean, check_arguments=False)
 
-    print("Calculating Vars")
+    # print("Calculating Vars")
 
-    with mp.Pool() as pool:
-        vars = pool.map(mean_unitary.get_frobenius_distance, ensemble)
-        var = np.mean(vars)
+    # with mp.Pool() as pool:
+    #     vars = pool.map(mean_unitary.get_frobenius_distance, ensemble)
+    #     var = np.mean(vars)
 
-    print("Finished Calculating Vars")
+    # print("Finished Calculating Vars")
 
-    covar = 0
+    # covar = 0
 
-    # Get all subsets
-    subsets = []
-    for i in range(1, M):
-        for j in range(i):
-            subsets.append((ensemble[i] - true_mean, ensemble[j] - true_mean))
+    # # Get all subsets
+    # subsets = []
+    # for i in range(1, M):
+    #     for j in range(i):
+    #         subsets.append((ensemble[i] - true_mean, ensemble[j] - true_mean))
 
-    print("Created Subsets")
+    # print("Created Subsets")
 
-    with mp.Pool() as pool:
-        covars = pool.map(get_covar_elem, subsets)
+    # with mp.Pool() as pool:
+    #     covars = pool.map(get_covar_elem, subsets)
 
-    print("Calculated")
+    # print("Calculated")
 
-    covar = np.sum(covars) / M / (M - 1)
+    # covar = np.sum(covars) / M / (M - 1)
 
-    return bias, var, covar
+    return ensemble_mean #,  var, covar
 
 
 def get_covar_diff(ensemble: list[UnitaryMatrix], next_unitary: UnitaryMatrix):
@@ -112,10 +120,12 @@ def get_covar_diff(ensemble: list[UnitaryMatrix], next_unitary: UnitaryMatrix):
 
     return np.mean(covars)
 
-
 # Circ 
 if __name__ == '__main__':
+    global basic_circ
+
     circ_type = argv[1]
+    timestep = int(argv[2])
 
     np.set_printoptions(precision=2, threshold=np.inf, linewidth=np.inf)
 
@@ -129,73 +139,109 @@ if __name__ == '__main__':
         initial_circ = Circuit.from_file("/pscratch/sd/j/jkalloor/bqskit/ensemble_benchmarks/heisenberg7.qasm")
     elif circ_type == "Hubbard":
         initial_circ = Circuit.from_file("/pscratch/sd/j/jkalloor/bqskit/ensemble_benchmarks/hubbard_4.qasm")
+    elif circ_type == "TFXY":
+        initial_circ = Circuit.from_file("/pscratch/sd/j/jkalloor/bqskit/ensemble_benchmarks/tfxy_6.qasm")
     else:
         target = np.loadtxt("ensemble_benchmarks/qite_3.unitary", dtype=np.complex128)
         initial_circ = Circuit.from_unitary(target)
 
     target = initial_circ.get_unitary()
 
-    method = argv[2]
-    tol = int(argv[3])
+    method = argv[3]
+    max_tol = int(argv[4])
     # Store approximate solutions
-    dir = f"ensemble_approx_circuits_frobenius/{method}/{circ_type}/{tol}/*.pickle"
+    all_utries = []
 
-    print(dir)
+    min_tol = 1
 
-    circ_files = glob.glob(dir)
+    for tol in range(min_tol, max_tol):
+        dir = f"ensemble_approx_circuits_qfactor/{method}/{circ_type}/{tol}/{timestep}/params_*.pickle"
+        if method == "jiggle":
+            basic_circ = pickle.load(open(f"ensemble_approx_circuits_qfactor/{method}/{circ_type}/{tol}/{timestep}/jiggled_circ.pickle", "rb"))
+        print(dir)
+        print("Got Circ")
 
-    print(len(circ_files))
+        circ_files = glob.glob(dir)
 
-    with mp.Pool() as pool:
-        all_utries = pool.map(get_circ_unitary, circ_files)
-    
+        print(len(circ_files))
+
+        with mp.Pool() as pool:
+            if method == "jiggle":
+                utries = pool.map(get_circ_unitary_jiggle, circ_files)
+            else:
+                utries = pool.map(get_circ_unitary, circ_files)
+        all_utries.extend(utries)
+        
     print("------------------")
     full_e1, full_e2, true_mean = get_upperbound_error_mean(all_utries, target)
 
-
+    print(full_e1, full_e2)
 
     # # Get random sub samples - Vary this in first plot
-    M = int(argv[4])
+    M = int(argv[5])
+
+    num_points = 100
 
     # Vary this as well - K
-    num_ensembles = 150
+    num_ensembles = 400
 
-    errors = []
-    biases = []
-    vars = []
-    covars = []
-    tvds = []
-    magnetizations = []
+    # vars = []
+    # covars = []
+    # tvds = []
+    # magnetizations = []
+
+    tot_e1_uppers = []
+    tot_e1_actuals = []
+    tot_e2_uppers = []
+
+    Ms = []
 
     # utry_inds = np.arange(len(all_utries))
+    for pt in range(num_points):
+        errors = []
+        errors_2 = []
+        biases = []
+        for num in range(num_ensembles):
+            # print(num)
+            ensemble = random.sample(all_utries, M)
 
-    for num in range(num_ensembles):
-        print(num)
-        ensemble = random.sample(all_utries, M)
+            # bias, var, cov = get_bias_var_covar(ensemble, target)
+            # bias, var, cov = get_bias_var_covar_fast(ensemble, target, true_mean)
+            bias = get_bias_var_covar_fast(ensemble, target, true_mean)
 
-        # bias, var, cov = get_bias_var_covar(ensemble, target)
-        bias, var, cov = get_bias_var_covar_fast(ensemble, target, true_mean)
+            e1, e2, sample_mean = get_upperbound_error_mean(ensemble, target)
 
-        e1, e2, sample_mean = get_upperbound_error_mean(ensemble, target)
+            tvd = get_tvd_magnetization(ensemble, target)
 
-        tvd = get_tvd_magnetization(ensemble, target)
+            errors.append(e1)
+            errors_2.append(e2)
+            biases.append(bias)
 
-        errors.append(e1)
-        biases.append(np.abs(bias))
-        vars.append(var)
-        covars.append(cov)
-        tvds.append(tvd)
+            print(e1)
+            print(e2)
 
-    print(biases)
+            # vars.append(var)
+            # covars.append(cov)
+            # tvds.append(tvd)
+        tot_e1_uppers.append(np.mean(errors))
+        actual_mean = np.mean(biases, axis = 0)
+        actual_e1 = target.get_frobenius_distance(actual_mean)
+        tot_e1_actuals.append(np.sqrt(actual_e1))
+        tot_e2_uppers.append(np.mean(errors_2))
+        Ms.append(M)
 
-    final_bias_dist = UnitaryMatrix(np.mean(biases, axis=0), check_arguments=False).get_frobenius_norm()
-    final_var = np.mean(vars)
-    final_covar = np.mean(covars)
-    final_tvd = np.mean(tvds)
+        print("Got pt", np.mean(errors), np.sqrt(actual_e1))
 
-    final_sample_err = np.mean(errors)
+    # print(biases)
 
-    print("Sample Stats:", final_sample_err, final_bias_dist, final_var, final_covar)
+    # final_bias_dist = UnitaryMatrix(np.mean(biases, axis=0), check_arguments=False).get_frobenius_norm()
+    # final_var = np.mean(vars)
+    # final_covar = np.mean(covars)
+    # final_tvd = np.mean(tvds)
+
+    # final_sample_err = np.mean(errors)
+
+    # print("Sample Stats:", final_sample_err, final_bias_dist, final_var, final_covar)
 
     # fig = plt.figure(figsize=(26, 20))
     # axes: list[list[plt.Axes]] = fig.subplots(2, 2, sharex=True)
@@ -223,17 +269,50 @@ if __name__ == '__main__':
     # axes[1][1].axhline(final_covar, c="blue")
     # axes[1][1].axhline(-1 * (full_e1 ** 2), c="red")
 
-    ensemble_dict = {}
+    # ensemble_dict = {}
 
-    ensemble_dict["errrors"] = errors
-    ensemble_dict["biases"] = biases
-    ensemble_dict["variances"] = vars
-    ensemble_dict["covariances"] = covars
-    ensemble_dict["final_bias_dist"] = final_bias_dist
-    ensemble_dict["final_var"] = final_var
-    ensemble_dict["final_covar"] = final_covar
+    # ensemble_dict["errrors"] = errors
+    # ensemble_dict["biases"] = biases
+    # ensemble_dict["variances"] = vars
+    # ensemble_dict["covariances"] = covars
+    # ensemble_dict["final_bias_dist"] = final_bias_dist
+    # ensemble_dict["final_var"] = final_var
+    # ensemble_dict["final_covar"] = final_covar
 
-    pickle.dump(ensemble_dict, open(f"{circ_type}_{method}_{tol}_{M}.data", "wb"))
+    # pickle.dump(ensemble_dict, open(f"{circ_type}_{method}_{tol}_{M}.data", "wb"))
+
+    fig, ax = plt.subplots(1, 1)
+
+    ax.scatter(tot_e2_uppers, tot_e1_uppers)
+    ax.scatter(tot_e2_uppers, tot_e1_actuals, c="red")
+
+    e2_min = min(tot_e2_uppers)
+    e2_max = max(tot_e2_uppers)
+
+    xs = np.linspace(e2_min, e2_max, 100)
+    ys = xs ** (2)
+
+    ax.plot(xs, ys)
+
+    ax.set_xlabel("E2s")
+    ax.set_ylabel("E1s")
+    ax.set_yscale("log")
+
+
+    fig.savefig(f"{circ_type}_{method}_errors_comp_{min_tol}_to_{max_tol}_rev.png")
+
+
+
+    # fig, ax = plt.subplots(1, 1)
+
+    # ax.scatter(Ms, tot_e2_uppers)
+    # # ax.scatter(tot_e2_uppers, tot_e1_actuals, c="red")
+    # ax.set_xlabel("M")
+    # ax.set_ylabel("E2s")
+    # ax.set_yscale("log")
+
+
+    # fig.savefig(f"{circ_type}_E2vM.png")
 
     # Now try to create a smart ensemble!
 

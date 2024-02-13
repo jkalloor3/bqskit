@@ -37,21 +37,35 @@ class CreateEnsemblePass(BasePass):
         self.success_threshold = success_threshold
         self.num_circs = num_circs
         self.cost = cost
+        self.instantiate_options={
+            'min_iters': 100,
+            'ftol': self.success_threshold,
+            'gtol': 1e-10,
+            'cost_fn_gen': self.cost,
+            'dist_tol': self.success_threshold,
+            'method': 'qfactor'
+        }
+
         # self.instantiate_options: dict[str, Any] = {
         #     'dist_tol': self.success_threshold,
         #     'min_iters': 100,
         #     'cost_fn_gen': self.cost,
+        #     'method': 'minimization',
+        #     'minimizer': LBFGSMinimizer(),
         # }
 
-        self.instantiate_options: dict[str, Any] = {
-            'dist_tol': self.success_threshold,
-            'min_iters': 100,
-            'cost_fn_gen': self.cost,
-            'method': 'minimization',
-            'minimizer': LBFGSMinimizer(),
-        }
+    async def unfold_circ(config: list[Circuit], circuit: Circuit, pts: list[CircuitPoint], locations):
+            operations = [
+                Operation(cg, loc, cg._circuit.params)
+                for cg, loc
+                in zip(config, locations)
+            ]
+            copied_circuit = circuit.copy()
+            copied_circuit.batch_replace(pts, operations)
+            copied_circuit.unfold_all()
+            return copied_circuit
 
-    def assemble_circuits(
+    async def assemble_circuits(
         self,
         circuit: Circuit,
         psols: list[list[Circuit]],
@@ -67,8 +81,15 @@ class CreateEnsemblePass(BasePass):
             new_combos = []
             circ_list = psols[i]
             print("Num Circs in layer", len(circ_list))
-            for circ in circ_list:
+            max_num = 1 if len(all_combos) > self.num_circs else len(circ_list)
+            for circ in circ_list[:max_num]:
                 cg = CircuitGate(circ)
+                # Should parallelize this
+                # new_configs: list[Circuit] = await get_runtime().map(
+                #     CreateEnsemblePass.append_elem,
+                #     all_combos,
+                #     b=cg,
+                # )
                 new_configs = [config + [cg] for config in all_combos]
                 new_combos.extend(new_configs)
             all_combos = new_combos
@@ -76,17 +97,23 @@ class CreateEnsemblePass(BasePass):
             i += 1
 
         locations = [circuit[pt].location for pt in pts]
-        all_circs = []
-        for config in all_combos:
-            operations = [
-                Operation(cg, loc, cg._circuit.params)
-                for cg, loc
-                in zip(config, locations)
-            ]
-            copied_circuit = circuit.copy()
-            copied_circuit.batch_replace(pts, operations)
-            copied_circuit.unfold_all()
-            all_circs.append(copied_circuit)
+        all_circs = await get_runtime().map(
+            CreateEnsemblePass.unfold_circ,
+            all_combos,
+            circuit=circuit,
+            pts=pts,
+            locations=locations
+        )
+        # for config in all_combos:
+        #     operations = [
+        #         Operation(cg, loc, cg._circuit.params)
+        #         for cg, loc
+        #         in zip(config, locations)
+        #     ]
+        #     copied_circuit = circuit.copy()
+        #     copied_circuit.batch_replace(pts, operations)
+        #     copied_circuit.unfold_all()
+        #     all_circs.append(copied_circuit)
         return all_circs
 
 
@@ -125,8 +152,11 @@ class CreateEnsemblePass(BasePass):
 
             print("Num Sols for layer", len(block['scan_sols']))
 
-            while i < min(num_sols_per_block, len(block['scan_sols']), max(self.num_circs - num_sols, 1)):
-                psols[-1].append(block["scan_sols"][i][0])
+            while i < min(len(block['scan_sols']), 3):
+                psol: Circuit = block["scan_sols"][i][0]
+                psols[-1].append(psol)
+                # if len(block["scan_sols"][i]) > 1:
+                print(block["scan_sols"][i][1], psol.num_operations, psol.num_params)
                 i += 1
 
             print("I", i)
@@ -188,7 +218,7 @@ class CreateEnsemblePass(BasePass):
 
 
         print([len(x) for x in approx_circs])
-        all_circs = self.assemble_circuits(circuit, approx_circs, pts)
+        all_circs = await self.assemble_circuits(circuit, approx_circs, pts)
         # init_approx_circuits: list[tuple[Circuit, float]] = CreateEnsemblePass.assemble_circuits(approx_circs, pts)
 
         # Only use the shortest distance / 10

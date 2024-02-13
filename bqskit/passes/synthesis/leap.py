@@ -15,7 +15,7 @@ from bqskit.passes.search.frontier import Frontier
 from bqskit.passes.search.generator import LayerGenerator
 from bqskit.passes.search.generators.seed import SeedLayerGenerator
 from bqskit.passes.search.heuristic import HeuristicFunction
-from bqskit.passes.search.heuristics import AStarHeuristic
+from bqskit.passes.search.heuristics import AStarHeuristic, DijkstraHeuristic
 from bqskit.passes.synthesis.synthesis import SynthesisPass
 from bqskit.qis.state.state import StateVector
 from bqskit.qis.state.system import StateSystem
@@ -41,7 +41,7 @@ class LEAPSynthesisPass(SynthesisPass):
 
     def __init__(
         self,
-        heuristic_function: HeuristicFunction = AStarHeuristic(),
+        heuristic_function: HeuristicFunction = DijkstraHeuristic(),
         layer_generator: LayerGenerator | None = None,
         success_threshold: float = 1e-8,
         cost: CostFunctionGenerator = HilbertSchmidtResidualsGenerator(),

@@ -102,14 +102,26 @@ class TreeScanningGateRemovalPass(BasePass):
         self.success_threshold = success_threshold
         self.cost = cost
         self.store_all_solutions = True
-        self.instantiate_options: dict[str, Any] = {
-            'dist_tol': self.success_threshold,
+
+        self.instantiate_options={
             'min_iters': 100,
+            'ftol': self.success_threshold,
+            'gtol': 1e-10,
             'cost_fn_gen': self.cost,
-            'method': 'minimization',
-            'minimizer': LBFGSMinimizer(),
-            'multistarts': 2
+            'dist_tol': self.success_threshold,
+            'method': 'qfactor'
+            # 'method': 'minimization',
+            # 'minimizer': LBFGSMinimizer() # Go back to QFactor. set x_tol
         }
+
+        # self.instantiate_options: dict[str, Any] = {
+        #     'dist_tol': self.success_threshold,
+        #     'min_iters': 100,
+        #     'cost_fn_gen': self.cost,
+        #     'method': 'minimization',
+        #     'minimizer': LBFGSMinimizer(),
+        #     'multistarts': 2
+        # }
         self.instantiate_options.update(instantiate_options)
 
     # Implement recursively for now, if slow then fix
@@ -154,7 +166,7 @@ class TreeScanningGateRemovalPass(BasePass):
 
         ops_left = list(circuit.operations_with_cycles(reverse=reverse_iter))
 
-        all_sols = []
+        all_sols = [(circuit.copy(), 0)]
 
         while ops_left:
             chunk, ops_left = ops_left[:self.tree_depth], ops_left[self.tree_depth:]

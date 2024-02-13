@@ -14,12 +14,20 @@ import pickle
 from bqskit.ir.opt.cost.functions import HilbertSchmidtResidualsGenerator, HilbertSchmidtCostGenerator, FrobeniusCostGenerator
 from bqskit.ir.opt.minimizers.lbfgs import LBFGSMinimizer
 from bqskit.ir.opt.minimizers.scipy import ScipyMinimizer
+import multiprocessing as mp
+from bqskit.ext import qiskit_to_bqskit
 
 from bqskit import enable_logging
 
 from pathlib import Path
 
 import json
+
+
+def write_circ(circ_info):
+    circuit, circ_file = circ_info
+    pickle.dump(circuit, open(circ_file, "wb"))
+    return
 
 # def parse_data(
 #     circuit: Circuit,
@@ -70,18 +78,23 @@ if __name__ == '__main__':
     elif circ_type == "Hubbard":
         initial_circ = Circuit.from_file("/pscratch/sd/j/jkalloor/bqskit/ensemble_benchmarks/hubbard_4.qasm")
         # target = np.loadtxt("/pscratch/sd/j/jkalloor/bqskit/ensemble_benchmarks/tfim_4-1.unitary", dtype=np.complex128)
+    elif circ_type == "TFXY":
+        initial_circ = Circuit.from_file("/pscratch/sd/j/jkalloor/bqskit/ensemble_benchmarks/tfxy_6.qasm")
+    elif circ_type == "TFXY_t":
+        initial_circ: Circuit =  Circuit.from_file(f"/pscratch/sd/j/jkalloor/bqskit/ensemble_benchmarks/TFXY_5_timesteps/TFXY_5_{timestep}.qasm")
+        initial_circ.remove_all_measurements()
     else:
         target = np.loadtxt("/pscratch/sd/j/jkalloor/bqskit/ensemble_benchmarks/qite_3.unitary", dtype=np.complex128)
         initial_circ = Circuit.from_unitary(target)
 
     target = initial_circ.get_unitary()
-    print(initial_circ)
+    # print(initial_circ)
 
     synth_circs = []
 
     # TODO: Divide by number of blocks yo
     err_thresh = 10 ** (-1 * tol)
-    extra_err_thresh = 1e-15
+    extra_err_thresh = 1e-13
 
     orig_depth = initial_circ.depth
     orig_count = initial_circ.count(CNOTGate())
@@ -125,7 +138,7 @@ if __name__ == '__main__':
             ForEachBlockPass([
                 synthesis_pass
             ]),
-            CreateEnsemblePass(success_threshold=err_thresh, num_circs=20000)
+            CreateEnsemblePass(success_threshold=err_thresh, num_circs=20000, cost=generator)
         ]
 
         old_workflow = [synthesis_pass, CreateEnsemblePass(success_threshold=err_thresh, num_circs=10000)]
@@ -134,40 +147,90 @@ if __name__ == '__main__':
         approx_circuits: list[Circuit] = data["ensemble"]
     elif method == "treescan":
         workflow = [
-            TreeScanningGateRemovalPass(success_threshold=err_thresh, store_all_solutions=True, tree_depth=7),
-            CreateEnsemblePass(success_threshold=err_thresh, num_circs=10000)
+            ToVariablePass(convert_all_single_qudit_gates=True),
+            ScanPartitioner(3),
+            ForEachBlockPass([
+                TreeScanningGateRemovalPass(success_threshold=err_thresh, store_all_solutions=True, tree_depth=7, cost=generator),
+            ]),
+            CreateEnsemblePass(success_threshold=err_thresh, num_circs=20000, cost=generator)
         ]
+
 
         out_circ, data = compiler.compile(initial_circ, workflow=workflow, request_data=True)
         approx_circuits: list[Circuit] = data["ensemble"]
     elif method == "quest":
         quest_runner = QuestRunner(SimulationRunner(), compiler=compiler, sample_size=20)
         approx_circuits: list[Circuit] = quest_runner.get_all_circuits(circuit=initial_circ)
+    elif method == "jiggle":
+        synthesis_pass = LEAPSynthesisPass(
+            success_threshold = 1e-14,
+            cost=generator,
+            instantiate_options={
+                'min_iters': 100,
+                # 'ftol': 1e-15,
+                # 'dist_tol': 1e-15,
+                # 'gtol': 1e-10,
+                # 'cost_fn_gen': generator,
+                # 'method': 'qfactor',
+                'method': 'minimization',
+                'minimizer': LBFGSMinimizer() # Go back to QFactor. set x_tol
+            }
+        )
 
-    utries = [x.get_unitary() for x in approx_circuits]
-    depths = [x.depth for x in approx_circuits]
-    counts = [x.count(CNOTGate()) for x in approx_circuits]
+        workflow = [
+            # ToU3Pass(convert_all_single_qubit_gates=True),
+            ScanPartitioner(3),
+            ForEachBlockPass([
+                synthesis_pass
+            ],
+            replace_filter="less-than"),
+            UnfoldPass(),
+            JiggleEnsemblePass(success_threshold=err_thresh, num_circs=20000, cost=generator)
+        ]
+        out_circ, data = compiler.compile(initial_circ, workflow, request_data=True)
+        print(out_circ.num_cycles)
+        approx_circuits: list[Circuit] = data["ensemble_params"]
+        # approx_circuits = data["ensemble"]
+
+    # utries = [x.get_unitary() for x in approx_circuits]
+    # dists = [get_frobenius_distance(x, target) for x in approx_circuits]
+    # print(dists)
+    # print("Getting Data")
+    # with mp.Pool() as pool:
+    #     depths = pool.map(lambda x: x.depth, approx_circuits)
+    #     counts = pool.map(lambda x: x.count(CNOTGate()), approx_circuits) 
+
+    # depths = [x.depth for x in approx_circuits]
+    # counts = [x.count(CNOTGate()) for x in approx_circuits]
     # dists = [x[1] for x in approx_circuits]
 
     # Store approximate solutions
-    dir = f"ensemble_approx_circuits_frobenius/{method}/{circ_type}/{tol}/{timestep}"
+    dir = f"ensemble_approx_circuits_qfactor/{method}_shorter/{circ_type}/{tol}/{timestep}"
 
     Path(dir).mkdir(parents=True, exist_ok=True)
 
-    for i, circ in enumerate(approx_circuits):
-        file = f"{dir}/circ_{i}.pickle"
-        pickle.dump(circ, open(file, "wb"))
+    circ_infos = [(circ, f"{dir}/params_{i}.pickle") for i, circ in enumerate(approx_circuits)]
+    print("Writing")
+    with mp.Pool() as pool:
+        pool.map(write_circ, circ_infos)
 
-    summary = {}
+    if method == "jiggle":
+        pickle.dump(out_circ, open(f"{dir}/jiggled_circ.pickle", "wb"))
 
-    summary["orig_depth"] = orig_depth
-    summary["orig_count"] = orig_count
-    summary["depths"] = depths
-    summary["counts"] = counts
-    summary["avg_depth"] = np.mean(depths)
-    summary["avg_count"] = np.mean(counts)
+    # for i, circ in enumerate(approx_circuits):
+    #     file = f"{dir}/circ_{i}.pickle"
+    #     pickle.dump(circ, open(file, "wb"))
 
-    json.dump(summary, open(f"{dir}/summary.json", "w"), indent=4)
+    # summary = {}
+
+    # summary["orig_depth"] = orig_depth
+    # summary["orig_count"] = orig_count
+    # summary["depths"] = depths
+    # summary["counts"] = counts
+    # summary["avg_depth"] = np.mean(depths)
+    # summary["avg_count"] = np.mean(counts)
+
+    # json.dump(summary, open(f"{dir}/summary.json", "w"), indent=4)
 
     print(len(approx_circuits))
     # print(dists)
