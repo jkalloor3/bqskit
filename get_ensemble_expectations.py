@@ -114,12 +114,12 @@ def get_circ_unitary_diff_jiggle(circ_file):
     global basic_circ
     global target
     params: Circuit = pickle.load(open(circ_file, "rb"))
-    return target - basic_circ.get_unitary(params)
+    return basic_circ.get_unitary(params)
 
 def get_circ_unitary_diff(circ_file):
     global target
     circ: Circuit = pickle.load(open(circ_file, "rb"))
-    return target - circ.get_unitary()
+    return circ.get_unitary()
 
 def get_covar_elem(matrices):
     A, B = matrices
@@ -199,8 +199,6 @@ if __name__ == '__main__':
     axs.set_ylabel('Excitation Displacement')
     print("")
 
-
-
     # Now get ensemble results
 
     ensemble_sizes = [3, 10, 100] #, 500, 1000]
@@ -211,30 +209,30 @@ if __name__ == '__main__':
 
     max_dists = []
 
-    if method == "jiggle":
+    if method.startswith("jiggle"):
         for i, timestep in enumerate(timesteps):
             for tol in range(min_tol, max_tol + 1):
                 dir = f"ensemble_approx_circuits_qfactor/{method}/{circ_type}/{tol}/{timestep}/params_*.pickle"
-                if method == "jiggle":
+                if method.startswith("jiggle"):
                     basic_circ = pickle.load(open(f"ensemble_approx_circuits_qfactor/{method}/{circ_type}/{tol}/{timestep}/jiggled_circ.pickle", "rb"))
-                    # print(basic_circ.num_cycles, end=",")
                     # print(dir)
                     # print("Got Circ")
                 
-                circ_files = glob.glob(dir)[:20]
+                circ_files = glob.glob(dir)[:200]
 
                 with mp.Pool() as pool:
-                    if method == "jiggle":
+                    if method.startswith("jiggle"):
                         utries = pool.map(get_circ_unitary_diff_jiggle, circ_files)
                     else:
                         utries = pool.map(get_circ_unitary_diff, circ_files)
 
-                print([targets[i].get_frobenius_distance(basic_circ.get_unitary()) for utry in utries])    
-                exit(0)
+                avg_utry_dist = np.mean([targets[i].get_frobenius_distance(utry) for utry in utries])  
+                print("Avg Utry Dist", avg_utry_dist, end=",")   
+                # exit(0)
                     # circ_files.extend(glob.glob(dir)[:1000])
                         
                 all_utries[i].extend(utries)
-    # print("")
+    print("")
     print([len(x) for x in all_utries])
 
     for j, ens_size in enumerate(ensemble_sizes):
@@ -244,6 +242,7 @@ if __name__ == '__main__':
             ensemble = random.sample(all_utries[i], ens_size)
             ensemble_mean = np.mean(ensemble, axis=0)
             dist = targets[i].get_frobenius_distance(ensemble_mean)
+            # print(dist)
             if dist > max_dist:
                 max_dist = dist
 
@@ -253,7 +252,14 @@ if __name__ == '__main__':
 
     colors = ["r", "g", "y"]
 
+    # print(base_excitations)
+    # print(ensemble_mags)
+
+    base_excitations = np.array(base_excitations)
+    ensemble_mags = np.array(ensemble_mags)
+
     for i, ens_size in enumerate(ensemble_sizes):
+        print(f"Avg Exp. Dist for Ens of size: {ens_size}", np.mean(ensemble_mags[i] - base_excitations))
         axs.plot(timesteps, ensemble_mags[i], c=colors[i], label=f"Ensemble Size: {ens_size}")
 
     # plt.show()

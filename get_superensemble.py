@@ -23,10 +23,27 @@ from pathlib import Path
 
 import json
 
+from os.path import join
 
 def write_circ(circ_info):
-    circuit, circ_file = circ_info
-    pickle.dump(circuit, open(circ_file, "wb"))
+    global basic_circ
+    global target
+
+    circuit, circ_dir, timestep,  circ_file = circ_info
+    dist = target.get_frobenius_distance(basic_circ.get_unitary(circuit))
+    if dist < 1e-18:
+        return
+
+    tol = int(-1 * np.log10(dist))
+    print(tol)
+
+    full_dir = join(circ_dir, f"{tol}", f"{timestep}")
+
+    Path(full_dir).mkdir(parents=True, exist_ok=True)
+
+    full_file = join(full_dir, circ_file)
+
+    pickle.dump(circuit, open(full_file, "wb"))
     return
 
 # def parse_data(
@@ -61,6 +78,8 @@ import numpy.typing as npt
 # Circ 
 if __name__ == '__main__':
     # enable_logging(True)
+    global basic_circ
+    global target
     np.set_printoptions(precision=4, threshold=np.inf, linewidth=np.inf)
     circ_type = argv[1]
     timestep = int(argv[2])
@@ -185,7 +204,7 @@ if __name__ == '__main__':
             ],
             replace_filter="less-than"),
             UnfoldPass(),
-            JiggleEnsemblePass(success_threshold=err_thresh, num_circs=20000, cost=generator)
+            JiggleEnsemblePass(success_threshold=err_thresh, num_circs=10000, cost=generator)
         ]
         out_circ, data = compiler.compile(initial_circ, workflow, request_data=True)
         print(out_circ.num_cycles)
@@ -205,17 +224,20 @@ if __name__ == '__main__':
     # dists = [x[1] for x in approx_circuits]
 
     # Store approximate solutions
-    dir = f"ensemble_approx_circuits_qfactor/{method}_shorter/{circ_type}/{tol}/{timestep}"
+    dir = f"ensemble_approx_circuits_qfactor/{method}_tighter/{circ_type}"
 
-    Path(dir).mkdir(parents=True, exist_ok=True)
+    Path(f"{dir}/jiggled_circs/{tol}/{timestep}").mkdir(parents=True, exist_ok=True)
 
-    circ_infos = [(circ, f"{dir}/params_{i}.pickle") for i, circ in enumerate(approx_circuits)]
+    circ_infos = [(circ, dir, timestep, f"params_{i}_{tol}.pickle") for i, circ in enumerate(approx_circuits)]
     print("Writing")
+    basic_circ = out_circ
     with mp.Pool() as pool:
         pool.map(write_circ, circ_infos)
 
+
+
     if method == "jiggle":
-        pickle.dump(out_circ, open(f"{dir}/jiggled_circ.pickle", "wb"))
+        pickle.dump(out_circ, open(f"{dir}/jiggled_circs/{tol}/{timestep}/jiggled_circ.pickle", "wb"))
 
     # for i, circ in enumerate(approx_circuits):
     #     file = f"{dir}/circ_{i}.pickle"
