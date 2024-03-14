@@ -141,6 +141,10 @@ if __name__ == '__main__':
         initial_circ = Circuit.from_file("/pscratch/sd/j/jkalloor/bqskit/ensemble_benchmarks/hubbard_4.qasm")
     elif circ_type == "TFXY":
         initial_circ = Circuit.from_file("/pscratch/sd/j/jkalloor/bqskit/ensemble_benchmarks/tfxy_6.qasm")
+    elif circ_type == "TFXY_t":
+            initial_circ: Circuit =  Circuit.from_file(f"/pscratch/sd/j/jkalloor/bqskit/ensemble_benchmarks/TFXY_5_timesteps/TFXY_5_{timestep}.qasm")
+            # qiskit_circ = QuantumCircuit.from_qasm_file(f"/pscratch/sd/j/jkalloor/bqskit/ensemble_benchmarks/TFXY_5_timesteps/TFXY_5_{timestep}.qasm")
+            initial_circ.remove_all_measurements()
     else:
         target = np.loadtxt("ensemble_benchmarks/qite_3.unitary", dtype=np.complex128)
         initial_circ = Circuit.from_unitary(target)
@@ -152,25 +156,26 @@ if __name__ == '__main__':
     # Store approximate solutions
     all_utries = []
 
-    min_tol = 1
+    min_tol = 2
 
     for tol in range(min_tol, max_tol):
-        dir = f"ensemble_approx_circuits_qfactor/{method}/{circ_type}/{tol}/{timestep}/params_*.pickle"
-        if method == "jiggle":
-            basic_circ = pickle.load(open(f"ensemble_approx_circuits_qfactor/{method}/{circ_type}/{tol}/{timestep}/jiggled_circ.pickle", "rb"))
-        print(dir)
-        print("Got Circ")
+        for i in range(tol + 1, tol + 5):
+            dir = f"ensemble_approx_circuits_qfactor/{method}/{circ_type}/{i}/{timestep}/params_*_{tol}.pickle"
+            if method.startswith("jiggle"):
+                basic_circ = pickle.load(open(f"ensemble_approx_circuits_qfactor/{method}/{circ_type}/jiggled_circs/{tol}/{timestep}/jiggled_circ.pickle", "rb"))
+            print(dir)
+            print("Got Circ")
 
-        circ_files = glob.glob(dir)
+            circ_files = glob.glob(dir)
 
-        print(len(circ_files))
+            print(len(circ_files))
 
-        with mp.Pool() as pool:
-            if method == "jiggle":
-                utries = pool.map(get_circ_unitary_jiggle, circ_files)
-            else:
-                utries = pool.map(get_circ_unitary, circ_files)
-        all_utries.extend(utries)
+            with mp.Pool() as pool:
+                if method.startswith("jiggle"):
+                    utries = pool.map(get_circ_unitary_jiggle, circ_files)
+                else:
+                    utries = pool.map(get_circ_unitary, circ_files)
+            all_utries.extend(utries)
         
     print("------------------")
     full_e1, full_e2, true_mean = get_upperbound_error_mean(all_utries, target)

@@ -72,7 +72,7 @@ class JiggleEnsemblePass(BasePass):
 
         print(f"Num Params: {len(params)}, num params extra: {num_extra_params}")
 
-        extra_diff = self.success_threshold / len(params)
+        extra_diff = self.success_threshold
 
         print(f"Generating {num_extra_params} extra params per param")
 

@@ -70,6 +70,7 @@ def excitation_displacement(u: UnitaryMatrix):
         z = local_magnetization(u, N, qub)
         dis += qub*((1.0 - z)/2.0)
     return dis
+
 # def local_magnetization_orig(N, result: dict, shots: int, qub: int):
 #     """Compute average magnetization from results of qk.execution.
 #     Args:
@@ -150,8 +151,6 @@ if __name__ == '__main__':
     timesteps = list(range(11,24))
     base_excitations = []
 
-    simulator = Aer.get_backend('aer_simulator')
-    num_shots = 40960
     num_spins = 5
 
     targets = []
@@ -193,7 +192,7 @@ if __name__ == '__main__':
     # Visualize the results
     fig, axs = plt.subplots(1,1)
 
-    axs.plot(timesteps, base_excitations)
+    # axs.plot(timesteps, base_excitations)
     axs.set_title('Base Behavior')
     axs.set_xlabel('Timestep')
     axs.set_ylabel('Excitation Displacement')
@@ -201,24 +200,25 @@ if __name__ == '__main__':
 
     # Now get ensemble results
 
-    ensemble_sizes = [3, 10, 100] #, 500, 1000]
+    # ensemble_sizes = [3, 10, 100, 500, 1000]
+    ensemble_sizes = [1,500]
 
     ensemble_mags = [[] for _ in ensemble_sizes]
 
     all_utries = [[] for _ in timesteps]
 
-    max_dists = []
+    max_dists = {}
 
     if method.startswith("jiggle"):
         for i, timestep in enumerate(timesteps):
-            for tol in range(min_tol, max_tol + 1):
-                dir = f"ensemble_approx_circuits_qfactor/{method}/{circ_type}/{tol}/{timestep}/params_*.pickle"
+            for j in range(max_tol + 1, max_tol + 2):
+                dir = f"ensemble_approx_circuits_qfactor/{method}/{circ_type}/{j}/{timestep}/params_*_{max_tol}.pickle"
                 if method.startswith("jiggle"):
-                    basic_circ = pickle.load(open(f"ensemble_approx_circuits_qfactor/{method}/{circ_type}/{tol}/{timestep}/jiggled_circ.pickle", "rb"))
+                    basic_circ = pickle.load(open(f"ensemble_approx_circuits_qfactor/{method}/{circ_type}/jiggled_circs/{max_tol}/{timestep}/jiggled_circ.pickle", "rb"))
                     # print(dir)
                     # print("Got Circ")
                 
-                circ_files = glob.glob(dir)[:200]
+                circ_files = glob.glob(dir)
 
                 with mp.Pool() as pool:
                     if method.startswith("jiggle"):
@@ -227,7 +227,7 @@ if __name__ == '__main__':
                         utries = pool.map(get_circ_unitary_diff, circ_files)
 
                 avg_utry_dist = np.mean([targets[i].get_frobenius_distance(utry) for utry in utries])  
-                print("Avg Utry Dist", avg_utry_dist, end=",")   
+                # print("Avg Utry Dist", avg_utry_dist, end=",")   
                 # exit(0)
                     # circ_files.extend(glob.glob(dir)[:1000])
                         
@@ -248,9 +248,9 @@ if __name__ == '__main__':
 
             avg_dist += (dist / len(timesteps))
             ensemble_mags[j].append(excitation_displacement(UnitaryMatrix(ensemble_mean, check_arguments=False)))
-        max_dists.extend([max_dist, avg_dist])
+        max_dists[ens_size] = [max_dist, avg_dist]
 
-    colors = ["r", "g", "y"]
+    colors = ["c", "g", "y", "b", "r"]
 
     # print(base_excitations)
     # print(ensemble_mags)
@@ -259,12 +259,12 @@ if __name__ == '__main__':
     ensemble_mags = np.array(ensemble_mags)
 
     for i, ens_size in enumerate(ensemble_sizes):
-        print(f"Avg Exp. Dist for Ens of size: {ens_size}", np.mean(ensemble_mags[i] - base_excitations))
-        axs.plot(timesteps, ensemble_mags[i], c=colors[i], label=f"Ensemble Size: {ens_size}")
+        print(f"Avg Exp. Dist for Ens of size: {ens_size}", np.mean(np.abs(ensemble_mags[i] - base_excitations)))
+        axs.plot(timesteps, ensemble_mags[i] - base_excitations, c=colors[i], label=f"Ensemble Size: {ens_size}")
 
     # plt.show()
-    axs.legend()
-    fig.savefig(f"excitation_{circ_type}_{method}_{max_tol}.png")
+    axs.legend() 
+    fig.savefig(f"excitation_{circ_type}_{method}_{max_tol}_diff.png")
 
     print(max_dists)
 

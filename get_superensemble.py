@@ -15,6 +15,7 @@ from bqskit.ir.opt.cost.functions import HilbertSchmidtResidualsGenerator, Hilbe
 from bqskit.ir.opt.minimizers.lbfgs import LBFGSMinimizer
 from bqskit.ir.opt.minimizers.scipy import ScipyMinimizer
 import multiprocessing as mp
+from qfactorjax.qfactor import QFactorJax
 from bqskit.ext import qiskit_to_bqskit
 
 from bqskit import enable_logging
@@ -74,6 +75,12 @@ from bqskit.qis.unitary.unitarymatrix import UnitaryMatrix
 from bqskit.ir.opt.cost.function import CostFunction
 from bqskit.qis.unitary.unitary import RealVector
 import numpy.typing as npt
+from jax import config
+
+enable_logging(True)
+
+import logging
+_logger = logging.getLogger(__name__)
 
 # Circ 
 if __name__ == '__main__':
@@ -85,6 +92,7 @@ if __name__ == '__main__':
     timestep = int(argv[2])
     method = argv[3]
     tol = int(argv[4])
+    config.update('jax_enable_x64', True)
 
     if circ_type == "TFIM":
         initial_circ = Circuit.from_file(f"/pscratch/sd/j/jkalloor/bqskit/ensemble_benchmarks/TFIM_3_timesteps/TFIM_3_{timestep}.qasm")
@@ -124,7 +132,7 @@ if __name__ == '__main__':
     #     UnfoldPass(),
     # ]
 
-    compiler = Compiler(num_workers=-1)
+    compiler = Compiler(num_workers=-1, runtime_log_level=logging.DEBUG)
     
     # circ = compiler.compile(initial_circ, workflow=workflow)
 
@@ -180,6 +188,49 @@ if __name__ == '__main__':
     elif method == "quest":
         quest_runner = QuestRunner(SimulationRunner(), compiler=compiler, sample_size=20)
         approx_circuits: list[Circuit] = quest_runner.get_all_circuits(circuit=initial_circ)
+    elif method == "jiggle_gpu":
+        num_multistarts = 32
+        max_iters = 100000
+        min_iters = 3
+        diff_tol_r = 1e-5
+        diff_tol_a = 0.0
+        dist_tol = err_thresh * 10e-3
+
+        diff_tol_step_r = 0.1
+        diff_tol_step = 200
+        beta = 0
+
+        batched_instantiation = QFactorJax(
+            diff_tol_r=diff_tol_r,
+            diff_tol_a=diff_tol_a,
+            min_iters=min_iters,
+            max_iters=max_iters,
+            dist_tol=dist_tol,
+            diff_tol_step_r=diff_tol_step_r,
+            diff_tol_step=diff_tol_step,
+            beta=beta,
+        )
+        instantiate_options = {
+            'method': batched_instantiation,
+            'multistarts': num_multistarts,
+        }
+
+        gate_deletion_jax_pass = ScanningGateRemovalPass( instantiate_options=instantiate_options)
+        
+        workflow = [
+            ToU3Pass(convert_all_single_qubit_gates=True),
+            ToVariablePass(),
+            ScanPartitioner(7),
+            ForEachBlockPass([
+                gate_deletion_jax_pass
+            ]),
+            UnfoldPass(),
+            ToU3Pass(),
+            JiggleEnsemblePass(success_threshold=err_thresh, num_circs=10000, cost=generator)
+        ]
+        out_circ, data = compiler.compile(initial_circ, workflow, request_data=True)
+        print(out_circ.num_cycles)
+        approx_circuits: list[Circuit] = data["ensemble_params"]
     elif method == "jiggle":
         synthesis_pass = LEAPSynthesisPass(
             success_threshold = 1e-14,
