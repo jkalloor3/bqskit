@@ -218,7 +218,11 @@ class UnitaryMatrix(Unitary, StateVectorMap, NDArrayOperatorsMixin):
         frac = min(num / dem, 1)
         dist = np.power(1 - (frac ** degree), 1.0 / degree)
         return dist if dist > 0.0 else 0.0
-    
+
+    def get_target_correction_factor(self, other):
+        other = UnitaryMatrix(other, check_arguments=False)
+        num = np.trace(self.conj().T @ other)
+        return np.exp(-1j * np.angle(num))
 
     def get_frobenius_norm(self) -> float:
         inner_product = np.real(np.trace(self.numpy.conj().T @ self.numpy))
@@ -227,25 +231,6 @@ class UnitaryMatrix(Unitary, StateVectorMap, NDArrayOperatorsMixin):
 
 
     def get_frobenius_distance(self, other: UnitaryLike) -> float:
-        """
-        Return the distance between `self` and `other`.
-
-        The distance is given as:
-
-        .. math::
-
-            \\sqrt{{Tr(U_1- U_2)^\\dagger|(U_1- U_2)}}
-
-        Args:
-            other (UnitaryLike): The unitary to measure distance from.
-
-            degree (int): The degree of the distance metric.
-
-        Returns:
-            float: A value between 1 and 0, where 0 means the two unitaries
-            are equal up to global phase and 1 means the two unitaries are
-            very unsimilar or far apart.
-        """
         other = UnitaryMatrix(other, check_arguments=False)
         diff: UnitaryMatrix = self - other
         inner_product = np.real(np.trace(diff.conj().T @ diff))

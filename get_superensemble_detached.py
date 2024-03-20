@@ -19,7 +19,6 @@ from qfactorjax.qfactor import QFactorJax
 from bqskit.ext import qiskit_to_bqskit
 from bqskit.utils.math import global_phase, canonical_unitary, correction_factor
 
-
 from bqskit import enable_logging
 
 from pathlib import Path
@@ -48,24 +47,6 @@ def write_circ(circ_info):
 
     pickle.dump(circuit, open(full_file, "wb"))
     return
-
-# def parse_data(
-#     circuit: Circuit,
-#     data: dict,
-# ) -> tuple[list[list[tuple[Circuit, float]]], list[CircuitPoint]]:
-#     """Parse the data outputed from synthesis."""
-#     psols: list[list[tuple[Circuit, float]]] = []
-#     exact_block = circuit.copy()  # type: ignore  # noqa
-#     exact_block.set_params(circuit.params)
-#     exact_utry = exact_block.get_unitary()
-#     psols.append([(exact_block, 0.0)])
-
-#     for depth, psol_list in data['psols'].items():
-#         for psol in psol_list:
-#             dist = psol[0].get_unitary().get_distance_from(exact_utry)
-#             psols[-1].append((psol[0], dist))
-
-#     return psols
 
 from bqskit.ir.opt.cost.differentiable import DifferentiableCostFunction
 from bqskit.ir.opt.cost.generator import CostFunctionGenerator
@@ -103,7 +84,6 @@ if __name__ == '__main__':
         prev_tol = None
         prev_block_size = None
 
-
     detached_server_ip = 'localhost'
     detached_server_port = default_server_port
     config.update('jax_enable_x64', True)
@@ -116,15 +96,6 @@ if __name__ == '__main__':
         initial_circ = Circuit.from_file("/pscratch/sd/j/jkalloor/bqskit/ensemble_benchmarks/heisenberg_3.qasm")
     elif circ_type == "Heisenberg_7":
         initial_circ = Circuit.from_file("/pscratch/sd/j/jkalloor/bqskit/ensemble_benchmarks/heisenberg7.qasm")
-        if prev_tol:
-            actual_initial_circ: Circuit = pickle.load(open(f"/pscratch/sd/j/jkalloor/bqskit/ensemble_approx_circuits_qfactor/jiggle_gpu_tighter/Heisenberg_7/jiggled_circs/{prev_tol}/{prev_block_size}/{timestep}/jiggled_circ.pickle", "rb"))
-        
-
-            print("ORIG GPU DIST", actual_initial_circ.get_unitary().get_frobenius_distance(initial_circ.get_unitary()))
-            print(f"Orig Depth: {initial_circ.depth}, New Depth: {actual_initial_circ.depth}")
-            print(f"Orig Count: {initial_circ.num_operations}, New Count: {actual_initial_circ.num_operations}")
-            initial_circ = actual_initial_circ
-
     elif circ_type == "Hubbard":
         initial_circ = Circuit.from_file("/pscratch/sd/j/jkalloor/bqskit/ensemble_benchmarks/hubbard_4.qasm")
         # target = np.loadtxt("/pscratch/sd/j/jkalloor/bqskit/ensemble_benchmarks/tfim_4-1.unitary", dtype=np.complex128)
@@ -155,16 +126,8 @@ if __name__ == '__main__':
     #     UnfoldPass(),
     # ]
 
-    # compiler = Compiler(detached_server_ip, detached_server_port, runtime_log_level=logging.DEBUG)
-    if block_size == 5:
-        num_workers = 10
-    elif block_size == 6:
-        num_workers = 4
-    elif block_size == 7:
-        num_workers = 2
-    else:
-        num_workers = 20
-    compiler = Compiler(num_workers=num_workers, runtime_log_level=logging.INFO)
+    compiler = Compiler(ip=detached_server_ip, port=detached_server_port, runtime_log_level=logging.DEBUG)
+    # compiler = Compiler(num_workers=2, runtime_log_level=logging.DEBUG)
     
     # circ = compiler.compile(initial_circ, workflow=workflow)
 
@@ -262,17 +225,17 @@ if __name__ == '__main__':
             ToU3Pass(),
         ]
         out_circ, data = compiler.compile(initial_circ, workflow, request_data=True)
-        new_target = out_circ.get_unitary().get_target_correction_factor(target) * target
+        new_target = correction_factor(out_circ) * canonical_unitary(target.numpy)
         out_canonical = UnitaryMatrix(canonical_unitary(out_circ.get_unitary()))
 
         print("FINAL GPU Dist: ", out_circ.get_unitary().get_frobenius_distance(new_target))
-        print("FINAL GPU Dist: ", out_circ.get_unitary().get_distance_from(target, degree=1)*(2 ** 8))
+        print("FINAL GPU Dist: ", out_canonical.get_frobenius_distance(canonical_unitary(target.numpy)))
+        print("FINAL GPU Dist: ", out_circ.get_unitary().get_distance_from(target, degree=1)* (2 ** 7) * 2)
         dir = f"ensemble_approx_circuits_qfactor/{method}_tighter/{circ_type}"
         Path(f"{dir}/jiggled_circs/{tol}/{block_size}/{timestep}").mkdir(parents=True, exist_ok=True)
         pickle.dump(out_circ, open(f"{dir}/jiggled_circs/{tol}/{block_size}/{timestep}/jiggled_circ.pickle", "wb"))
         pickle.dump(new_target, open(f"{dir}/jiggled_circs/{tol}/{block_size}/{timestep}/target.pickle", "wb"))
         exit(0)
-
     elif method == "jiggle":
         synthesis_pass = LEAPSynthesisPass(
             success_threshold = 1e-14,
@@ -291,12 +254,12 @@ if __name__ == '__main__':
 
         workflow = [
             # ToU3Pass(convert_all_single_qubit_gates=True),
-            # ScanPartitioner(3),
-            # ForEachBlockPass([
-            #     synthesis_pass
-            # ],
-            # replace_filter="less-than"),
-            # UnfoldPass(),
+            ScanPartitioner(3),
+            ForEachBlockPass([
+                synthesis_pass
+            ],
+            replace_filter="less-than"),
+            UnfoldPass(),
             JiggleEnsemblePass(success_threshold=err_thresh, num_circs=10000, cost=generator)
         ]
         out_circ, data = compiler.compile(initial_circ, workflow, request_data=True)
@@ -317,20 +280,20 @@ if __name__ == '__main__':
     # dists = [x[1] for x in approx_circuits]
 
     # Store approximate solutions
-    # dir = f"ensemble_approx_circuits_qfactor/{method}_tighter/{circ_type}"
+    dir = f"ensemble_approx_circuits_qfactor/{method}_tighter/{circ_type}"
 
-    # Path(f"{dir}/jiggled_circs/{tol}/{block_size}/{timestep}").mkdir(parents=True, exist_ok=True)
+    Path(f"{dir}/jiggled_circs/{tol}/{timestep}").mkdir(parents=True, exist_ok=True)
 
-    # circ_infos = [(circ, dir, timestep, f"params_{i}_{block_size}_{tol}.pickle") for i, circ in enumerate(approx_circuits)]
-    # print("Writing")
-    # basic_circ = out_circ
-    # with mp.Pool() as pool:
-    #     pool.map(write_circ, circ_infos)
+    circ_infos = [(circ, dir, timestep, f"params_{i}_{tol}.pickle") for i, circ in enumerate(approx_circuits)]
+    print("Writing")
+    basic_circ = out_circ
+    with mp.Pool() as pool:
+        pool.map(write_circ, circ_infos)
 
 
 
-    # if method.startswith("jiggle"):
-    #     pickle.dump(out_circ, open(f"{dir}/jiggled_circs/{tol}/{block_size}/{timestep}/jiggled_circ.pickle", "wb"))
+    if method == "jiggle":
+        pickle.dump(out_circ, open(f"{dir}/jiggled_circs/{tol}/{timestep}/jiggled_circ.pickle", "wb"))
 
     # for i, circ in enumerate(approx_circuits):
     #     file = f"{dir}/circ_{i}.pickle"
@@ -347,7 +310,7 @@ if __name__ == '__main__':
 
     # json.dump(summary, open(f"{dir}/summary.json", "w"), indent=4)
 
-    # print(len(approx_circuits))
+    print(len(approx_circuits))
     # print(dists)
     # print(dists2)
 

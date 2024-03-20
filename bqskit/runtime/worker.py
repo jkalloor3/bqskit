@@ -246,7 +246,15 @@ class Worker:
 
         # Handle outgoing communication
         for out_msg in self._outgoing:
-            self._conn.send(out_msg)
+            try:
+                self._conn.send(out_msg)
+            except Exception as e:
+                print(out_msg)
+                exc_info = sys.exc_info()
+                error_str = ''.join(traceback.format_exception(*exc_info))
+                print("NOOOOOO")
+                exit(1)
+                
         self._outgoing.clear()
 
         # Handle incomming communication

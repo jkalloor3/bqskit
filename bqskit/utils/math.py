@@ -288,3 +288,31 @@ def global_phase(
     index = np.argmax(first_row_mags)
     std_phase = np.angle(special_unitary[0, index])
     return np.exp(1j * std_phase)
+
+def correction_factor(
+    unitary: npt.NDArray[np.complex128],
+) -> np.complex128:
+    """
+    Computes the global phase w.r.t the canonical untiary
+
+    If unitary matrices V, W differ only by a global phase, then
+    canonical_unitary(V) == canonical_unitary(W).
+
+    Args:
+        unitary (npt.NDArray[np.complex128]): A unitary matrix.
+
+    Returns:
+        npt.NDArray[np.complex128]: A unitary matrix.
+
+    References:
+        https://arxiv.org/abs/2306.05622
+    """
+    can_utry = canonical_unitary(unitary)
+
+    def first_nonzero(arr, axis, invalid_val=-1):
+        mask = arr!=0
+        return np.where(mask.any(axis=axis), mask.argmax(axis=axis), invalid_val)
+
+    a = unitary[np.nonzero(unitary)]
+    b = can_utry[np.nonzero(can_utry)]
+    return np.mean(a / b)

@@ -13,7 +13,7 @@ header = """#!/bin/bash -l
 #SBATCH --mem=0
 #SBATCH --signal=B:USR1@1
 #SBATCH --gpus-per-task=1
-#SBATCH --output=./slurm_logs/{method}/{circ}/{tol}_tol/{timestep}_t
+#SBATCH --output=./slurm_logs/{method}/{circ}/{tol}_tol/block_size_{m}
 
 module load python
 module load cudnn/8.9.3_cuda12
@@ -32,14 +32,14 @@ if __name__ == '__main__':
     circs = ["TFXY_t"]
     circs = ["Heisenberg_7"]
     # tols = range(1, 7)
-    tols = [1]
-    methods = ["jiggle_gpu"] #, "treescan"]
+    tols = [3,4,5,6]
+    methods = ["gpu"] #, "treescan"]
     part_sizes = [3]
     for circ in circs:
-        for timestep in range(11, 12):
+        for timestep in range(0, 1):
             for method in methods:
                 for tol in tols:
-                    for m in [1000]:
+                    for m in [5, 6, 7]:
                         to_write = open(file_name, 'w')
                         to_write.write(header.format(file=file, circ=circ, method=method, tol=tol, m=m, timestep=timestep))
                         to_write.close()
