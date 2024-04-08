@@ -156,28 +156,40 @@ if __name__ == '__main__':
     # Store approximate solutions
     all_utries = []
 
-    min_tol = 2
+    all_tols = [1,1.3,2,3,4,5,6]
 
-    for tol in range(min_tol, max_tol):
-        for i in range(tol + 1, tol + 5):
-            dir = f"ensemble_approx_circuits_qfactor/{method}/{circ_type}/{i}/{timestep}/params_*_{tol}.pickle"
+    for tol in all_tols:
+        # for i in range(tol + 1, tol + 5):
+        # dir = f"ensemble_approx_circuits_qfactor/{method}/{circ_type}/{tol}/{timestep}/params_*_{tol}.pickle"
+        if method.startswith("jiggle"):
+            basic_circ_2 = pickle.load(open(f"ensemble_approx_circuits_qfactor/{method}/{circ_type}/jiggled_circs/2/6/{timestep}/jiggled_circ.pickle", "rb"))
+            basic_circ_3 = pickle.load(open(f"ensemble_approx_circuits_qfactor/{method}/{circ_type}/jiggled_circs/3/6/{timestep}/jiggled_circ.pickle", "rb"))
+        # print(dir)
+        print("Got Circ")
+
+        dir2 = f"ensemble_approx_circuits_qfactor/{method}/{circ_type}/{tol}/{timestep}/params_*2*.pickle"
+        dir3 = f"ensemble_approx_circuits_qfactor/{method}/{circ_type}/{tol}/{timestep}/params_*3*.pickle"
+        print(dir2)
+        circ_files_2 = glob.glob(dir2)[:1000]
+        circ_files_3 = glob.glob(dir3)
+
+
+        # print(len(circ_files))
+        basic_circ = basic_circ_2
+
+        with mp.Pool() as pool:
             if method.startswith("jiggle"):
-                basic_circ = pickle.load(open(f"ensemble_approx_circuits_qfactor/{method}/{circ_type}/jiggled_circs/{tol}/{timestep}/jiggled_circ.pickle", "rb"))
-            print(dir)
-            print("Got Circ")
-
-            circ_files = glob.glob(dir)
-
-            print(len(circ_files))
-
-            with mp.Pool() as pool:
-                if method.startswith("jiggle"):
-                    utries = pool.map(get_circ_unitary_jiggle, circ_files)
-                else:
-                    utries = pool.map(get_circ_unitary, circ_files)
-            all_utries.extend(utries)
+                utries = pool.map(get_circ_unitary_jiggle, circ_files_2)
+                # all_utries.extend(utries)
+                # basic_circ = basic_circ_3
+                # utries = pool.map(get_circ_unitary_jiggle, circ_files_3)
+                # utries = pool.map(get_circ_unitary_jiggle, circ_files)
+            else:
+                utries = pool.map(get_circ_unitary, circ_files)
+        all_utries.extend(utries)
         
     print("------------------")
+    print(len(all_utries))
     full_e1, full_e2, true_mean = get_upperbound_error_mean(all_utries, target)
 
     print(full_e1, full_e2)
@@ -288,8 +300,8 @@ if __name__ == '__main__':
 
     fig, ax = plt.subplots(1, 1)
 
-    ax.scatter(tot_e2_uppers, tot_e1_uppers)
-    ax.scatter(tot_e2_uppers, tot_e1_actuals, c="red")
+    ax.scatter(tot_e2_uppers, tot_e1_uppers, label="E1")
+    ax.scatter(tot_e2_uppers, tot_e1_actuals, c="red", label = "Full Distance")
 
     e2_min = min(tot_e2_uppers)
     e2_max = max(tot_e2_uppers)
@@ -302,9 +314,10 @@ if __name__ == '__main__':
     ax.set_xlabel("E2s")
     ax.set_ylabel("E1s")
     ax.set_yscale("log")
+    ax.legend()
 
 
-    fig.savefig(f"{circ_type}_{method}_errors_comp_{min_tol}_to_{max_tol}_rev.png")
+    fig.savefig(f"{circ_type}_{method}_errors_comp_rev.png")
 
 
 

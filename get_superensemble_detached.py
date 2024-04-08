@@ -10,6 +10,7 @@ from bqskit.ir.gates import CNOTGate
 # Generate a super ensemble for some error bounds
 from bqskit.passes import *
 from bqskit.runtime import get_runtime
+from bqskit.ir.gates import GlobalPhaseGate
 import pickle
 from bqskit.ir.opt.cost.functions import HilbertSchmidtResidualsGenerator, HilbertSchmidtCostGenerator, FrobeniusCostGenerator
 from bqskit.ir.opt.minimizers.lbfgs import LBFGSMinimizer
@@ -77,38 +78,23 @@ if __name__ == '__main__':
     method = argv[3]
     tol = int(argv[4])
     block_size = int(argv[5])
-    if len(argv) == 8:
-        prev_tol = argv[6]
-        prev_block_size = argv[7]
-    else:
-        prev_tol = None
-        prev_block_size = None
+
+    print(tol, block_size)
 
     detached_server_ip = 'localhost'
     detached_server_port = default_server_port
     config.update('jax_enable_x64', True)
 
-    if circ_type == "TFIM":
-        initial_circ = Circuit.from_file(f"/pscratch/sd/j/jkalloor/bqskit/ensemble_benchmarks/TFIM_3_timesteps/TFIM_3_{timestep}.qasm")
-        initial_circ.remove_all_measurements()
-        # target = np.loadtxt("/pscratch/sd/j/jkalloor/bqskit/ensemble_benchmarks/tfim_4-1.unitary", dtype=np.complex128)
-    elif circ_type == "Heisenberg":
-        initial_circ = Circuit.from_file("/pscratch/sd/j/jkalloor/bqskit/ensemble_benchmarks/heisenberg_3.qasm")
-    elif circ_type == "Heisenberg_7":
-        initial_circ = Circuit.from_file("/pscratch/sd/j/jkalloor/bqskit/ensemble_benchmarks/heisenberg7.qasm")
-    elif circ_type == "Hubbard":
-        initial_circ = Circuit.from_file("/pscratch/sd/j/jkalloor/bqskit/ensemble_benchmarks/hubbard_4.qasm")
-        # target = np.loadtxt("/pscratch/sd/j/jkalloor/bqskit/ensemble_benchmarks/tfim_4-1.unitary", dtype=np.complex128)
-    elif circ_type == "TFXY":
-        initial_circ = Circuit.from_file("/pscratch/sd/j/jkalloor/bqskit/ensemble_benchmarks/tfxy_6.qasm")
-    elif circ_type == "TFXY_t":
-        initial_circ: Circuit =  Circuit.from_file(f"/pscratch/sd/j/jkalloor/bqskit/ensemble_benchmarks/TFXY_5_timesteps/TFXY_5_{timestep}.qasm")
-        initial_circ.remove_all_measurements()
-    else:
-        target = np.loadtxt("/pscratch/sd/j/jkalloor/bqskit/ensemble_benchmarks/qite_3.unitary", dtype=np.complex128)
-        initial_circ = Circuit.from_unitary(target)
-
+    # q_circ = pickle.load(open(f"/pscratch/sd/j/jkalloor/bqskit/ensemble_benchmarks/{circ_type}/{circ_type}_{timestep}.pkl", "rb"))
+    # initial_circ = qiskit_to_bqskit(q_circ)
+    initial_circ = Circuit.from_file(f"/pscratch/sd/j/jkalloor/bqskit/ensemble_benchmarks/{circ_type}/{circ_type}_{timestep}.qasm")
+    initial_circ.remove_all_measurements()
     target = initial_circ.get_unitary()
+
+    orig_depth = initial_circ.depth
+    orig_count = initial_circ.count(CNOTGate())
+
+    print(orig_count, orig_depth)
     # print(initial_circ)
 
     synth_circs = []
@@ -117,23 +103,18 @@ if __name__ == '__main__':
     err_thresh = 10 ** (-1 * tol)
     extra_err_thresh = 1e-13
 
-    orig_depth = initial_circ.depth
-    orig_count = initial_circ.count(CNOTGate())
+    if block_size == 5:
+        num_workers = 10
+    elif block_size == 6:
+        num_workers = 4
+    elif block_size == 7:
+        num_workers = 2
+    elif block_size == 8:
+        num_workers = 1
+    else:
+        num_workers = -1
 
-    # workflow = [
-    #     QFASTDecompositionPass(),
-    #     ForEachBlockPass([LEAPSynthesisPass(), ScanningGateRemovalPass()]),
-    #     UnfoldPass(),
-    # ]
-
-    compiler = Compiler(ip=detached_server_ip, port=detached_server_port, runtime_log_level=logging.DEBUG)
-    # compiler = Compiler(num_workers=2, runtime_log_level=logging.DEBUG)
-    
-    # circ = compiler.compile(initial_circ, workflow=workflow)
-
-    # # Using Quest
-    # quest_runner = QuestRunner(SimulationRunner(), compiler=compiler, sample_size=1, approx_threshold=1e-4)
-    # approx_circuits = quest_runner.get_all_circuits(circ)
+    compiler = Compiler(ip=detached_server_ip, port=detached_server_port)
 
     approx_circuits: list[Circuit] = []
 
@@ -189,7 +170,9 @@ if __name__ == '__main__':
         min_iters = 3
         diff_tol_r = 1e-5
         diff_tol_a = 0.0
-        dist_tol = err_thresh * 10e-5
+        approx_num_blocks = max((initial_circ.num_qudits / block_size) * initial_circ.depth / 20, 1)
+        dist_tol = err_thresh / approx_num_blocks
+        print(dist_tol)
 
         diff_tol_step_r = 0.1
         diff_tol_step = 200
@@ -209,32 +192,30 @@ if __name__ == '__main__':
             'method': batched_instantiation,
             'multistarts': num_multistarts,
         }
-
-        gate_deletion_jax_pass = ScanningGateRemovalPass( instantiate_options=instantiate_options)
-        
+        if block_size == initial_circ.num_qudits:
+            # Only 1 block, do TreeScan
+            gate_deletion_jax_pass = TreeScanningGateRemovalPass(instantiate_options=instantiate_options, tree_depth=8)
+        else:
+            gate_deletion_jax_pass = ScanningGateRemovalPass(instantiate_options=instantiate_options)
+        print(block_size)
         workflow = [
-            # ToU3Pass(convert_all_single_qubit_gates=True),
             ToVariablePass(convert_all_single_qudit_gates=True),
             QuickPartitioner(block_size=block_size),
             ForEachBlockPass([
-                ScanningGateRemovalPass(
-                    instantiate_options=instantiate_options,
-                ),
+                gate_deletion_jax_pass,
             ]),
             UnfoldPass(),
             ToU3Pass(),
         ]
         out_circ, data = compiler.compile(initial_circ, workflow, request_data=True)
-        new_target = correction_factor(out_circ) * canonical_unitary(target.numpy)
-        out_canonical = UnitaryMatrix(canonical_unitary(out_circ.get_unitary()))
+        global_phase_correction = target.get_target_correction_factor(out_circ.get_unitary())
 
-        print("FINAL GPU Dist: ", out_circ.get_unitary().get_frobenius_distance(new_target))
-        print("FINAL GPU Dist: ", out_canonical.get_frobenius_distance(canonical_unitary(target.numpy)))
-        print("FINAL GPU Dist: ", out_circ.get_unitary().get_distance_from(target, degree=1)* (2 ** 7) * 2)
-        dir = f"ensemble_approx_circuits_qfactor/{method}_tighter/{circ_type}"
+        out_circ.append_gate(GlobalPhaseGate(1, global_phase=global_phase_correction), (0,))
+
+        print("FINAL Original GPU Dist: ", out_circ.get_unitary().get_frobenius_distance(target))
+        dir = f"ensemble_approx_circuits_qfactor/{method}_real/{circ_type}"
         Path(f"{dir}/jiggled_circs/{tol}/{block_size}/{timestep}").mkdir(parents=True, exist_ok=True)
         pickle.dump(out_circ, open(f"{dir}/jiggled_circs/{tol}/{block_size}/{timestep}/jiggled_circ.pickle", "wb"))
-        pickle.dump(new_target, open(f"{dir}/jiggled_circs/{tol}/{block_size}/{timestep}/target.pickle", "wb"))
         exit(0)
     elif method == "jiggle":
         synthesis_pass = LEAPSynthesisPass(
@@ -280,7 +261,7 @@ if __name__ == '__main__':
     # dists = [x[1] for x in approx_circuits]
 
     # Store approximate solutions
-    dir = f"ensemble_approx_circuits_qfactor/{method}_tighter/{circ_type}"
+    dir = f"ensemble_approx_circuits_qfactor/{method}_real/{circ_type}"
 
     Path(f"{dir}/jiggled_circs/{tol}/{timestep}").mkdir(parents=True, exist_ok=True)
 

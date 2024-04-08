@@ -68,17 +68,11 @@ class JiggleEnsemblePass(BasePass):
 
         # For each params come up with nth root of num_circs number of extra params
 
-        num_extra_params = int(np.ceil(self.num_circs ** (1/ len(params))) - 1)
 
-        print(f"Num Params: {len(params)}, num params extra: {num_extra_params}")
+        print(f"Num Params: {len(params)}")
 
-        extra_diff = self.success_threshold / len(params)
+        extra_diff = self.success_threshold
 
-        print(f"Generating {num_extra_params} extra params per param")
-
-        all_params = [[x] for x in params]
-
-        total_combos = 1
         all_combos = []
         for i in range(self.num_circs):
             next_params = np.array(params.copy())

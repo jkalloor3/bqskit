@@ -1,16 +1,10 @@
 from bqskit.ir.circuit import Circuit
 from sys import argv
-from bqskit import compile
 import numpy as np
 # Generate a super ensemble for some error bounds
-from bqskit.passes import *
 import pickle
 
 from bqskit.qis.unitary import UnitaryMatrix
-
-from bqskit.ir.opt.cost.functions import HilbertSchmidtResidualsGenerator, HilbertSchmidtCostGenerator
-
-from pathlib import Path
 
 import glob
 
@@ -18,10 +12,8 @@ import matplotlib.pyplot as plt
 import random
 
 import multiprocessing as mp
+import time
 
-from sklearn.decomposition import PCA
-
-from qiskit import QuantumCircuit
 
 def local_magnetization(u: UnitaryMatrix, N,  qub: int):
     """Compute average magnetization from results of qk.execution.
@@ -102,6 +94,19 @@ def excitation_displacement(u: UnitaryMatrix):
 #         exit(0)
 #     return dis
 
+def get_ensemble_mags(i):
+    global all_utries
+    global targets
+    ens_size = 1
+    ensemble = random.sample(all_utries[i], ens_size)
+    ensemble_mean = np.mean(ensemble, axis=0)
+    dist = targets[i].get_frobenius_distance(ensemble_mean)
+    print(dist)
+    # print(dist)
+    # if dist > max_dist:
+    #     max_dist = dist
+    return excitation_displacement(UnitaryMatrix(ensemble_mean, check_arguments=False))
+
 
 def transform_mat_to_vec(unitary: UnitaryMatrix):
     vec = unitary.flatten()
@@ -111,14 +116,16 @@ def transform_mat_to_vec(unitary: UnitaryMatrix):
     return np.hstack([re_vec, im_vec])
 
 
-def get_circ_unitary_diff_jiggle(circ_file):
-    global basic_circ
-    global target
+def get_circ_unitary_diff_jiggle(circ_args):
+    start = time.time()
+    basic_circ_file, circ_file = circ_args
+    basic_circ: Circuit = pickle.load(open(basic_circ_file, "rb"))
     params: Circuit = pickle.load(open(circ_file, "rb"))
-    return basic_circ.get_unitary(params)
+    final_utry =  basic_circ.get_unitary(params)
+    print("Took", time.time() - start)
+    return final_utry
 
 def get_circ_unitary_diff(circ_file):
-    global target
     circ: Circuit = pickle.load(open(circ_file, "rb"))
     return circ.get_unitary()
 
@@ -133,6 +140,8 @@ from qiskit import Aer
 if __name__ == '__main__':
     global basic_circ
     global target
+    global all_utries
+    global targets
 
     circ_type = argv[1]
 
@@ -148,7 +157,7 @@ if __name__ == '__main__':
 
     min_tol = max_tol
 
-    timesteps = list(range(11,24))
+    timesteps = list(range(10,20))
     base_excitations = []
 
     num_spins = 5
@@ -164,8 +173,9 @@ if __name__ == '__main__':
                 # target = np.loadtxt("/pscratch/sd/j/jkalloor/bqskit/ensemble_benchmarks/tfim_4-1.unitary", dtype=np.complex128)
         elif circ_type == "Heisenberg":
             initial_circ = Circuit.from_file("/pscratch/sd/j/jkalloor/bqskit/ensemble_benchmarks/heisenberg_3.qasm")
-        elif circ_type == "Heisenberg_7":
-            initial_circ = Circuit.from_file("/pscratch/sd/j/jkalloor/bqskit/ensemble_benchmarks/heisenberg7.qasm")
+        elif circ_type == "Heisenberg_7" or circ_type == "TFXY_8":
+            initial_circ = Circuit.from_file(f"/pscratch/sd/j/jkalloor/bqskit/ensemble_benchmarks/{circ_type}/{circ_type}_{timestep}.qasm")
+            initial_circ.remove_all_measurements()
         elif circ_type == "Hubbard":
             initial_circ = Circuit.from_file("/pscratch/sd/j/jkalloor/bqskit/ensemble_benchmarks/hubbard_4.qasm")
             # target = np.loadtxt("/pscratch/sd/j/jkalloor/bqskit/ensemble_benchmarks/tfim_4-1.unitary", dtype=np.complex128)
@@ -201,7 +211,7 @@ if __name__ == '__main__':
     # Now get ensemble results
 
     # ensemble_sizes = [3, 10, 100, 500, 1000]
-    ensemble_sizes = [1,500]
+    ensemble_sizes = [1, 10, 100]
 
     ensemble_mags = [[] for _ in ensemble_sizes]
 
@@ -211,22 +221,25 @@ if __name__ == '__main__':
 
     if method.startswith("jiggle"):
         for i, timestep in enumerate(timesteps):
-            for j in range(max_tol + 1, max_tol + 2):
-                dir = f"ensemble_approx_circuits_qfactor/{method}/{circ_type}/{j}/{timestep}/params_*_{max_tol}.pickle"
+            for j in range(max_tol, max_tol + 1):
+                # dir = f"ensemble_approx_circuits_qfactor/{method}/{circ_type}/{j}/{timestep}/params_*_{max_tol}.pickle"
+                dir = f"ensemble_approx_circuits_qfactor/{method}/{circ_type}/{j}/{timestep}/params_*.pickle"
                 if method.startswith("jiggle"):
-                    basic_circ = pickle.load(open(f"ensemble_approx_circuits_qfactor/{method}/{circ_type}/jiggled_circs/{max_tol}/{timestep}/jiggled_circ.pickle", "rb"))
-                    # print(dir)
-                    # print("Got Circ")
+                    # basic_circ = pickle.load(open(f"ensemble_approx_circuits_qfactor/{method}/{circ_type}/jiggled_circs/{max_tol}/{timestep}/jiggled_circ.pickle", "rb"))
+                    basic_circ: Circuit = pickle.load(open(f"ensemble_approx_circuits_qfactor/gpu_real/{circ_type}/jiggled_circs/7/6/{timestep}/jiggled_circ.pickle", "rb"))
+                    print(dir)
+                    print("Got Circ")
                 
-                circ_files = glob.glob(dir)
+                circ_files = glob.glob(dir)[:200]
+                circ_args = [(f"ensemble_approx_circuits_qfactor/gpu_real/{circ_type}/jiggled_circs/7/6/{timestep}/jiggled_circ.pickle", cf) for cf in circ_files]
 
                 with mp.Pool() as pool:
                     if method.startswith("jiggle"):
-                        utries = pool.map(get_circ_unitary_diff_jiggle, circ_files)
+                        utries = pool.map(get_circ_unitary_diff_jiggle, circ_args)
                     else:
                         utries = pool.map(get_circ_unitary_diff, circ_files)
 
-                avg_utry_dist = np.mean([targets[i].get_frobenius_distance(utry) for utry in utries])  
+                # avg_utry_dist = np.mean([targets[i].get_frobenius_distance(utry) for utry in utries])  
                 # print("Avg Utry Dist", avg_utry_dist, end=",")   
                 # exit(0)
                     # circ_files.extend(glob.glob(dir)[:1000])
@@ -238,17 +251,10 @@ if __name__ == '__main__':
     for j, ens_size in enumerate(ensemble_sizes):
         max_dist = 0
         avg_dist = 0
-        for i,timestep in enumerate(timesteps):
-            ensemble = random.sample(all_utries[i], ens_size)
-            ensemble_mean = np.mean(ensemble, axis=0)
-            dist = targets[i].get_frobenius_distance(ensemble_mean)
-            # print(dist)
-            if dist > max_dist:
-                max_dist = dist
-
-            avg_dist += (dist / len(timesteps))
-            ensemble_mags[j].append(excitation_displacement(UnitaryMatrix(ensemble_mean, check_arguments=False)))
-        max_dists[ens_size] = [max_dist, avg_dist]
+        # print(ens_size)
+        with mp.Pool() as pool:
+            ensemble_mags[j] = pool.map(get_ensemble_mags, range(len(timesteps)))
+        # max_dists[ens_size] = [max_dist, avg_dist]
 
     colors = ["c", "g", "y", "b", "r"]
 
@@ -264,9 +270,9 @@ if __name__ == '__main__':
 
     # plt.show()
     axs.legend() 
-    fig.savefig(f"excitation_{circ_type}_{method}_{max_tol}_diff.png")
+    fig.savefig(f"excitation_{circ_type}_{method}_{max_tol}_1_diff.png")
 
-    print(max_dists)
+    # print(max_dists)
 
         
     # print("------------------")

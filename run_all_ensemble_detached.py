@@ -1,11 +1,12 @@
 import time
 import subprocess
+import os
 
 sleep_time = 0.05
 file_name = 'job_detached.sh'
 
 header = """#!/bin/bash
-#SBATCH --job-name=qfactor_{method}_{circ}_{tol}_tol/block_size_{m}
+#SBATCH --job-name={circ}_{m}
 #SBATCH -A m4141_g
 #SBATCH -C gpu
 #SBATCH -q regular
@@ -24,7 +25,7 @@ conda activate /pscratch/sd/j/jkalloor/justin_env_clone
 echo "starting BQSKit managers on all nodes"
 pwd
 ls run_workers_and_managers.sh
-source /pscratch/sd/j/jkalloor/bqskit/run_workers_and_managers.sh 4 1 &
+source /pscratch/sd/j/jkalloor/bqskit/run_workers_and_managers.sh 4 {num_workers} &
 #srun run_workers_and_managers.sh 4 4 &
 managers_pid=$!
 filename=$SCRATCH/managers_${{SLURM_JOB_ID}}_started
@@ -52,21 +53,29 @@ sleep 2
 if __name__ == '__main__':
     # mesh_gates = ["cx", "ecr"]
     # file = "get_ensemble_stats"
-    file = "get_superensemble"
+    file = "get_superensemble_detached"
     # file = "full_compile"
     circs = ["TFXY_t"]
-    circs = ["Heisenberg_7"]
+    circs = ["Heisenberg_7", "QITE_8", "TFXY_8"]
     # tols = range(1, 7)
-    tols = [3,4,5,6]
+    tols = [7]
     methods = ["gpu"] #, "treescan"]
-    part_sizes = [3]
+    # part_sizes = [3]
     for circ in circs:
-        for timestep in range(0, 1):
+        for timestep in range(10, 20):
             for method in methods:
                 for tol in tols:
-                    for m in [5, 6, 7]:
+                    if "7" in circ:
+                        ms = [6]
+                    else:
+                        ms = [6,7]
+                    for m in ms:
+                        num_workers = 64 if m == 6 else 32
+                        dir = f"ensemble_approx_circuits_qfactor/{method}_real/{circ}"
+                        if os.path.exists(f"{dir}/jiggled_circs/{tol}/{m}/{timestep}/jiggled_circ.pickle"):
+                            continue
                         to_write = open(file_name, 'w')
-                        to_write.write(header.format(file=file, circ=circ, method=method, tol=tol, m=m, timestep=timestep))
+                        to_write.write(header.format(file=file, circ=circ, method=method, tol=tol, m=m, timestep=timestep, num_workers=num_workers))
                         to_write.close()
                         time.sleep(2*sleep_time)
                         print(circ, method, tol)

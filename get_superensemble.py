@@ -6,7 +6,7 @@ from bqskit import compile
 import numpy as np
 from bqskit.compiler.compiler import Compiler
 from bqskit.ir.point import CircuitPoint
-from bqskit.ir.gates import CNOTGate
+from bqskit.ir.gates import CNOTGate, GlobalPhaseGate
 # Generate a super ensemble for some error bounds
 from bqskit.passes import *
 from bqskit.runtime import get_runtime
@@ -16,7 +16,7 @@ from bqskit.ir.opt.minimizers.lbfgs import LBFGSMinimizer
 from bqskit.ir.opt.minimizers.scipy import ScipyMinimizer
 import multiprocessing as mp
 from qfactorjax.qfactor import QFactorJax
-from bqskit.ext import qiskit_to_bqskit
+from bqskit.ext import qiskit_to_bqskit, bqskit_to_qiskit
 from bqskit.utils.math import global_phase, canonical_unitary, correction_factor
 
 
@@ -32,13 +32,7 @@ def write_circ(circ_info):
     global basic_circ
     global target
 
-    circuit, circ_dir, timestep,  circ_file = circ_info
-    dist = target.get_frobenius_distance(basic_circ.get_unitary(circuit))
-    if dist < 1e-18:
-        return
-
-    tol = int(-1 * np.log10(dist))
-    print(tol)
+    circuit, circ_dir, timestep,  circ_file, tol = circ_info
 
     full_dir = join(circ_dir, f"{tol}", f"{timestep}")
 
@@ -48,6 +42,12 @@ def write_circ(circ_info):
 
     pickle.dump(circuit, open(full_file, "wb"))
     return
+
+
+def get_dist(circuit):
+    global basic_circ
+    dist = target.get_frobenius_distance(basic_circ.get_unitary(circuit))
+    return dist
 
 # def parse_data(
 #     circuit: Circuit,
@@ -79,17 +79,43 @@ from bqskit.qis.unitary.unitary import RealVector
 import numpy.typing as npt
 from jax import config
 from bqskit.runtime import default_server_port
-
+from qiskit import QuantumCircuit
+from qiskit_aer import AerSimulator
+from qiskit_aer.noise import (NoiseModel, QuantumError, ReadoutError,
+    pauli_error, depolarizing_error, thermal_relaxation_error)
 enable_logging(False)
 
 import logging
 _logger = logging.getLogger(__name__)
+
+def create_pauli_noise_model(rb_fid_1q, rb_fid_2q):
+    rb_err_1q = 1 - rb_fid_1q
+    rb_err_2q = 1 - rb_fid_2q
+
+    # Create an empty noise model
+    noise_model = NoiseModel()
+
+    # Add depolarizing error to all single qubit u1, u2, u3 gates
+    one_q_error = pauli_error([('X', rb_err_1q /3), ('Y', rb_err_1q /3), ('Z', rb_err_1q / 3), ('I', rb_fid_1q)])
+    two_q_error = pauli_error([('XX', rb_err_2q / 15), ('YX', rb_err_2q / 15), ('ZX', rb_err_2q / 15),
+                            ('XY', rb_err_2q / 15), ('YY', rb_err_2q / 15), ('ZY', rb_err_2q / 15),
+                                ('XZ', rb_err_2q / 15), ('YZ', rb_err_2q / 15), ('ZZ', rb_err_2q / 15),
+                                ('XI', rb_err_2q / 15), ('YI', rb_err_2q / 15), ('ZI', rb_err_2q / 15),
+                                ('IX', rb_err_2q / 15), ('IY', rb_err_2q / 15), ('IZ', rb_err_2q / 15), 
+                                ('II', rb_fid_2q)])
+    noise_model.add_all_qubit_quantum_error(one_q_error, ['u3'])
+    noise_model.add_all_qubit_quantum_error(two_q_error, ['cx'])
+
+    return noise_model
+
 
 # Circ 
 if __name__ == '__main__':
     # enable_logging(True)
     global basic_circ
     global target
+
+    final_tol = None
     np.set_printoptions(precision=4, threshold=np.inf, linewidth=np.inf)
     circ_type = argv[1]
     timestep = int(argv[2])
@@ -107,6 +133,7 @@ if __name__ == '__main__':
     detached_server_ip = 'localhost'
     detached_server_port = default_server_port
     config.update('jax_enable_x64', True)
+    actual_target = None
 
     if circ_type == "TFIM":
         initial_circ = Circuit.from_file(f"/pscratch/sd/j/jkalloor/bqskit/ensemble_benchmarks/TFIM_3_timesteps/TFIM_3_{timestep}.qasm")
@@ -114,13 +141,13 @@ if __name__ == '__main__':
         # target = np.loadtxt("/pscratch/sd/j/jkalloor/bqskit/ensemble_benchmarks/tfim_4-1.unitary", dtype=np.complex128)
     elif circ_type == "Heisenberg":
         initial_circ = Circuit.from_file("/pscratch/sd/j/jkalloor/bqskit/ensemble_benchmarks/heisenberg_3.qasm")
-    elif circ_type == "Heisenberg_7":
-        initial_circ = Circuit.from_file("/pscratch/sd/j/jkalloor/bqskit/ensemble_benchmarks/heisenberg7.qasm")
+    elif circ_type == "Heisenberg_7" or circ_type == "TFXY_8":
+        initial_circ = Circuit.from_file(f"/pscratch/sd/j/jkalloor/bqskit/ensemble_benchmarks/{circ_type}/{circ_type}_{timestep}.qasm")
+        initial_circ.remove_all_measurements()
         if prev_tol:
-            actual_initial_circ: Circuit = pickle.load(open(f"/pscratch/sd/j/jkalloor/bqskit/ensemble_approx_circuits_qfactor/jiggle_gpu_tighter/Heisenberg_7/jiggled_circs/{prev_tol}/{prev_block_size}/{timestep}/jiggled_circ.pickle", "rb"))
-        
-
-            print("ORIG GPU DIST", actual_initial_circ.get_unitary().get_frobenius_distance(initial_circ.get_unitary()))
+            actual_initial_circ: Circuit = pickle.load(open(f"/pscratch/sd/j/jkalloor/bqskit/ensemble_approx_circuits_qfactor/gpu_real/{circ_type}/jiggled_circs/{prev_tol}/{prev_block_size}/{timestep}/jiggled_circ.pickle", "rb"))
+            target = initial_circ.get_unitary()
+            print("ORIG GPU DIST", actual_initial_circ.get_unitary().get_frobenius_distance(target))
             print(f"Orig Depth: {initial_circ.depth}, New Depth: {actual_initial_circ.depth}")
             print(f"Orig Count: {initial_circ.num_operations}, New Count: {actual_initial_circ.num_operations}")
             initial_circ = actual_initial_circ
@@ -137,8 +164,6 @@ if __name__ == '__main__':
         target = np.loadtxt("/pscratch/sd/j/jkalloor/bqskit/ensemble_benchmarks/qite_3.unitary", dtype=np.complex128)
         initial_circ = Circuit.from_unitary(target)
 
-    target = initial_circ.get_unitary()
-    # print(initial_circ)
 
     synth_circs = []
 
@@ -156,15 +181,16 @@ if __name__ == '__main__':
     # ]
 
     # compiler = Compiler(detached_server_ip, detached_server_port, runtime_log_level=logging.DEBUG)
-    if block_size == 5:
-        num_workers = 10
-    elif block_size == 6:
-        num_workers = 4
-    elif block_size == 7:
-        num_workers = 2
-    else:
-        num_workers = 20
-    compiler = Compiler(num_workers=num_workers, runtime_log_level=logging.INFO)
+    # if block_size == 5:
+    #     num_workers = 10
+    # elif block_size == 6:
+    #     num_workers = 4
+    # elif block_size == 7:
+    #     num_workers = 2
+    # else:
+    #     num_workers = 20
+    num_workers = 4
+    compiler = Compiler(num_workers=num_workers)
     
     # circ = compiler.compile(initial_circ, workflow=workflow)
 
@@ -274,20 +300,7 @@ if __name__ == '__main__':
         exit(0)
 
     elif method == "jiggle":
-        synthesis_pass = LEAPSynthesisPass(
-            success_threshold = 1e-14,
-            cost=generator,
-            instantiate_options={
-                'min_iters': 100,
-                # 'ftol': 1e-15,
-                # 'dist_tol': 1e-15,
-                # 'gtol': 1e-10,
-                # 'cost_fn_gen': generator,
-                # 'method': 'qfactor',
-                'method': 'minimization',
-                'minimizer': LBFGSMinimizer() # Go back to QFactor. set x_tol
-            }
-        )
+
 
         workflow = [
             # ToU3Pass(convert_all_single_qubit_gates=True),
@@ -304,6 +317,27 @@ if __name__ == '__main__':
         approx_circuits: list[Circuit] = data["ensemble_params"]
         # approx_circuits = data["ensemble"]
 
+
+    elif method == "noise":
+        dir = f"ensemble_approx_circuits_qfactor/{method}/{circ_type}/{tol}/{block_size}"
+        Path(f"{dir}").mkdir(parents=True, exist_ok=True)
+        one_q_prob = 0.001
+        two_q_prob = 0.001
+        # for i in range(20000):
+        #     # Calculate total unitary
+        #     # utry = initial_circ.get_noisy_pauli_unitary(0.001, 0)
+        #     pickle.dump(utry, open(f"{dir}/utry_{i}.pickle", "wb"))
+
+        def save_noisy_unitary(i: int):
+            utry = initial_circ.get_noisy_pauli_unitary(0.1, 0)
+            # print(utry)
+            pickle.dump(utry, open(f"{dir}/utry_{i}.pickle", "wb"))
+
+        with mp.Pool() as pool:
+            utries = pool.map(save_noisy_unitary, range(2000))
+
+        exit(0)
+
     # utries = [x.get_unitary() for x in approx_circuits]
     # dists = [get_frobenius_distance(x, target) for x in approx_circuits]
     # print(dists)
@@ -317,16 +351,23 @@ if __name__ == '__main__':
     # dists = [x[1] for x in approx_circuits]
 
     # Store approximate solutions
-    # dir = f"ensemble_approx_circuits_qfactor/{method}_tighter/{circ_type}"
+    dir = f"ensemble_approx_circuits_qfactor/{method}_post_gpu/{circ_type}"
 
-    # Path(f"{dir}/jiggled_circs/{tol}/{block_size}/{timestep}").mkdir(parents=True, exist_ok=True)
+    Path(f"{dir}/jiggled_circs/{tol}/{block_size}/{timestep}").mkdir(parents=True, exist_ok=True)
 
-    # circ_infos = [(circ, dir, timestep, f"params_{i}_{block_size}_{tol}.pickle") for i, circ in enumerate(approx_circuits)]
-    # print("Writing")
-    # basic_circ = out_circ
-    # with mp.Pool() as pool:
-    #     pool.map(write_circ, circ_infos)
+    # Get first 100 dists
+    basic_circ = out_circ
+    with mp.Pool() as pool:
+        dists = pool.map(get_dist, approx_circuits[:500])
 
+
+    actual_tol = int(-1 * np.log10(np.mean(dists)))
+    print(actual_tol)
+
+    circ_infos = [(circ, dir, timestep, f"params_{i}_{block_size}_{tol}.pickle", actual_tol) for i, circ in enumerate(approx_circuits)]
+    print("Writing")
+    with mp.Pool() as pool:
+        pool.map(write_circ, circ_infos)
 
 
     # if method.startswith("jiggle"):
