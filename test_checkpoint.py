@@ -63,7 +63,7 @@ import numpy.typing as npt
 from jax import config
 from bqskit.runtime import default_server_port
 
-enable_logging(False)
+enable_logging(True)
 
 import logging
 _logger = logging.getLogger(__name__)
@@ -84,7 +84,6 @@ if __name__ == '__main__':
 
     detached_server_ip = 'localhost'
     detached_server_port = default_server_port
-    config.update('jax_enable_x64', True)
 
     # q_circ = pickle.load(open(f"/pscratch/sd/j/jkalloor/bqskit/ensemble_benchmarks/{circ_type}/{circ_type}_{timestep}.pkl", "rb"))
     # initial_circ = qiskit_to_bqskit(q_circ)
@@ -104,86 +103,32 @@ if __name__ == '__main__':
     err_thresh = 10 ** (-1 * tol)
     extra_err_thresh = 1e-13
 
-    if block_size == 5:
-        num_workers = 10
-    elif block_size == 6:
-        num_workers = 4
-    elif block_size == 7:
-        num_workers = 2
-    elif block_size == 8:
-        num_workers = 1
-    else:
-        num_workers = -1
-
-    compiler = Compiler(ip=detached_server_ip, port=detached_server_port)
+    compiler = Compiler(num_workers = 2)
 
     approx_circuits: list[Circuit] = []
 
     generator = HilbertSchmidtCostGenerator()
     # generator = FrobeniusCostGenerator()
 
-    if method == "gpu":
-        num_multistarts = 32
-        max_iters = 100000
-        min_iters = 3
-        diff_tol_r = 1e-5
-        diff_tol_a = 0.0
-        approx_num_blocks = max((initial_circ.num_qudits / block_size) * initial_circ.depth / 20, 1)
-        dist_tol = err_thresh / approx_num_blocks
-        print(dist_tol)
-
-        diff_tol_step_r = 0.1
-        diff_tol_step = 200
-        beta = 0
-
-        batched_instantiation = QFactorJax(
-            diff_tol_r=diff_tol_r,
-            diff_tol_a=diff_tol_a,
-            min_iters=min_iters,
-            max_iters=max_iters,
-            dist_tol=dist_tol,
-            diff_tol_step_r=diff_tol_step_r,
-            diff_tol_step=diff_tol_step,
-            beta=beta,
-        )
-        instantiate_options = {
-            'method': batched_instantiation,
-            'multistarts': num_multistarts,
-        }
-
+    if method == "scan":
         base_checkpoint_dir = "checkpoints"
         proj_name = f"{circ_type}_{method}_{timestep}_{block_size}_{tol}"
         full_checkpoint_dir = join(base_checkpoint_dir, proj_name)
+        gate_deletion_jax_pass = ScanningGateRemovalPass(checkpoint_proj=full_checkpoint_dir)
 
-        if block_size == initial_circ.num_qudits:
-            # Only 1 block, do TreeScan
-            gate_deletion_jax_pass = TreeScanningGateRemovalPass(instantiate_options=instantiate_options, tree_depth=8)
-        else:
-            gate_deletion_jax_pass = ScanningGateRemovalPass(instantiate_options=instantiate_options, checkpoint_proj=full_checkpoint_dir)
-        print(block_size)
-        # Check if checkpoint files exist
-        if len(glob.glob(join(full_checkpoint_dir, "*", "*.pickle"))) > 0:
-            print("Checkpoint does not exist!")
-            workflow = [
-                ToVariablePass(convert_all_single_qudit_gates=True),
-                QuickPartitioner(block_size=block_size),
-                SaveIntermediatePass(base_checkpoint_dir, proj_name, save_as_qasm= False),
-                ForEachBlockPass([
-                    gate_deletion_jax_pass,
-                ]),
-                UnfoldPass(),
-                ToU3Pass(),
-            ]
-        else:
-            # Already Partitioned, restart
-            workflow = [
-                RestoreIntermediatePass(full_checkpoint_dir, as_circuit_gate=True),
-                ForEachBlockPass([
-                    gate_deletion_jax_pass,
-                ]),
-                UnfoldPass(),
-                ToU3Pass(),
-            ]
+
+        workflow = [
+            CheckpointRestartPass(base_checkpoint_dir, proj_name, 
+                                  default_passes=[
+                                    ToVariablePass(convert_all_single_qudit_gates=True),
+                                    QuickPartitioner(block_size=block_size),
+                                  ], save_as_qasm=False),
+            ForEachBlockPass([
+                gate_deletion_jax_pass,
+            ]),
+            UnfoldPass(),
+            ToU3Pass(),
+        ]
         
         out_circ, data = compiler.compile(initial_circ, workflow, request_data=True)
         global_phase_correction = target.get_target_correction_factor(out_circ.get_unitary())
