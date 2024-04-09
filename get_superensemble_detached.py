@@ -1,31 +1,19 @@
 from bqskit.ir.circuit import Circuit
 from sys import argv
-from bqskit.exec.runners.quest import QuestRunner
-from bqskit.exec.runners.sim import SimulationRunner
-from bqskit import compile
 import numpy as np
 from bqskit.compiler.compiler import Compiler
-from bqskit.ir.point import CircuitPoint
 from bqskit.ir.gates import CNOTGate
 # Generate a super ensemble for some error bounds
 from bqskit.passes import *
 from bqskit.runtime import get_runtime
 from bqskit.ir.gates import GlobalPhaseGate
 import pickle
-from bqskit.ir.opt.cost.functions import HilbertSchmidtResidualsGenerator, HilbertSchmidtCostGenerator, FrobeniusCostGenerator
-from bqskit.ir.opt.minimizers.lbfgs import LBFGSMinimizer
-from bqskit.ir.opt.minimizers.scipy import ScipyMinimizer
-import multiprocessing as mp
+from bqskit.ir.opt.cost.functions import HilbertSchmidtResidualsGenerator, HilbertSchmidtCostGenerator
 from qfactorjax.qfactor import QFactorJax
-from bqskit.ext import qiskit_to_bqskit
-from bqskit.utils.math import global_phase, canonical_unitary, correction_factor
 
 from bqskit import enable_logging
 
 from pathlib import Path
-import glob
-
-import json
 
 from os.path import join
 
@@ -86,8 +74,6 @@ if __name__ == '__main__':
     detached_server_port = default_server_port
     config.update('jax_enable_x64', True)
 
-    # q_circ = pickle.load(open(f"/pscratch/sd/j/jkalloor/bqskit/ensemble_benchmarks/{circ_type}/{circ_type}_{timestep}.pkl", "rb"))
-    # initial_circ = qiskit_to_bqskit(q_circ)
     initial_circ = Circuit.from_file(f"/pscratch/sd/j/jkalloor/bqskit/ensemble_benchmarks/{circ_type}/{circ_type}_{timestep}.qasm")
     initial_circ.remove_all_measurements()
     target = initial_circ.get_unitary()
@@ -162,28 +148,18 @@ if __name__ == '__main__':
             gate_deletion_jax_pass = ScanningGateRemovalPass(instantiate_options=instantiate_options, checkpoint_proj=full_checkpoint_dir)
         print(block_size)
         # Check if checkpoint files exist
-        if len(glob.glob(join(full_checkpoint_dir, "*", "*.pickle"))) > 0:
-            print("Checkpoint does not exist!")
-            workflow = [
-                ToVariablePass(convert_all_single_qudit_gates=True),
-                QuickPartitioner(block_size=block_size),
-                SaveIntermediatePass(base_checkpoint_dir, proj_name, save_as_qasm= False),
-                ForEachBlockPass([
-                    gate_deletion_jax_pass,
-                ]),
-                UnfoldPass(),
-                ToU3Pass(),
-            ]
-        else:
-            # Already Partitioned, restart
-            workflow = [
-                RestoreIntermediatePass(full_checkpoint_dir, as_circuit_gate=True),
-                ForEachBlockPass([
-                    gate_deletion_jax_pass,
-                ]),
-                UnfoldPass(),
-                ToU3Pass(),
-            ]
+        workflow = [
+            CheckpointRestartPass(base_checkpoint_dir, proj_name, 
+                                  default_passes=[
+                                    ToVariablePass(convert_all_single_qudit_gates=True),
+                                    QuickPartitioner(block_size=block_size),
+                                  ], save_as_qasm=False),
+            ForEachBlockPass([
+                gate_deletion_jax_pass,
+            ]),
+            UnfoldPass(),
+            ToU3Pass(),
+        ]
         
         out_circ, data = compiler.compile(initial_circ, workflow, request_data=True)
         global_phase_correction = target.get_target_correction_factor(out_circ.get_unitary())
