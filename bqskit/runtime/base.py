@@ -266,10 +266,11 @@ class ServerBase:
             w_id = self.lower_id_bound + i
             procs[w_id] = Process(
                 target=start_worker,
-                args=(w_id, port, profile),
+                args=(w_id, port),
                 kwargs={
                     'logging_level': logging_level,
                     'num_blas_threads': num_blas_threads,
+                    'profile': profile
                 },
             )
             procs[w_id].daemon = True

@@ -187,6 +187,7 @@ class QSDPass(BasePass):
             # TODO: Combine mod_unitaries and qsd
             unitaries = await get_runtime().map(QSDPass.mod_unitaries, unitaries)
             circs = await get_runtime().map(QSDPass.qsd, unitaries)
+            # circs = [QSDPass.qsd(QSDPass.mod_unitaries(u)) for u in unitaries]
             # Do bulk replace (single threaded)
             circ_gates = [CircuitGate(x) for x in circs]
             circ_ops = [Operation(x, locations[i], x._circuit.params) for i,x in enumerate(circ_gates)]

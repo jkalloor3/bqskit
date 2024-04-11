@@ -1,3 +1,4 @@
+from bqskit.compiler import Compiler
 from bqskit.passes import FullQSDPass, QSDPass, MGDPass
 from bqskit.ir.circuit import Circuit
 from bqskit.ir.operation import Operation
@@ -8,7 +9,6 @@ import numpy.random as rand
 import numpy as np
 from bqskit.passes import UnfoldPass
 from bqskit.qis import UnitaryMatrix
-from bqskit.compiler import Compiler, compile
 import time
 from bqskit import enable_logging
 # from bqskitqfactorjax.qfactor_jax import QFactor_jax
