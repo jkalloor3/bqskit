@@ -38,7 +38,7 @@ if __name__ == '__main__':
                     # for exp in range(tree_depth - 4, tree_depth + 1):
                     for num_worker in [4, 8, 64]:
                         # num_worker = 2 ** exp
-                        pathlib.Path(f"new_runtime/{method}/{num_qudit}/{min_qudit}/{tree_depth}/{num_worker}").mkdir(parents=True, exist_ok=True)
+                        pathlib.Path(f"updated_runtime/{method}/{num_qudit}/{min_qudit}/{tree_depth}/{num_worker}").mkdir(parents=True, exist_ok=True)
                         to_write = open(file_name, 'w')
                         to_write.write(header.format(file=file, method=method, num_qudit=num_qudit, min_qudit=min_qudit,
                                                       tree_depth=tree_depth, num_worker=num_worker))
