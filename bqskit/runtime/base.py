@@ -12,6 +12,7 @@ import socket
 import sys
 import time
 import traceback
+from pathlib import Path
 from multiprocessing import Process
 from multiprocessing.connection import Client
 from multiprocessing.connection import Connection
@@ -163,7 +164,9 @@ class ServerBase:
         """Used to find the employee associated with a message."""
 
         if log_file:
-            self.log_file = open(log_file, "w")
+            log_file_path = Path(log_file)
+            log_file_path.parent.mkdir(exist_ok=True, parents=True)
+            self.log_file = open(log_file_path, "w")
             print("Piping log to: ", log_file)
         else:
             self.log_file = sys.stdout
