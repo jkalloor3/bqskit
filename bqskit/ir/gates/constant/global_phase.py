@@ -9,6 +9,8 @@ from bqskit.ir.gates.constantgate import ConstantGate
 from bqskit.qis.unitary.unitarymatrix import UnitaryMatrix
 from bqskit.utils.typing import is_valid_radixes
 
+from bqskit.ir.location import CircuitLocation
+from bqskit.qis.unitary.unitary import RealVector
 
 class GlobalPhaseGate(ConstantGate):
     """An Identity (No-OP) Gate with a global phase."""
@@ -44,14 +46,14 @@ class GlobalPhaseGate(ConstantGate):
         self.global_phase = global_phase
         self._qasm_name = 'identity%d' % self.num_qudits
 
-    def get_qasm_gate_def(self) -> str:
-        """Return a qasm gate definition block for this gate."""
-        param_symbols = ['a%d' % i for i in range(self.num_qudits)]
-        param_str = ','.join(param_symbols)
-        header = 'gate identity%d %s' % (self.num_qudits, param_str)
-        body_stmts = ['\tU(0,0,0) %s;' % sym for sym in param_symbols]
-        body = '\n'.join(body_stmts)
-        return f'{header}\n{{\n{body}\n}}\n'
+    def get_qasm(self, params: RealVector, location: CircuitLocation) -> str:
+        """Returns the qasm string for this gate."""
+        actual_params = [0,0,0]
+        return '{}({}) q[{}];\n'.format(
+            "u3",
+            ', '.join([str(p) for p in actual_params]),
+            '], q['.join([str(q) for q in location]),
+        ).replace('()', '')
 
     def __eq__(self, other: object) -> bool:
         return (

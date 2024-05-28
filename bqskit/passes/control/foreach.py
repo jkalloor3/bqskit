@@ -13,6 +13,8 @@ from bqskit.compiler.workflow import Workflow
 from bqskit.compiler.workflow import WorkflowLike
 from bqskit.ir.circuit import Circuit
 from bqskit.ir.gates.circuitgate import CircuitGate
+from bqskit.ir.gate import Gate
+from bqskit.ir.gates import CNOTGate
 from bqskit.ir.gates.constant.unitary import ConstantUnitaryGate
 from bqskit.ir.gates.parameterized.pauli import PauliGate
 from bqskit.ir.gates.parameterized.unitary import VariableUnitaryGate
@@ -64,6 +66,8 @@ class ForEachBlockPass(BasePass):
         replace_filter: ReplaceFilterFn | str = 'always',
         batch_size: int | None = None,
         blocks_to_run: List[int] = [],
+        allocate_error: bool = False,
+        allocate_error_gate: Gate = CNOTGate(),
     ) -> None:
         """
         Construct a ForEachBlockPass.
@@ -147,6 +151,8 @@ class ForEachBlockPass(BasePass):
         self.replace_filter = replace_filter or default_replace_filter
         self.workflow = Workflow(loop_body)
         self.blocks_to_run = sorted(blocks_to_run)
+        self.allocate_error = allocate_error
+        self.allocate_error_gate = allocate_error_gate
         if not callable(self.collection_filter):
             raise TypeError(
                 'Expected callable method that maps Operations to booleans for'
@@ -204,6 +210,8 @@ class ForEachBlockPass(BasePass):
         # Preprocess blocks
         subcircuits: list[Circuit] = []
         block_datas: list[PassData] = []
+        total_gates = 0
+        block_gates = []
         for i, (cycle, op) in enumerate(blocks):
 
             # Form Subcircuit
@@ -222,6 +230,9 @@ class ForEachBlockPass(BasePass):
                 model.gate_set,
                 subradixes,
             )
+
+            total_gates += subcircuit.count(self.allocate_error)
+            block_gates.append(subcircuit.count(self.allocate_error))
 
             # Form Subdata
             block_data: PassData = PassData(subcircuit)
@@ -243,6 +254,11 @@ class ForEachBlockPass(BasePass):
 
             subcircuits.append(subcircuit)
             block_datas.append(block_data)
+
+        # Assign error as percentage of block
+        if self.allocate_error:
+            for i in range(len(block_datas)):
+                block_datas[i]["error_percentage_allocated"] = block_gates[i] / total_gates
 
         # Do the work
         results = await get_runtime().map(

@@ -67,21 +67,42 @@ if __name__ == '__main__':
     method = argv[3]
     tol = int(argv[4])
     block_size = int(argv[5])
-
-    print(tol, block_size)
+    if len(argv) == 8:
+        prev_tol = argv[6]
+        prev_block_size = argv[7]
+    else:
+        prev_tol = None
+        prev_block_size = None
 
     detached_server_ip = 'localhost'
     detached_server_port = default_server_port
     config.update('jax_enable_x64', True)
 
-    initial_circ = Circuit.from_file(f"/pscratch/sd/j/jkalloor/bqskit/ensemble_benchmarks/{circ_type}/{circ_type}_{timestep}.qasm")
-    initial_circ.remove_all_measurements()
-    target = initial_circ.get_unitary()
+
+
+    if circ_type.startswith("vqe"):
+        initial_circ = Circuit.from_file(f"/pscratch/sd/j/jkalloor/bqskit/ensemble_benchmarks/{circ_type}.qasm")
+    else:
+        initial_circ = Circuit.from_file(f"/pscratch/sd/j/jkalloor/bqskit/ensemble_benchmarks/{circ_type}/{circ_type}_{timestep}.qasm")
+        initial_circ.remove_all_measurements()
+    
+    if initial_circ.num_qudits < 8:
+        target = initial_circ.get_unitary()
+
+    pam_circ: Circuit = pickle.load(open(f"/pscratch/sd/j/jkalloor/bqskit/ensemble_approx_circuits_pam/pam/{circ_type}/{prev_tol}/{prev_block_size}/{timestep}/circ.pickle", "rb"))
 
     orig_depth = initial_circ.depth
     orig_count = initial_circ.count(CNOTGate())
+                                    
+    pam_depth = pam_circ.depth
+    pam_count = pam_circ.count(CNOTGate())
 
+    print("COUNT", "DEPTH")
     print(orig_count, orig_depth)
+    print("PAM COUNT", "PAM DEPTH")
+    print(pam_count, pam_depth)
+
+    initial_circ = pam_circ
     # print(initial_circ)
 
     synth_circs = []
@@ -115,8 +136,8 @@ if __name__ == '__main__':
         diff_tol_r = 1e-5
         diff_tol_a = 0.0
         approx_num_blocks = max((initial_circ.num_qudits / block_size) * initial_circ.depth / 20, 1)
-        dist_tol = err_thresh / approx_num_blocks
-        print(dist_tol)
+        dist_tol = err_thresh #/ approx_num_blocks
+        # print(dist_tol)
 
         diff_tol_step_r = 0.1
         diff_tol_step = 200
@@ -162,11 +183,10 @@ if __name__ == '__main__':
         ]
         
         out_circ, data = compiler.compile(initial_circ, workflow, request_data=True)
-        global_phase_correction = target.get_target_correction_factor(out_circ.get_unitary())
-
-        out_circ.append_gate(GlobalPhaseGate(1, global_phase=global_phase_correction), (0,))
-
-        print("FINAL Original GPU Dist: ", out_circ.get_unitary().get_frobenius_distance(target))
-        dir = f"ensemble_approx_circuits_qfactor/{method}_real/{circ_type}"
+        if out_circ.num_qudits < 8:
+            global_phase_correction = target.get_target_correction_factor(out_circ.get_unitary())
+            out_circ.append_gate(GlobalPhaseGate(1, global_phase=global_phase_correction), (0,))
+            print("FINAL Original GPU Dist: ", out_circ.get_unitary().get_frobenius_distance(target))
+        dir = f"ensemble_approx_circuits_qfactor/{method}_post_pam/{circ_type}"
         Path(f"{dir}/jiggled_circs/{tol}/{block_size}/{timestep}").mkdir(parents=True, exist_ok=True)
         pickle.dump(out_circ, open(f"{dir}/jiggled_circs/{tol}/{block_size}/{timestep}/jiggled_circ.pickle", "wb"))

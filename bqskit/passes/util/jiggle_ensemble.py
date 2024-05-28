@@ -16,6 +16,7 @@ from bqskit.ir.gates import CircuitGate
 from bqskit.ir.gates import CNOTGate
 from bqskit.qis import UnitaryMatrix
 import numpy as np
+from math import ceil
 
 _logger = logging.getLogger(__name__)
 
@@ -25,7 +26,8 @@ class JiggleEnsemblePass(BasePass):
 
     def __init__(self, success_threshold = 1e-4, 
                  num_circs = 1000,
-                 cost: CostFunctionGenerator = HilbertSchmidtCostGenerator(),) -> None:
+                 cost: CostFunctionGenerator = HilbertSchmidtCostGenerator(),
+                 use_ensemble: bool = True) -> None:
         """
         Construct a ToU3Pass.
 
@@ -42,7 +44,7 @@ class JiggleEnsemblePass(BasePass):
         #     'min_iters': 100,
         #     'cost_fn_gen': self.cost,
         # }
-
+        self.use_ensemble = use_ensemble
         self.instantiate_options: dict[str, Any] = {
             'dist_tol': self.success_threshold,
             'min_iters': 100,
@@ -66,63 +68,31 @@ class JiggleEnsemblePass(BasePass):
 
         params = circuit.params
 
+        all_circs = []
+
         # For each params come up with nth root of num_circs number of extra params
+        if self.use_ensemble:
+            circuits = data["ensemble"]
+        else:
+            circuits = [circuit]
+        for circ in circuits:
+            params = circ.params
+            print(f"Num Params: {len(params)}")
 
+            extra_diff = self.success_threshold
 
-        print(f"Num Params: {len(params)}")
+            for _ in range(ceil(self.num_circs / len(circuits))):
+                next_params = np.array(params.copy())
+                num_params_to_jiggle = int(np.random.uniform() * min(len(params) / 2, 50))
+                params_to_jiggle = np.random.choice(list(range(len(params))), num_params_to_jiggle, replace=False)
+                jiggle_amounts = np.random.uniform(-1 * extra_diff, extra_diff, num_params_to_jiggle)
+                next_params[params_to_jiggle] = next_params[params_to_jiggle] + jiggle_amounts
+                circ_copy = circ.copy()
+                circ_copy.set_params(next_params)
+                all_circs.append(circ_copy)
+                # all_combos.append(next_params)
 
-        extra_diff = self.success_threshold
-
-        all_combos = []
-        for i in range(self.num_circs):
-            next_params = np.array(params.copy())
-            num_params_to_jiggle = int(np.random.uniform() * min(len(params) / 2, 50))
-            params_to_jiggle = np.random.choice(list(range(len(params))), num_params_to_jiggle, replace=False)
-            jiggle_amounts = np.random.uniform(-1 * extra_diff, extra_diff, num_params_to_jiggle)
-            next_params[params_to_jiggle] = next_params[params_to_jiggle] + jiggle_amounts
-            all_combos.append(next_params)
-
-
-
-        # for i,param in enumerate(params):
-        #     if total_combos < self.num_circs:
-        #         num_extra = num_extra_params
-        #     else:
-        #         num_extra = 0
-        #     extra_params = np.random.uniform(param - extra_diff, param + extra_diff, num_extra)
-        #     all_params[i].extend(extra_params)
-        #     total_combos *= (len(extra_params) + 1)
-        #     print(total_combos)
-
-        # Now create all circuits
-        # all_combos = [np.zeros(len(params)) for _ in range(total_combos)]
-        # i = 0
-        # # np.set_printoptions(linewidth=np.inf, threshold=np.inf, precision=6)
-
-        # for i in range(total_combos):
-        #     total = i
-        #     for j, params_list in enumerate(all_params):
-        #         ind = total % len(params_list)
-        #         total = total // len(params_list)
-        #         all_combos[i][j] = params_list[ind]
-
-        #     # print(all_combos[i])
-        # print(f"Generated all {len(all_combos)} param lists")
-        
-        # all_circs = await get_runtime().map(
-        #     JiggleEnsemblePass.get_circ,
-        #     all_combos,
-        #     circuit=circuit
-        # )
-        # all_circs = [None for _ in all_combos]
-        # for i, l_params in enumerate(all_combos):
-        #     unit = circuit.get_unitary(l_params)
-        #     # circ_copy.set_params(l_params)
-        #     if i % 1000 == 0:
-        #         print("1000 done")
-        #     all_circs[i] = unit
-
-        data["ensemble_params"] = all_combos
+        data["ensemble"] = all_circs
 
         print("FINISHED!")
         return

@@ -19,6 +19,7 @@ from qfactorjax.qfactor import QFactorJax
 from bqskit.ext import qiskit_to_bqskit, bqskit_to_qiskit
 from bqskit.utils.math import global_phase, canonical_unitary, correction_factor
 
+from util import AnalyzeBlockPass
 
 from bqskit import enable_logging
 
@@ -139,19 +140,16 @@ if __name__ == '__main__':
         initial_circ = Circuit.from_file(f"/pscratch/sd/j/jkalloor/bqskit/ensemble_benchmarks/TFIM_3_timesteps/TFIM_3_{timestep}.qasm")
         initial_circ.remove_all_measurements()
         # target = np.loadtxt("/pscratch/sd/j/jkalloor/bqskit/ensemble_benchmarks/tfim_4-1.unitary", dtype=np.complex128)
-    elif circ_type == "Heisenberg":
-        initial_circ = Circuit.from_file("/pscratch/sd/j/jkalloor/bqskit/ensemble_benchmarks/heisenberg_3.qasm")
     elif circ_type == "Heisenberg_7" or circ_type == "TFXY_8":
         initial_circ = Circuit.from_file(f"/pscratch/sd/j/jkalloor/bqskit/ensemble_benchmarks/{circ_type}/{circ_type}_{timestep}.qasm")
         initial_circ.remove_all_measurements()
         if prev_tol:
-            actual_initial_circ: Circuit = pickle.load(open(f"/pscratch/sd/j/jkalloor/bqskit/ensemble_approx_circuits_qfactor/gpu_real/{circ_type}/jiggled_circs/{prev_tol}/{prev_block_size}/{timestep}/jiggled_circ.pickle", "rb"))
+            actual_initial_circ: Circuit = pickle.load(open(f"/pscratch/sd/j/jkalloor/bqskit/ensemble_approx_circuits_qfactor/gpu_post_pam/{circ_type}/jiggled_circs/{prev_tol}/{prev_block_size}/{timestep}/jiggled_circ.pickle", "rb"))
             target = initial_circ.get_unitary()
             print("ORIG GPU DIST", actual_initial_circ.get_unitary().get_frobenius_distance(target))
             print(f"Orig Depth: {initial_circ.depth}, New Depth: {actual_initial_circ.depth}")
             print(f"Orig Count: {initial_circ.num_operations}, New Count: {actual_initial_circ.num_operations}")
             initial_circ = actual_initial_circ
-
     elif circ_type == "Hubbard":
         initial_circ = Circuit.from_file("/pscratch/sd/j/jkalloor/bqskit/ensemble_benchmarks/hubbard_4.qasm")
         # target = np.loadtxt("/pscratch/sd/j/jkalloor/bqskit/ensemble_benchmarks/tfim_4-1.unitary", dtype=np.complex128)
@@ -161,8 +159,17 @@ if __name__ == '__main__':
         initial_circ: Circuit =  Circuit.from_file(f"/pscratch/sd/j/jkalloor/bqskit/ensemble_benchmarks/TFXY_5_timesteps/TFXY_5_{timestep}.qasm")
         initial_circ.remove_all_measurements()
     else:
-        target = np.loadtxt("/pscratch/sd/j/jkalloor/bqskit/ensemble_benchmarks/qite_3.unitary", dtype=np.complex128)
-        initial_circ = Circuit.from_unitary(target)
+        initial_circ = Circuit.from_file(f"/pscratch/sd/j/jkalloor/bqskit/ensemble_benchmarks/{circ_type}.qasm")
+        if prev_tol:
+            # Get shorter circuit
+            actual_initial_circ: Circuit = pickle.load(open(f"/pscratch/sd/j/jkalloor/bqskit/ensemble_approx_circuits_pam/pam/{circ_type}/{prev_tol}/{prev_block_size}/{timestep}/circ.pickle", "rb"))
+            target = initial_circ.get_unitary()
+            global_phase_correction = target.get_target_correction_factor(actual_initial_circ.get_unitary())
+            actual_initial_circ.append_gate(GlobalPhaseGate(1, global_phase=global_phase_correction), (0,))
+            print("ORIG DIST", actual_initial_circ.get_unitary().get_frobenius_distance(target))
+            print(f"Orig Depth: {initial_circ.depth}, New Depth: {actual_initial_circ.depth}")
+            print(f"Orig Count: {initial_circ.num_operations}, New Count: {actual_initial_circ.num_operations}")
+            initial_circ = actual_initial_circ
 
 
     synth_circs = []
@@ -189,7 +196,7 @@ if __name__ == '__main__':
     #     num_workers = 2
     # else:
     #     num_workers = 20
-    num_workers = 4
+    num_workers = 256
     compiler = Compiler(num_workers=num_workers)
     
     # circ = compiler.compile(initial_circ, workflow=workflow)
@@ -218,12 +225,25 @@ if __name__ == '__main__':
             }
         )
 
+        second_synthesis_pass = SecondLEAPSynthesisPass(
+            store_partial_solutions=True,
+            success_threshold = extra_err_thresh,
+            partial_success_threshold=err_thresh,
+            cost=generator,
+            instantiate_options={
+                'min_iters': 100,
+                'cost_fn_gen': generator,
+                'method': 'minimization',
+                'minimizer': LBFGSMinimizer()
+            }
+        )
+
         workflow = [
             ScanPartitioner(3),
             ForEachBlockPass([
-                synthesis_pass
-            ]),
-            CreateEnsemblePass(success_threshold=err_thresh, num_circs=20000, cost=generator)
+                synthesis_pass,
+                second_synthesis_pass
+            ])
         ]
 
         old_workflow = [synthesis_pass, CreateEnsemblePass(success_threshold=err_thresh, num_circs=10000)]
@@ -243,9 +263,12 @@ if __name__ == '__main__':
 
         out_circ, data = compiler.compile(initial_circ, workflow=workflow, request_data=True)
         approx_circuits: list[Circuit] = data["ensemble"]
-    elif method == "quest":
-        quest_runner = QuestRunner(SimulationRunner(), compiler=compiler, sample_size=20)
-        approx_circuits: list[Circuit] = quest_runner.get_all_circuits(circuit=initial_circ)
+    elif method == "pam":
+        out_circ = compile(initial_circ, optimization_level=3, error_sim_size=8, error_threshold=err_thresh, max_synthesis_size=block_size)
+        dir = f"ensemble_approx_circuits_pam/{method}/{circ_type}/{tol}/{block_size}/{timestep}"
+        Path(dir).mkdir(parents=True, exist_ok=True)
+        pickle.dump(out_circ, open(f"{dir}/circ.pickle", "wb"))
+        exit(0)
     elif method == "gpu":
         num_multistarts = 32
         max_iters = 100000
@@ -317,6 +340,29 @@ if __name__ == '__main__':
         approx_circuits: list[Circuit] = data["ensemble_params"]
         # approx_circuits = data["ensemble"]
 
+    elif method == "analyze":
+        workflow = [
+            # ToU3Pass(convert_all_single_qubit_gates=True),
+            ScanPartitioner(block_size=block_size),
+            ForEachBlockPass([
+                AnalyzeBlockPass(gate_to_count=CNOTGate())
+            ]),
+            # replace_filter="less-than"),
+            # UnfoldPass(),
+        ]
+        out_circ, data = compiler.compile(initial_circ, workflow, request_data=True)
+        # print(out_circ.num_cycles)
+        # approx_circuits: list[Circuit] = data["ensemble_params"]
+        data = data['ForEachBlockPass_data']
+        print(data)
+        counts = []
+        depths = []
+        for item in data[0]:
+            counts.append(item["block_twoq_count"])
+            depths.append(item["block_depth"])
+        print(counts)
+        print(depths)
+        exit(0)
 
     elif method == "noise":
         dir = f"ensemble_approx_circuits_qfactor/{method}/{circ_type}/{tol}/{block_size}"
@@ -351,9 +397,14 @@ if __name__ == '__main__':
     # dists = [x[1] for x in approx_circuits]
 
     # Store approximate solutions
-    dir = f"ensemble_approx_circuits_qfactor/{method}_post_gpu/{circ_type}"
+
+    pickle.dump(target, open("hubard_4_unitary.pickle", "wb"))
+
+    dir = f"ensemble_approx_circuits_qfactor/{method}_post_gpu_pam/{circ_type}"
 
     Path(f"{dir}/jiggled_circs/{tol}/{block_size}/{timestep}").mkdir(parents=True, exist_ok=True)
+
+    pickle.dump(out_circ, open(f"{dir}/jiggled_circs/{tol}/{block_size}/{timestep}/jiggled_circ.pickle", "wb"))
 
     # Get first 100 dists
     basic_circ = out_circ
@@ -364,10 +415,21 @@ if __name__ == '__main__':
     actual_tol = int(-1 * np.log10(np.mean(dists)))
     print(actual_tol)
 
-    circ_infos = [(circ, dir, timestep, f"params_{i}_{block_size}_{tol}.pickle", actual_tol) for i, circ in enumerate(approx_circuits)]
-    print("Writing")
-    with mp.Pool() as pool:
-        pool.map(write_circ, circ_infos)
+    # circ_infos = [(circ, dir, timestep, f"params_{i}_{block_size}_{tol}.pickle", actual_tol) for i, circ in enumerate(approx_circuits)]
+    # print("Writing")
+
+    param_dir= f"{dir}/{actual_tol}/{timestep}/"
+
+    Path(param_dir).mkdir(parents=True, exist_ok=True)
+
+    # param_file = join(param_dir, "all_unitaries.pickle")
+
+    # approx_unitaries = [actual_initial_circ.get_unitary(param) for param in approx_circuits]
+
+    # pickle.dump(approx_unitaries, open(param_file, "wb"))
+
+    # with mp.Pool() as pool:
+    #     pool.map(write_circ, circ_infos)
 
 
     # if method.startswith("jiggle"):

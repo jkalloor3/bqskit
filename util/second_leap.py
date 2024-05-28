@@ -9,25 +9,28 @@ from scipy.stats import linregress
 
 from bqskit.compiler.passdata import PassData
 from bqskit.ir.circuit import Circuit
+from bqskit.ir.gates import CNOTGate
 from bqskit.ir.opt.cost.functions import HilbertSchmidtResidualsGenerator
 from bqskit.ir.opt.cost.generator import CostFunctionGenerator
 from bqskit.passes.search.frontier import Frontier
+from bqskit.passes.control import ForEachBlockPass
 from bqskit.passes.search.generator import LayerGenerator
 from bqskit.passes.search.generators.seed import SeedLayerGenerator
 from bqskit.passes.search.heuristic import HeuristicFunction
 from bqskit.passes.search.heuristics import AStarHeuristic, DijkstraHeuristic
-from bqskit.passes.synthesis.synthesis import SynthesisPass
+from bqskit.compiler.basepass import BasePass
 from bqskit.qis.state.state import StateVector
 from bqskit.qis.state.system import StateSystem
 from bqskit.qis.unitary import UnitaryMatrix
 from bqskit.runtime import get_runtime
 from bqskit.utils.typing import is_integer
 from bqskit.utils.typing import is_real_number
+from itertools import chain, zip_longest
 
 _logger = logging.getLogger(__name__)
 
 
-class LEAPSynthesisPass(SynthesisPass):
+class SecondLEAPSynthesisPass(BasePass):
     """
     A pass implementing the LEAP search synthesis algorithm.
 
@@ -46,11 +49,10 @@ class LEAPSynthesisPass(SynthesisPass):
         success_threshold: float = 1e-8,
         cost: CostFunctionGenerator = HilbertSchmidtResidualsGenerator(),
         max_layer: int | None = None,
-        store_partial_solutions: bool = False,
-        partials_per_depth: int = 25,
         min_prefix_size: int = 3,
         instantiate_options: dict[str, Any] = {},
         partial_success_threshold: float = 1e-3,
+        use_calculated_error: bool = False,
     ) -> None:
         """
         Construct a search-based synthesis pass.
@@ -77,13 +79,6 @@ class LEAPSynthesisPass(SynthesisPass):
             max_layer (int): The maximum number of layers to append without
                 success before termination. If left as None it will default
                 to unlimited. (Default: None)
-
-            store_partial_solutions (bool): Whether to store partial solutions
-                at different depths inside of the data dict. (Default: False)
-
-            partials_per_depth (int): The maximum number of partials
-                to store per search depth. No effect if
-                `store_partial_solutions` is False. (Default: 25)
 
             min_prefix_size (int): The minimum number of layers needed
                 to prefix the circuit.
@@ -157,15 +152,62 @@ class LEAPSynthesisPass(SynthesisPass):
         self.instantiate_options: dict[str, Any] = {
             'cost_fn_gen': self.cost,
         }
+        self.use_calculated_error = use_calculated_error
         self.instantiate_options.update(instantiate_options)
-        self.store_partial_solutions = store_partial_solutions
-        self.partials_per_depth = partials_per_depth
 
-    async def synthesize(
+    async def synthesize(self, data: PassData, max_cnot_gates: int, default_circuit: Circuit) -> Circuit:
+        # Synthesize every circuit in the ensemble
+        circs: list[Circuit] = [d[0] for d in data['scan_sols']]
+
+        for c in circs:
+            assert(isinstance(c, Circuit))
+
+        utries = [c.get_unitary() for c in circs]
+
+        if self.use_calculated_error:
+            new_success_threshold = self.success_threshold - data[ForEachBlockPass.pass_down_key_prefix + "error"]
+            new_success_threshold = new_success_threshold * data["error_percentage_allocated"]
+            self.success_threshold = new_success_threshold
+
+        # new_circs = []
+        # for i, utry in enumerate(utries):
+        #     new_circs.append(await self.synthesize_circ(utry, data))
+        new_circs: list[list[Circuit]] = await get_runtime().map(
+            self.synthesize_circ,
+            utries,
+            data=data,
+        )
+        for i, circs in enumerate(new_circs):
+            if not isinstance(circs, list):
+                print(len(utries), len(new_circs), len(circs), type(circs), flush=True)
+            assert(isinstance(circs, list))
+            for c in circs:
+                assert(isinstance(c, Circuit))
+
+        for i, circs in enumerate(new_circs):
+            new_circs[i] = sorted(circs, key=lambda x: x.count(CNOTGate()))
+            for j, c in enumerate(new_circs[i]):
+                if c.count(CNOTGate()) > max_cnot_gates:
+                    new_circs[i][j] = None
+        
+        # Now interleave so you get a decent mix
+        new_circs = list(chain(*zip_longest(*new_circs, fillvalue=None)))
+        new_circs: list[Circuit] = [c for c in new_circs if c is not None]
+
+        if len(new_circs) == 0:
+            new_circs = [default_circuit]
+
+        assert(isinstance(new_circs[0], Circuit))
+
+        data['scan_sols'] = new_circs
+        return new_circs[0]
+
+    async def synthesize_circ(
         self,
         utry: UnitaryMatrix | StateVector | StateSystem,
         data: PassData,
-    ) -> Circuit:
+        tol: float = 1e-3,
+    ) -> list[Circuit]:
         """Synthesize `utry`, see :class:`SynthesisPass` for more."""
         # Initialize run-dependent options
         instantiate_options = self.instantiate_options.copy()
@@ -193,16 +235,14 @@ class LEAPSynthesisPass(SynthesisPass):
         last_prefix_layer = 0
 
         # Track partial solutions
-        psols: dict[int, list[tuple[Circuit, float]]] = {}
-        scan_sols: list[tuple[Circuit, float]] = []
+        scan_sols: list[Circuit] = []
 
         _logger.debug(f'Search started, initial layer has cost: {best_dist}.')
 
         # Evalute initial layer
         if best_dist < self.success_threshold:
             _logger.debug('Successful synthesis.')
-            data['scan_sols'] = [(initial_layer.copy(), best_dist)]
-            return initial_layer
+            return [initial_layer]
 
         # Main loop
         while not frontier.empty():
@@ -226,26 +266,12 @@ class LEAPSynthesisPass(SynthesisPass):
             for circuit in circuits:
                 dist = self.cost.calc_cost(circuit, utry)
 
-
-                if self.store_partial_solutions:
-                    if dist < self.partial_success_threshold:
-                        scan_sols.append((circuit.copy(), dist))
-
-                    if layer not in psols:
-                        psols[layer] = []
-
-                    psols[layer].append((circuit.copy(), dist))
-
-                    if len(psols[layer]) > self.partials_per_depth:
-                        psols[layer].sort(key=lambda x: x[1])
-                        del psols[layer][-1]
+                if dist < self.partial_success_threshold:
+                    scan_sols.append(circuit.copy())
 
                 if dist < self.success_threshold:
                     _logger.debug(f'Successful synthesis with distance {dist:.6e}.')
-                    if self.store_partial_solutions:
-                        data['psols'] = psols
-                        data['scan_sols'] = scan_sols
-                    return circuit
+                    return scan_sols
 
                 if self.check_new_best(layer + 1, dist, best_layer, best_dist):
                     plural = '' if layer == 0 else 's'
@@ -278,12 +304,10 @@ class LEAPSynthesisPass(SynthesisPass):
             'Returning best known circuit with %d layer%s and cost: %e.'
             % (best_layer, '' if best_layer == 1 else 's', best_dist),
         )
-        if self.store_partial_solutions:
-            data['psols'] = psols
-            data['scan_sols'] = scan_sols
-            print("NUMBER P SOLS", len(scan_sols))
 
-        return best_circ
+        print("NUMBER P SOLS", len(scan_sols))
+
+        return scan_sols
 
     def check_new_best(
         self,
@@ -384,3 +408,7 @@ class LEAPSynthesisPass(SynthesisPass):
             return SeedLayerGenerator(data['seed_circuits'], layer_gen)
 
         return layer_gen
+
+    async def run(self, circuit: Circuit, data: PassData) -> None:
+        """Perform the pass's operation, see :class:`BasePass` for more."""
+        await self.synthesize(data, max_cnot_gates=circuit.count(CNOTGate()), default_circuit=circuit)

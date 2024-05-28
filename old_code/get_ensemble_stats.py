@@ -1,6 +1,5 @@
 from bqskit.ir.circuit import Circuit
 from sys import argv
-from bqskit import compile
 import numpy as np
 # Generate a super ensemble for some error bounds
 from bqskit.passes import *
@@ -8,9 +7,7 @@ import pickle
 
 from bqskit.qis.unitary import UnitaryMatrix
 
-from bqskit.ir.opt.cost.functions import HilbertSchmidtResidualsGenerator, HilbertSchmidtCostGenerator
-
-from pathlib import Path
+from util import load_circuit
 
 import glob
 
@@ -124,35 +121,10 @@ def get_covar_diff(ensemble: list[UnitaryMatrix], next_unitary: UnitaryMatrix):
 if __name__ == '__main__':
     global basic_circ
 
-    circ_type = argv[1]
+    circ_name = argv[1]
     timestep = int(argv[2])
 
-    np.set_printoptions(precision=2, threshold=np.inf, linewidth=np.inf)
-
-    if circ_type == "TFIM":
-        initial_circ = Circuit.from_file("ensemble_benchmarks/tfim_3.qasm")
-        # target = np.loadtxt("/pscratch/sd/j/jkalloor/bqskit/ensemble_benchmarks/tfim_4-1.unitary", dtype=np.complex128)
-    elif circ_type == "Heisenberg":
-        initial_circ = Circuit.from_file("ensemble_benchmarks/heisenberg_3.qasm")
-        # target = np.loadtxt("/pscratch/sd/j/jkalloor/bqskit/ensemble_benchmarks/tfim_4-1.unitary", dtype=np.complex128)
-    elif circ_type == "Heisenberg_7":
-        initial_circ = Circuit.from_file("/pscratch/sd/j/jkalloor/bqskit/ensemble_benchmarks/heisenberg7.qasm")
-    elif circ_type == "Hubbard":
-        initial_circ = Circuit.from_file("/pscratch/sd/j/jkalloor/bqskit/ensemble_benchmarks/hubbard_4.qasm")
-    elif circ_type == "TFXY":
-        initial_circ = Circuit.from_file("/pscratch/sd/j/jkalloor/bqskit/ensemble_benchmarks/tfxy_6.qasm")
-    elif circ_type == "TFXY_t":
-            initial_circ: Circuit =  Circuit.from_file(f"/pscratch/sd/j/jkalloor/bqskit/ensemble_benchmarks/TFXY_5_timesteps/TFXY_5_{timestep}.qasm")
-            # qiskit_circ = QuantumCircuit.from_qasm_file(f"/pscratch/sd/j/jkalloor/bqskit/ensemble_benchmarks/TFXY_5_timesteps/TFXY_5_{timestep}.qasm")
-            initial_circ.remove_all_measurements()
-    else:
-        target = np.loadtxt("ensemble_benchmarks/qite_3.unitary", dtype=np.complex128)
-        initial_circ = Circuit.from_unitary(target)
-
-    target = initial_circ.get_unitary()
-
-    method = argv[3]
-    max_tol = int(argv[4])
+    circ = load_circuit(circ_name)
     # Store approximate solutions
     all_utries = []
 
