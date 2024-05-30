@@ -18,23 +18,25 @@ class CalculateErrorPass(BasePass):
         cost: CostFunctionGenerator = HilbertSchmidtResidualsGenerator()) -> None:
         self.cost = cost
 
-    def run(self, circuit: Circuit, data: PassData) -> Any:
+    async def run(self, circuit: Circuit, data: PassData) -> Any:
         data.error = self.cost.calc_cost(circuit, data.target)
 
 
 class CalculateErrorBoundPass(BasePass):
     
-    def __init__(self, block_size: int = 5) -> None:
+    def __init__(self, 
+                 block_size: int = 5, 
+                 cost: CostFunctionGenerator = HilbertSchmidtResidualsGenerator()) -> None:
         self.passes = [
-            UnfoldPass(),
             QuickPartitioner(block_size=block_size),
             ForEachBlockPass(
                 [
-                    NOOPPass()
+                    CalculateErrorPass(cost=cost),
                 ],
                 calculate_error_bound=True
             )
         ]
+        self.cost = cost
 
     async def run(
             self, 
@@ -42,5 +44,9 @@ class CalculateErrorBoundPass(BasePass):
             data: PassData
     ) -> None:
         data_copy = data.copy()
-        await Workflow(self.passes).run(circuit.copy(), data_copy)
+        circuit_copy = circuit.copy()
+        circuit_copy.unfold_all()
+        print("Full Cost", self.cost.calc_cost(circuit_copy, data.target))
+        data_copy.error = 0
+        await Workflow(self.passes).run(circuit_copy, data_copy)
         data.error = data_copy.error

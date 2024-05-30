@@ -9,6 +9,7 @@ from scipy.stats import linregress
 
 from bqskit.compiler.passdata import PassData
 from bqskit.ir.circuit import Circuit
+from bqskit.ir.gates import CNOTGate
 from bqskit.ir.opt.cost.functions import HilbertSchmidtResidualsGenerator
 from bqskit.ir.opt.cost.generator import CostFunctionGenerator
 from bqskit.passes.search.frontier import Frontier
@@ -51,6 +52,7 @@ class LEAPSynthesisPass(SynthesisPass):
         min_prefix_size: int = 3,
         instantiate_options: dict[str, Any] = {},
         partial_success_threshold: float = 1e-3,
+        use_calculated_error: bool = False,
     ) -> None:
         """
         Construct a search-based synthesis pass.
@@ -157,6 +159,7 @@ class LEAPSynthesisPass(SynthesisPass):
         self.instantiate_options: dict[str, Any] = {
             'cost_fn_gen': self.cost,
         }
+        self.use_calculated_error = use_calculated_error
         self.instantiate_options.update(instantiate_options)
         self.store_partial_solutions = store_partial_solutions
         self.partials_per_depth = partials_per_depth
@@ -165,11 +168,15 @@ class LEAPSynthesisPass(SynthesisPass):
         self,
         utry: UnitaryMatrix | StateVector | StateSystem,
         data: PassData,
+        default_circuit: Circuit | None = None,
     ) -> Circuit:
         """Synthesize `utry`, see :class:`SynthesisPass` for more."""
         # Initialize run-dependent options
         instantiate_options = self.instantiate_options.copy()
 
+        if self.use_calculated_error:
+            self.success_threshold = self.success_threshold * data["error_percentage_allocated"]
+            self.partial_success_threshold = self.partial_success_threshold * data["error_percentage_allocated"]
         # Seed the PRNG
         if 'seed' not in instantiate_options:
             instantiate_options['seed'] = data.seed
@@ -204,6 +211,8 @@ class LEAPSynthesisPass(SynthesisPass):
             data['scan_sols'] = [(initial_layer.copy(), best_dist)]
             return initial_layer
 
+        default_count = default_circuit.count(CNOTGate())
+
         # Main loop
         while not frontier.empty():
             top_circuit, layer = frontier.pop()
@@ -215,7 +224,7 @@ class LEAPSynthesisPass(SynthesisPass):
                 continue
 
             # Instantiate successors
-            circuits = await get_runtime().map(
+            circuits: list[Circuit] = await get_runtime().map(
                 Circuit.instantiate,
                 successors,
                 target=utry,
@@ -225,10 +234,10 @@ class LEAPSynthesisPass(SynthesisPass):
             # Evaluate successors
             for circuit in circuits:
                 dist = self.cost.calc_cost(circuit, utry)
-
+                circ_count = circuit.count(CNOTGate())
 
                 if self.store_partial_solutions:
-                    if dist < self.partial_success_threshold:
+                    if dist < self.partial_success_threshold and circ_count < default_count:
                         scan_sols.append((circuit.copy(), dist))
 
                     if layer not in psols:
@@ -242,10 +251,20 @@ class LEAPSynthesisPass(SynthesisPass):
 
                 if dist < self.success_threshold:
                     _logger.debug(f'Successful synthesis with distance {dist:.6e}.')
+                    if len(scan_sols) == 0:
+                        scan_sols.append((default_circuit.copy(), 0.0))
+
                     if self.store_partial_solutions:
                         data['psols'] = psols
                         data['scan_sols'] = scan_sols
-                    return circuit
+
+                    # Return circuit with highest distance
+                    max_dist = 0.0
+                    max_circ = default_circuit
+                    for scan_sol in scan_sols:
+                        if scan_sol[1] > max_dist:
+                            max_circ = scan_sol[0]
+                    return max_circ
 
                 if self.check_new_best(layer + 1, dist, best_layer, best_dist):
                     plural = '' if layer == 0 else 's'
@@ -282,6 +301,13 @@ class LEAPSynthesisPass(SynthesisPass):
             data['psols'] = psols
             data['scan_sols'] = scan_sols
             print("NUMBER P SOLS", len(scan_sols))
+
+        # Return circuit with highest distance
+        max_dist = best_dist
+        max_circ = best_circ
+        for scan_sol in scan_sols:
+            if scan_sol[1] > max_dist:
+                max_circ = scan_sol[0]
 
         return best_circ
 
@@ -384,3 +410,7 @@ class LEAPSynthesisPass(SynthesisPass):
             return SeedLayerGenerator(data['seed_circuits'], layer_gen)
 
         return layer_gen
+
+    async def run(self, circuit: Circuit, data: PassData) -> None:
+        """Perform the pass's operation, see :class:`BasePass` for more."""
+        circuit.become(await self.synthesize(data.target, data, default_circuit=circuit))

@@ -72,14 +72,16 @@ class JiggleEnsemblePass(BasePass):
 
         # For each params come up with nth root of num_circs number of extra params
         if self.use_ensemble:
-            circuits = data["ensemble"]
+            circuits = data["scan_sols"]
         else:
             circuits = [circuit]
+
+        print("Number of Starting Circuits", len(circuits))  
         for circ in circuits:
             params = circ.params
             print(f"Num Params: {len(params)}")
 
-            extra_diff = self.success_threshold
+            extra_diff = self.success_threshold / len(params)
 
             for _ in range(ceil(self.num_circs / len(circuits))):
                 next_params = np.array(params.copy())

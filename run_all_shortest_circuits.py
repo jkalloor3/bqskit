@@ -9,7 +9,7 @@ header = """#!/bin/bash -l
 #SBATCH -q regular
 #SBATCH -A m4141
 #SBATCH -C cpu
-#SBATCH --time=03:50:00
+#SBATCH --time=11:50:00
 #SBATCH -N 1
 #SBATCH --signal=B:USR1@1
 #SBATCH --output=./slurm_logs/{file}/{circ}/{tol}_tol
@@ -24,15 +24,15 @@ if __name__ == '__main__':
     # mesh_gates = ["cx", "ecr"]
     # file = "get_ensemble_stats_new"
     # file = "get_ensemble_expectations"
-    file = "get_shortest_circuits"
+    # file = "get_shortest_circuits_new"
     # file = "plot_ensemble_data"
     # file = "run_simulations"
-    # file = "full_compile"
+    file = "full_compile"
     # circs = ["Heisenberg_7"] #, 
     # circs = ["Heisenberg_7", "TFXY_8"]
-    circs = ["tfxy_6", "qc_binary_5q", "qc_gray_5q"]
+    circs = ["tfxy_6", "qc_binary_5q", "qc_gray_5q", "qc_optimized_5q", "shor_12", "qft_10", "vqe_12"]
     # tols = range(1, 7)
-    tols = [1,2,3,4,5]#,3,5]
+    tols = [1]#,3,5]
     for circ in circs:
         for timestep in [0]:
             for tol in tols:
@@ -41,7 +41,7 @@ if __name__ == '__main__':
                 # param_file = f"ensemble_approx_circuits_qfactor/{method}/{circ}/{tol}/{m}/{timestep}/jiggled_circ.pickle"
                 # param_file = f"/pscratch/sd/j/jkalloor/bqskit/ensemble_shortest_circuits/{circ}/{tol}/{timestep}/{circ}.pkl"
 
-                # if (os.path.exists(param_file)):
+                # if not (os.path.exists(param_file)):
                 #     continue
 
                 to_write = open(file_name, 'w')

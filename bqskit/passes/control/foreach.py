@@ -5,7 +5,8 @@ import functools
 import logging
 from typing import Callable, List
 
-from bqskit.compiler.basepass import _sub_do_work
+# from bqskit.compiler.basepass import _sub_do_work
+from collections import Counter
 from bqskit.compiler.basepass import BasePass
 from bqskit.compiler.machine import MachineModel
 from bqskit.compiler.passdata import PassData
@@ -18,6 +19,8 @@ from bqskit.ir.gates import CNOTGate
 from bqskit.ir.gates.constant.unitary import ConstantUnitaryGate
 from bqskit.ir.gates.parameterized.pauli import PauliGate
 from bqskit.ir.gates.parameterized.unitary import VariableUnitaryGate
+from bqskit.ir.opt.cost.functions import HilbertSchmidtResidualsGenerator
+from bqskit.ir.opt.cost.generator import CostFunctionGenerator
 from bqskit.ir.location import CircuitLocation
 from bqskit.ir.operation import Operation
 from bqskit.ir.point import CircuitPoint
@@ -62,12 +65,14 @@ class ForEachBlockPass(BasePass):
         self,
         loop_body: WorkflowLike,
         calculate_error_bound: bool = False,
+        error_cost_gen: CostFunctionGenerator = HilbertSchmidtResidualsGenerator(),
         collection_filter: Callable[[Operation], bool] | None = None,
         replace_filter: ReplaceFilterFn | str = 'always',
         batch_size: int | None = None,
         blocks_to_run: List[int] = [],
         allocate_error: bool = False,
         allocate_error_gate: Gate = CNOTGate(),
+        allocate_skew_factor: int = 3
     ) -> None:
         """
         Construct a ForEachBlockPass.
@@ -153,6 +158,8 @@ class ForEachBlockPass(BasePass):
         self.blocks_to_run = sorted(blocks_to_run)
         self.allocate_error = allocate_error
         self.allocate_error_gate = allocate_error_gate
+        self.allocate_skew_factor = allocate_skew_factor
+        self.error_cost_gen = error_cost_gen
         if not callable(self.collection_filter):
             raise TypeError(
                 'Expected callable method that maps Operations to booleans for'
@@ -210,7 +217,6 @@ class ForEachBlockPass(BasePass):
         # Preprocess blocks
         subcircuits: list[Circuit] = []
         block_datas: list[PassData] = []
-        total_gates = 0
         block_gates = []
         for i, (cycle, op) in enumerate(blocks):
 
@@ -231,8 +237,10 @@ class ForEachBlockPass(BasePass):
                 subradixes,
             )
 
-            total_gates += subcircuit.count(self.allocate_error)
-            block_gates.append(subcircuit.count(self.allocate_error))
+            # We are cubing here so that blocks with more CNOT gates 
+            # are given more error budget
+            skewed_gates = subcircuit.count(self.allocate_error_gate) ** self.allocate_skew_factor
+            block_gates.append(skewed_gates)
 
             # Form Subdata
             block_data: PassData = PassData(subcircuit)
@@ -256,9 +264,12 @@ class ForEachBlockPass(BasePass):
             block_datas.append(block_data)
 
         # Assign error as percentage of block
+        c = Counter(block_gates)
+        print(c.most_common())
+        total_gates = sum(block_gates)
         if self.allocate_error:
             for i in range(len(block_datas)):
-                block_datas[i]["error_percentage_allocated"] = block_gates[i] / total_gates
+                block_datas[i]["error_percentage_allocated"] = block_gates[i] * data.get("error_percentage_allocated", 1) / total_gates 
 
         # Do the work
         results = await get_runtime().map(
@@ -266,6 +277,7 @@ class ForEachBlockPass(BasePass):
             [self.workflow] * len(subcircuits),
             subcircuits,
             block_datas,
+            cost=self.error_cost_gen,
         )
 
         # Unpack results
@@ -308,6 +320,23 @@ class ForEachBlockPass(BasePass):
         if self.calculate_error_bound:
             _logger.debug(f'New circuit error is {data.error}.')
 
+
+async def _sub_do_work(
+    workflow: Workflow,
+    circuit: Circuit,
+    data: PassData,
+    cost: CostFunctionGenerator,
+) -> tuple[Circuit, PassData]:
+    """Execute a sequence of passes on circuit."""
+    if 'calculate_error_bound' in data and data['calculate_error_bound']:
+        old_utry = circuit.get_unitary()
+
+    await workflow.run(circuit, data)
+
+    if 'calculate_error_bound' in data and data['calculate_error_bound']:
+        data.error = cost.calc_cost(circuit, old_utry)
+
+    return circuit, data
 
 def default_collection_filter(op: Operation) -> bool:
     return isinstance(

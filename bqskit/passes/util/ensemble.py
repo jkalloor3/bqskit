@@ -80,11 +80,21 @@ class CreateEnsemblePass(BasePass):
 
         used_inds = set()
         num_circs = 0
+        trials = 0
+
+        inds = [[] for _ in range(len(psols))]
+        for i in range(len(psols)):
+            numbers = np.arange(0, len(psols[i]))
+            weights = np.array([10 - i for i in numbers])
+            weights = weights / np.sum(weights)
+            inds[i] = np.random.choice(numbers, p=weights, size=(self.num_circs * 2))
+
+        inds = np.array(inds)
+
         # Randomly sample a bunch of psols
-        while num_circs < self.num_circs:
-            random_inds = np.random.randint(0, 20, len(psols))
-            for i in range(len(random_inds)):
-                random_inds[i] = random_inds[i] % len(psols[i])
+        while (num_circs < self.num_circs and trials < self.num_circs * 2):
+            random_inds = inds[:, trials]
+            trials += 1
             if (str(random_inds) in used_inds):
                 continue
             else:
@@ -116,9 +126,8 @@ class CreateEnsemblePass(BasePass):
         pts: list[CircuitPoint] = []
         targets: list[UnitaryMatrix] = []
 
-        num_sols_per_block = max(int(self.num_circs ** (1/len(block_data))), 2)
-
         num_sols = 1
+        print("PARSING DATA")
 
         # print(num_sols_per_block)
 
@@ -151,7 +160,7 @@ class CreateEnsemblePass(BasePass):
             num_sols *= i
 
 
-        # print("Total Solutions", num_sols)
+        print("Total Solutions", num_sols)
 
         self.num_circs = min(self.num_circs, num_sols)
 
@@ -165,9 +174,11 @@ class CreateEnsemblePass(BasePass):
         block_data = data[ForEachBlockPass.key]
         approx_circs, pts = self.parse_data(circuit, block_data)
         
-        all_circs = await self.assemble_circuits(circuit, approx_circs, pts)
+        all_circs: list[Circuit] = await self.assemble_circuits(circuit, approx_circs, pts)
 
-        data["ensemble"] = all_circs
+        all_circs = sorted(all_circs, key=lambda x: x.count(CNOTGate()))
+
+        data["scan_sols"] = all_circs
         # data["ensemble_dists"] = all_dists
         return circuit
 

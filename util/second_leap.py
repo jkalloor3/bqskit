@@ -163,12 +163,11 @@ class SecondLEAPSynthesisPass(BasePass):
             assert(isinstance(c, Circuit))
 
         utries = [c.get_unitary() for c in circs]
-
         if self.use_calculated_error:
-            new_success_threshold = self.success_threshold - data[ForEachBlockPass.pass_down_key_prefix + "error"]
-            new_success_threshold = new_success_threshold * data["error_percentage_allocated"]
+            cur_error = self.cost.calc_cost(default_circuit, data.target)
+            new_success_threshold = self.success_threshold * data["error_percentage_allocated"]
+            self.partial_success_threshold = self.partial_success_threshold * data["error_percentage_allocated"] - cur_error
             self.success_threshold = new_success_threshold
-
         # new_circs = []
         # for i, utry in enumerate(utries):
         #     new_circs.append(await self.synthesize_circ(utry, data))
@@ -200,13 +199,15 @@ class SecondLEAPSynthesisPass(BasePass):
         assert(isinstance(new_circs[0], Circuit))
 
         data['scan_sols'] = new_circs
+        
+        cur_error = self.cost.calc_cost(new_circs[0], data.target)
+        np.set_printoptions(precision=3, linewidth=np.inf, threshold=np.inf)
         return new_circs[0]
 
     async def synthesize_circ(
         self,
         utry: UnitaryMatrix | StateVector | StateSystem,
-        data: PassData,
-        tol: float = 1e-3,
+        data: PassData
     ) -> list[Circuit]:
         """Synthesize `utry`, see :class:`SynthesisPass` for more."""
         # Initialize run-dependent options
@@ -411,4 +412,4 @@ class SecondLEAPSynthesisPass(BasePass):
 
     async def run(self, circuit: Circuit, data: PassData) -> None:
         """Perform the pass's operation, see :class:`BasePass` for more."""
-        await self.synthesize(data, max_cnot_gates=circuit.count(CNOTGate()), default_circuit=circuit)
+        circuit.become(await self.synthesize(data, max_cnot_gates=circuit.count(CNOTGate()), default_circuit=circuit))
