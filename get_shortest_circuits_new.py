@@ -21,13 +21,17 @@ from bqskit import enable_logging
 
 from pathlib import Path
 
-import json
+import multiprocessing as mp
 
 from os.path import join
 
 from util import save_circuits, load_circuit, FixGlobalPhasePass, CalculateErrorBoundPass
 
-enable_logging(True)
+# enable_logging(True)
+
+def get_distance(circ1: Circuit) -> float:
+    global target
+    return circ1.get_unitary().get_frobenius_distance(target)
 
 def gpu_workflow(tol: int, checkpoint_proj: str) -> WorkflowLike:
     gpu_block_size = 6
@@ -85,6 +89,15 @@ def get_shortest_circuits(circ_name: str, tol: int, timestep: int) -> list[Circu
     extra_err_thresh = 1e-10
     err_thresh = 10 ** (-1 * tol)
     generator = HilbertSchmidtCostGenerator()
+
+    base_checkpoint_dir = "block_checkpoints"
+    proj_name = f"{circ_name}_{timestep}_{tol}"
+    big_block_size = 8
+
+    sub_checkpoint_dir = "miniblock_checkpoints"
+    small_block_size = 3
+
+
     synthesis_pass = LEAPSynthesisPass(
         store_partial_solutions=True,
         success_threshold = extra_err_thresh,
@@ -96,29 +109,39 @@ def get_shortest_circuits(circ_name: str, tol: int, timestep: int) -> list[Circu
             'method': 'minimization',
             'minimizer': LBFGSMinimizer()
         },
-        use_calculated_error=True
+        use_calculated_error=True,
+        checkpoint_dir=sub_checkpoint_dir,
+        checkpoint_proj=proj_name,
+        append_block_id=True
     )
 
     second_synthesis_pass = SecondLEAPSynthesisPass(
         success_threshold = extra_err_thresh,
         partial_success_threshold=err_thresh,
-        use_calculated_error=True,
         cost=generator,
         instantiate_options={
             'min_iters': 100,
             'cost_fn_gen': generator,
             'method': 'minimization',
             'minimizer': LBFGSMinimizer()
-        }
+        },
+        checkpoint_dir=sub_checkpoint_dir,
+        checkpoint_proj=proj_name,
+        append_block_id=True
     )
 
-
     leap_workflow = [
-        # ToU3Pass(convert_all_single_qubit_gates=True),
-        ScanPartitioner(8),
+        CheckpointRestartPass(base_checkpoint_dir, proj_name, 
+                                default_passes=[
+                                QuickPartitioner(block_size=big_block_size),
+                                ], save_as_qasm=False),
         ForEachBlockPass(
             [
-                ScanPartitioner(3),
+                CheckpointRestartPass(sub_checkpoint_dir, proj_name, 
+                        default_passes=[
+                        ScanPartitioner(block_size=3),
+                        ], save_as_qasm=False,
+                        append_block_id=True),
                 ForEachBlockPass(
                     [
                         synthesis_pass,
@@ -128,7 +151,11 @@ def get_shortest_circuits(circ_name: str, tol: int, timestep: int) -> list[Circu
                     allocate_error=True,
                     allocate_error_gate=CNOTGate(),
                 ),
-                CreateEnsemblePass(success_threshold=err_thresh, num_circs=200, cost=generator),
+                CreateEnsemblePass(success_threshold=err_thresh, 
+                                   use_calculated_error=True, 
+                                   num_circs=500, 
+                                   cost=generator, 
+                                   solve_exact_dists=True),
                 FixGlobalPhasePass(),
                 UnfoldPass()
             ],
@@ -137,30 +164,40 @@ def get_shortest_circuits(circ_name: str, tol: int, timestep: int) -> list[Circu
             allocate_error=True,
             allocate_error_gate=CNOTGate(),
         ),
-        CreateEnsemblePass(success_threshold=err_thresh, num_circs=1000, cost=generator),
-        JiggleEnsemblePass(success_threshold=err_thresh, num_circs=20000, use_ensemble=True),
+        CreateEnsemblePass(success_threshold=err_thresh, num_circs=500, cost=generator, solve_exact_dists=False),
+        JiggleEnsemblePass(success_threshold=err_thresh, num_circs=10000, use_ensemble=True),
         UnfoldPass()
     ]
     num_workers = 256
     compiler = Compiler(num_workers=num_workers)
+    target = circ.get_unitary()
     out_circ, data = compiler.compile(circ, workflow=leap_workflow, request_data=True)
     approx_circuits: list[Circuit] = data["ensemble"]
     print("Num Circs", len(approx_circuits))
-    actual_error = circ.get_unitary().get_frobenius_distance(out_circ.get_unitary())
-    assert(np.allclose(actual_error, generator.calc_cost(out_circ, circ.get_unitary())))
+    actual_error = target.get_frobenius_distance(out_circ.get_unitary())
+    cost_error = generator.calc_cost(out_circ, target)
+    assert(np.allclose(actual_error, cost_error))
     return approx_circuits, data.error, actual_error, out_circ.count(CNOTGate())
 
 if __name__ == '__main__':
+    global target
     circ_name = argv[1]
     timestep = int(argv[2])
     tol = int(argv[3])
     circs, error_bound, actual_error, count = get_shortest_circuits(circ_name, tol, timestep)
     sorted_circs = sorted(circs, key=lambda c: c.count(CNOTGate()))
     circ = load_circuit(circ_name)
+    target = circ.get_unitary()
     print("Error Bound", error_bound)
     print("Actual Error", actual_error)
     print("Lowest Count", count)
     print([c.count(CNOTGate()) for c in circs[:20]])
-    print([c.get_unitary().get_frobenius_distance(circ.get_unitary()) for c in circs[:20]])
-    print([c.get_unitary().get_distance_from(circ.get_unitary()) for c in circs[:20]])
+    # print([c.get_unitary().get_frobenius_distance(circ.get_unitary()) for c in])
+    with mp.Pool() as pool:
+        dists = pool.map(get_distance, circs)
+    # dists = [get_distance(c) for c in circs]
+    print("Max Distance", max(dists))
+    print("Min Distance", min(dists))
+    print("Mean Distance", np.mean(dists))
+    # print([c.get_unitary().get_distance_from(circ.get_unitary()) for c in circs[:20]])
     save_circuits(circs, circ_name, tol, timestep)

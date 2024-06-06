@@ -72,27 +72,45 @@ class JiggleEnsemblePass(BasePass):
 
         # For each params come up with nth root of num_circs number of extra params
         if self.use_ensemble:
-            circuits = data["scan_sols"]
+            circuits = [psol[0] for psol in data["scan_sols"]]
+            dists = [psol[1] for psol in data["scan_sols"]]
         else:
             circuits = [circuit]
 
         print("Number of Starting Circuits", len(circuits))  
-        for circ in circuits:
+        for i,circ in enumerate(circuits):
             params = circ.params
             print(f"Num Params: {len(params)}")
-
-            extra_diff = self.success_threshold / len(params)
-
+            cost_fn = self.cost.gen_cost(circ.copy(), data.target)
+            # extra_diff = max(self.success_threshold - dists[i], self.success_threshold / len(params)) 
             for _ in range(ceil(self.num_circs / len(circuits))):
-                next_params = np.array(params.copy())
-                num_params_to_jiggle = int(np.random.uniform() * min(len(params) / 2, 50))
-                params_to_jiggle = np.random.choice(list(range(len(params))), num_params_to_jiggle, replace=False)
-                jiggle_amounts = np.random.uniform(-1 * extra_diff, extra_diff, num_params_to_jiggle)
-                next_params[params_to_jiggle] = next_params[params_to_jiggle] + jiggle_amounts
+                circ_cost = self.cost.calc_cost(circ, data.target)
+
+                trials = 0
+
+                best_params = np.array(params.copy())
+                extra_diff = max(self.success_threshold - dists[i], self.success_threshold / len(params))
+                # extra_diff = self.success_threshold * 10
+
+                while circ_cost < self.success_threshold and trials < 20:
+                    num_params_to_jiggle = int(np.random.uniform() * len(params) / 2) + len(params) // 10
+                    # num_params_to_jiggle = len(params)
+                    params_to_jiggle = np.random.choice(list(range(len(params))), num_params_to_jiggle, replace=False)
+                    jiggle_amounts = np.random.uniform(-1 * extra_diff, extra_diff, num_params_to_jiggle)
+                    next_params = best_params.copy()
+                    next_params[params_to_jiggle] = next_params[params_to_jiggle] + jiggle_amounts
+                    circ_cost = cost_fn(next_params)
+                    if (circ_cost < self.success_threshold):
+                        extra_diff = extra_diff * 1.5
+                        best_params = next_params
+                    else:
+                        extra_diff = extra_diff / 4
+                    trials += 1
+                
+                # print(circ_cost, self.success_threshold, trials)
                 circ_copy = circ.copy()
-                circ_copy.set_params(next_params)
+                circ_copy.set_params(best_params)
                 all_circs.append(circ_copy)
-                # all_combos.append(next_params)
 
         data["ensemble"] = all_circs
 

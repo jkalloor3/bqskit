@@ -10,6 +10,7 @@ from re import findall
 from typing import cast, Sequence
 
 from bqskit.compiler.basepass import BasePass
+from bqskit.compiler.workflow import Workflow
 from bqskit.passes.alias import PassAlias
 from bqskit.compiler.passdata import PassData
 from bqskit.ir.circuit import Circuit
@@ -232,7 +233,8 @@ class CheckpointRestartPass(PassAlias):
     def __init__(self, base_checkpoint_dir: str, 
                  project_name: str,
                  default_passes: BasePass | Sequence[BasePass],
-                 save_as_qasm: bool = True) -> None:
+                 save_as_qasm: bool = True,
+                 append_block_id: bool = False) -> None:
         """Group together one or more `passes`."""
         if not is_sequence(default_passes):
             default_passes = [cast(BasePass, default_passes)]
@@ -240,15 +242,25 @@ class CheckpointRestartPass(PassAlias):
         if not isinstance(default_passes, list):
             default_passes = list(default_passes)
 
-        full_checkpoint_dir = join(base_checkpoint_dir, project_name)
+        self.base_checkpoint_dir = base_checkpoint_dir
+        self.project_name = project_name
+        self.save_as_qasm = save_as_qasm
+        self.passes = default_passes
+        self.append_block_id = append_block_id
+
+    def get_passes(self, block_id: str) -> list[BasePass]:
+        """Return the passes to be run, see :class:`PassAlias` for more."""
+        if self.append_block_id:
+            self.base_checkpoint_dir = self.base_checkpoint_dir + f"_{block_id}"
+        
+        full_checkpoint_dir = join(self.base_checkpoint_dir, self.project_name)
         
         # Check if checkpoint files exist
         if not exists(join(full_checkpoint_dir, "structure.pickle")):
             _logger.info("Checkpoint does not exist!")
-            save_pass = SaveIntermediatePass(base_checkpoint_dir, project_name, 
-                                             save_as_qasm=save_as_qasm, overwrite=True)
-            default_passes.append(save_pass)
-            self.passes = default_passes
+            save_pass = SaveIntermediatePass(self.base_checkpoint_dir, self.project_name, 
+                                             save_as_qasm=self.save_as_qasm, overwrite=True)
+            self.passes.append(save_pass)
         else:
             # Already checkpointed, restore
             _logger.info("Restoring from Checkpoint!")
@@ -256,6 +268,9 @@ class CheckpointRestartPass(PassAlias):
                 RestoreIntermediatePass(full_checkpoint_dir, as_circuit_gate=True)
             ]
 
-    def get_passes(self) -> list[BasePass]:
-        """Return the passes to be run, see :class:`PassAlias` for more."""
         return self.passes
+    
+    async def run(self, circuit: Circuit, data: PassData) -> None:
+        """Perform the pass's operation, see :class:`BasePass` for more."""
+        block_id = data.get("block_num", "0")
+        await Workflow(self.get_passes(block_id)).run(circuit, data)

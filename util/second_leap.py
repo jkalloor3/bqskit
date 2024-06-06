@@ -155,54 +155,48 @@ class SecondLEAPSynthesisPass(BasePass):
         self.use_calculated_error = use_calculated_error
         self.instantiate_options.update(instantiate_options)
 
-    async def synthesize(self, data: PassData, max_cnot_gates: int, default_circuit: Circuit) -> Circuit:
+    async def synthesize(self, data: PassData, target: UnitaryMatrix, max_cnot_gates: int, default_circuit: Circuit) -> Circuit:
         # Synthesize every circuit in the ensemble
-        circs: list[Circuit] = [d[0] for d in data['scan_sols']]
-
-        for c in circs:
-            assert(isinstance(c, Circuit))
-
-        utries = [c.get_unitary() for c in circs]
-        if self.use_calculated_error:
-            cur_error = self.cost.calc_cost(default_circuit, data.target)
-            new_success_threshold = self.success_threshold * data["error_percentage_allocated"]
-            self.partial_success_threshold = self.partial_success_threshold * data["error_percentage_allocated"] - cur_error
-            self.success_threshold = new_success_threshold
-        # new_circs = []
-        # for i, utry in enumerate(utries):
-        #     new_circs.append(await self.synthesize_circ(utry, data))
-        new_circs: list[list[Circuit]] = await get_runtime().map(
-            self.synthesize_circ,
-            utries,
-            data=data,
-        )
-        for i, circs in enumerate(new_circs):
-            if not isinstance(circs, list):
-                print(len(utries), len(new_circs), len(circs), type(circs), flush=True)
-            assert(isinstance(circs, list))
+        circs: list[Circuit] = [d for d in data['scan_sols'][1:]]
+        if len(circs) > 0:
             for c in circs:
                 assert(isinstance(c, Circuit))
 
-        for i, circs in enumerate(new_circs):
-            new_circs[i] = sorted(circs, key=lambda x: x.count(CNOTGate()))
-            for j, c in enumerate(new_circs[i]):
-                if c.count(CNOTGate()) > max_cnot_gates:
-                    new_circs[i][j] = None
-        
-        # Now interleave so you get a decent mix
-        new_circs = list(chain(*zip_longest(*new_circs, fillvalue=None)))
-        new_circs: list[Circuit] = [c for c in new_circs if c is not None]
+            utries = [c.get_unitary() for c in circs]
+            if self.use_calculated_error:
+                new_success_threshold = self.success_threshold * data["error_percentage_allocated"]
+                self.success_threshold = new_success_threshold
 
-        if len(new_circs) == 0:
-            new_circs = [default_circuit]
+            new_circs: list[list[Circuit]] = await get_runtime().map(
+                self.synthesize_circ,
+                utries,
+                data=data,
+            )
+            for i, circs in enumerate(new_circs):
+                if not isinstance(circs, list):
+                    print(len(utries), len(new_circs), len(circs), type(circs), flush=True)
+                assert(isinstance(circs, list))
+                for c in circs:
+                    assert(isinstance(c, Circuit))
 
-        assert(isinstance(new_circs[0], Circuit))
+            for i, circs in enumerate(new_circs):
+                new_circs[i] = sorted(circs, key=lambda x: x.count(CNOTGate()))
+                for j, c in enumerate(new_circs[i]):
+                    if c.count(CNOTGate()) >= max_cnot_gates: # Only take shorter circuits
+                        new_circs[i][j] = None
+            
+            # Now interleave so you get a decent mix
+            new_circs = list(chain(*zip_longest(*new_circs, fillvalue=None)))
+            new_circs: list[tuple[Circuit, float]] = [(c, self.cost(c, target)) for c in new_circs if c is not None]
+        else:
+            new_circs = []
+
+        new_circs.append((default_circuit, 0))
+
+        assert(isinstance(new_circs[0][0], Circuit))
 
         data['scan_sols'] = new_circs
-        
-        cur_error = self.cost.calc_cost(new_circs[0], data.target)
-        np.set_printoptions(precision=3, linewidth=np.inf, threshold=np.inf)
-        return new_circs[0]
+        return new_circs[0][0]
 
     async def synthesize_circ(
         self,
@@ -412,4 +406,4 @@ class SecondLEAPSynthesisPass(BasePass):
 
     async def run(self, circuit: Circuit, data: PassData) -> None:
         """Perform the pass's operation, see :class:`BasePass` for more."""
-        circuit.become(await self.synthesize(data, max_cnot_gates=circuit.count(CNOTGate()), default_circuit=circuit))
+        circuit.become(await self.synthesize(data, target=data.target, max_cnot_gates=circuit.count(CNOTGate()), default_circuit=data['scan_sols'][0]))
