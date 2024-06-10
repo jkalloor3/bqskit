@@ -34,9 +34,18 @@ def load_unitaries(circ_name: int, tol: int, timestep: int) -> list[UnitaryMatri
     return pickle.load(open(full_path, "rb"))
 
 def save_send_unitaries(unitaries: list[np.ndarray], circ_name: int, tol: int) -> None:
-    full_path = f"/pscratch/sd/j/jkalloor/bqskit/unitaries_to_send_2/{tol}/{circ_name}/utries.pkl"
-    print(full_path)
+    full_path = f"/pscratch/sd/j/jkalloor/bqskit/unitaries_to_send_fix/{tol}/{circ_name}/utries.pkl"
+    Path(full_path).parent.mkdir(parents=True, exist_ok=True)
     return pickle.dump(unitaries, open(full_path, "wb"))
+
+def load_sent_unitaries(circ_name: int, tol: int) -> None:
+    full_path = f"/pscratch/sd/j/jkalloor/bqskit/unitaries_to_send/{tol}/{circ_name}/{circ_name}_utries.pkl"
+    print(full_path)
+    return pickle.load(open(full_path, "rb"))
+
+def save_target(target: UnitaryMatrix, circ_name: int) -> None:
+    full_path = f"/pscratch/sd/j/jkalloor/bqskit/unitaries/{circ_name}.pkl"
+    return pickle.dump(target.numpy, open(full_path, "wb"))
 
 def get_unitary(circ: Circuit):
     return circ.get_unitary()

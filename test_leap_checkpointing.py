@@ -27,58 +27,11 @@ from os.path import join
 
 from util import save_circuits, load_circuit, FixGlobalPhasePass, CalculateErrorBoundPass
 
-# enable_logging(True)
+enable_logging(True)
 
 def get_distance(circ1: Circuit) -> float:
     global target
     return circ1.get_unitary().get_frobenius_distance(target)
-
-def gpu_workflow(tol: int, checkpoint_proj: str) -> WorkflowLike:
-    gpu_block_size = 6
-    num_multistarts = 32
-    max_iters = 100000
-    min_iters = 3
-    diff_tol_r = 1e-5
-    diff_tol_a = 0.0
-    dist_tol = 10 ** (-tol)
-
-    diff_tol_step_r = 0.1
-    diff_tol_step = 200
-    beta = 0
-
-    batched_instantiation = QFactorJax(
-        diff_tol_r=diff_tol_r,
-        diff_tol_a=diff_tol_a,
-        min_iters=min_iters,
-        max_iters=max_iters,
-        dist_tol=dist_tol,
-        diff_tol_step_r=diff_tol_step_r,
-        diff_tol_step=diff_tol_step,
-        beta=beta,
-    )
-    instantiate_options = {
-        'method': batched_instantiation,
-        'multistarts': num_multistarts,
-    }
-
-    base_checkpoint_dir = "checkpoints"
-    full_checkpoint_dir = join(base_checkpoint_dir, checkpoint_proj)
-    gate_deletion_jax_pass = ScanningGateRemovalPass(instantiate_options=instantiate_options, checkpoint_proj=full_checkpoint_dir)
-    # Check if checkpoint files exist
-    workflow = [
-        CheckpointRestartPass(base_checkpoint_dir, checkpoint_proj, 
-                                default_passes=[
-                                ToVariablePass(convert_all_single_qudit_gates=True),
-                                QuickPartitioner(block_size=gpu_block_size),
-                                ], save_as_qasm=False),
-        ForEachBlockPass([
-            gate_deletion_jax_pass,
-        ]),
-        UnfoldPass(),
-        ToU3Pass(),
-    ]
-
-    return workflow
 
 
 def get_shortest_circuits(circ_name: str, tol: int, timestep: int) -> list[Circuit]:
@@ -93,7 +46,8 @@ def get_shortest_circuits(circ_name: str, tol: int, timestep: int) -> list[Circu
     base_checkpoint_dir = "checkpoints"
     proj_name = f"{circ_name}_{timestep}_{tol}"
     big_block_size = 8
-    small_block_size = 3
+    small_block_size = 4
+
 
     synthesis_pass = LEAPSynthesisPass(
         store_partial_solutions=True,
@@ -127,33 +81,35 @@ def get_shortest_circuits(circ_name: str, tol: int, timestep: int) -> list[Circu
         append_block_id=True
     )
 
+
+
     leap_workflow = [
-        CheckpointRestartPass(base_checkpoint_dir, proj_name, 
-                                default_passes=[
-                                QuickPartitioner(block_size=big_block_size),
-                                ], save_as_qasm=False),
+        CheckpointRestartPass(
+            base_checkpoint_dir, 
+            proj_name, 
+            default_passes=[
+                ScanPartitioner(block_size=big_block_size),
+            ], 
+            save_as_qasm=False),
         ForEachBlockPass(
             [
-                CheckpointRestartPass(base_checkpoint_dir, proj_name, 
-                        default_passes=[
+                CheckpointRestartPass(
+                    base_checkpoint_dir, 
+                    proj_name, 
+                    default_passes=[
                         ScanPartitioner(block_size=small_block_size),
-                        ], save_as_qasm=False,
-                        append_block_id=True),
+                    ],
+                    save_as_qasm=False,
+                    append_block_id=True),
                 ForEachBlockPass(
                     [
                         synthesis_pass,
-                        second_synthesis_pass,
+                        second_synthesis_pass
                     ],
                     calculate_error_bound=False,
                     allocate_error=True,
                     allocate_error_gate=CNOTGate(),
                 ),
-                CreateEnsemblePass(success_threshold=err_thresh, 
-                                   use_calculated_error=True, 
-                                   num_circs=50, 
-                                   cost=generator, 
-                                   solve_exact_dists=True),
-                FixGlobalPhasePass(),
                 UnfoldPass()
             ],
             calculate_error_bound=True,
@@ -161,8 +117,6 @@ def get_shortest_circuits(circ_name: str, tol: int, timestep: int) -> list[Circu
             allocate_error=True,
             allocate_error_gate=CNOTGate(),
         ),
-        CreateEnsemblePass(success_threshold=err_thresh, num_circs=500, cost=generator, solve_exact_dists=False),
-        JiggleEnsemblePass(success_threshold=err_thresh, num_circs=10000, use_ensemble=True),
         UnfoldPass()
     ]
     num_workers = 256

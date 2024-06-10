@@ -8,6 +8,7 @@ from os.path import exists, join
 import shutil
 from re import findall
 from typing import cast, Sequence
+from pathlib import Path
 
 from bqskit.compiler.basepass import BasePass
 from bqskit.compiler.workflow import Workflow
@@ -55,9 +56,11 @@ class SaveIntermediatePass(BasePass):
             if self.pathdir[-1] != '/':
                 self.pathdir += '/'
         else:
-            raise ValueError(
+            Path(path_to_save_dir).mkdir(parents=True, exist_ok=True)
+            _logger.warning(
                 f'Path {path_to_save_dir} does not exist',
             )
+            self.pathdir = path_to_save_dir
         self.projname = project_name if project_name is not None \
             else 'unnamed_project'
 
@@ -75,7 +78,7 @@ class SaveIntermediatePass(BasePass):
                     'instead.',
                 )
 
-        mkdir(self.pathdir + self.projname)
+        mkdir(join(self.pathdir,self.projname))
 
         self.as_qasm = save_as_qasm
 
@@ -89,8 +92,8 @@ class SaveIntermediatePass(BasePass):
                 blocks_to_save.append((enum, op))
 
         # Set up path and file names
-        structure_file = self.pathdir + self.projname + '/structure.pickle'
-        block_skeleton = self.pathdir + self.projname + '/block_'
+        structure_file = join(self.pathdir,self.projname , 'structure.pickle')
+        print(structure_file)
         num_digits = len(str(len(blocks_to_save)))
 
         structure_list: list[list[int]] = []
@@ -112,11 +115,11 @@ class SaveIntermediatePass(BasePass):
             subcircuit.unfold((0, 0))
             if self.as_qasm:
                 await ToU3Pass().run(subcircuit, PassData(subcircuit))
-                with open(block_skeleton + f'{enum}.qasm', 'w') as f:
+                with open(join(self.pathdir, self.projname, f'block_{enum}.qasm'), 'w') as f:
                     f.write(OPENQASM2Language().encode(subcircuit))
             else:
                 with open(
-                    f'{block_skeleton}{enum}.pickle', 'wb',
+                    join(self.pathdir, self.projname, f'block_{enum}.pickle'), 'wb',
                 ) as f:
                     pickle.dump(subcircuit, f)
 
@@ -157,7 +160,7 @@ class RestoreIntermediatePass(BasePass):
         """
         Updates the `block_list` variable with the current contents of the
         `proj_dir`.
-
+    
         Raises:
             ValueError: if there are more block files than indices in the
             `structure.pickle`.
@@ -173,7 +176,7 @@ class RestoreIntermediatePass(BasePass):
             self.block_list = pickle_list
         if len(self.block_list) > len(self.structure):
             raise ValueError(
-                'More block files than indices in `structure.pickle`',
+                f'More block files ({len(self.block_list), len(pickle_list)}) than indices ({len(self.structure)}) in `{self.proj_dir}/structure.pickle` {self.block_list}',
             )
 
     async def run(self, circuit: Circuit, data: PassData) -> None:
@@ -250,10 +253,12 @@ class CheckpointRestartPass(PassAlias):
 
     def get_passes(self, block_id: str) -> list[BasePass]:
         """Return the passes to be run, see :class:`PassAlias` for more."""
-        if self.append_block_id:
-            self.base_checkpoint_dir = self.base_checkpoint_dir + f"_{block_id}"
-        
         full_checkpoint_dir = join(self.base_checkpoint_dir, self.project_name)
+        if self.append_block_id:
+            self.base_checkpoint_dir = full_checkpoint_dir
+            self.project_name = f"block_{block_id}/"
+            full_checkpoint_dir = join(full_checkpoint_dir, f"block_{block_id}/")
+
         
         # Check if checkpoint files exist
         if not exists(join(full_checkpoint_dir, "structure.pickle")):
@@ -264,6 +269,7 @@ class CheckpointRestartPass(PassAlias):
         else:
             # Already checkpointed, restore
             _logger.info("Restoring from Checkpoint!")
+            print("RESTORING FROM CHECKPOINT")
             self.passes = [
                 RestoreIntermediatePass(full_checkpoint_dir, as_circuit_gate=True)
             ]

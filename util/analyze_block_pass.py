@@ -45,4 +45,6 @@ class AnalyzeBlockPass(BasePass):
         # Get circuit structure quantities
         data["block_depth"] = circuit.depth
         data["block_twoq_count"] = circuit.count(self.gate_to_count)
+        data["num_gates"] = circuit.num_operations
+        data["num_qubits"] = circuit.num_qudits
         data["parallelism"] = supermarq_parallelism(circuit=circuit)

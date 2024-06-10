@@ -251,6 +251,7 @@ class ForEachBlockPass(BasePass):
             # Need to zero pad block ids for consistency
             num_digits = len(str(circuit.num_operations))
             block_data['block_num'] = str(self.blocks_to_run[i]).zfill(num_digits)
+            block_data['super_block_num'] = data.get("block_num", "00")
             for key in data:
                 if key.startswith(self.pass_down_key_prefix):
                     block_data[key] = data[key]
@@ -265,7 +266,6 @@ class ForEachBlockPass(BasePass):
 
         # Assign error as percentage of block
         c = Counter(block_gates)
-        print(c.most_common())
         total_gates = sum(block_gates)
         if self.allocate_error:
             for i in range(len(block_datas)):

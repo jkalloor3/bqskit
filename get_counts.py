@@ -5,7 +5,7 @@ import numpy as np
 from bqskit.ir.gates import CNOTGate
 from bqskit.qis import UnitaryMatrix
 
-from util import load_circuit, load_compiled_circuits, get_unitary, save_unitaries, load_unitaries, save_send_unitaries
+from util import load_circuit, load_compiled_circuits, get_unitary, save_unitaries, load_unitaries, save_send_unitaries, save_target, load_sent_unitaries
 
 import multiprocessing as mp
 
@@ -32,11 +32,17 @@ if __name__ == '__main__':
     timestep = int(argv[2])
     tol = int(argv[3])
 
-    orig_circ = load_circuit(circ_name)
-    target = orig_circ.get_unitary()
+    # orig_circ = load_circuit(circ_name)
+    # target = orig_circ.get_unitary()
     # circs = load_compiled_circuits(circ_name, tol, timestep)
 
-    unitaries = load_unitaries(circ_name, tol, timestep)
+    # if circ_name.endswith("q"):
+    #     circ_name = circ_name[:-1]
+
+    unitaries = load_sent_unitaries(circ_name, tol)
+
+    
+    # unitaries = load_unitaries(circ_name, tol, timestep)
 
     with mp.Pool() as pool:
         # tols = pool.map(get_distance, circs)
@@ -48,6 +54,7 @@ if __name__ == '__main__':
     # sorted_counts = sorted(zip(tols, cnot_counts), key=lambda x: x[1])
 
     save_send_unitaries(unitaries, circ_name, tol)
+    # save_target(target, circ_name)
 
     # print("Final Counts: ", sorted_counts[:10])
     # print("Avg Dist:", np.mean(tols)) 
