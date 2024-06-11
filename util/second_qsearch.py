@@ -21,12 +21,13 @@ from bqskit.qis.unitary import UnitaryMatrix
 from bqskit.runtime import get_runtime
 from bqskit.utils.typing import is_integer
 from bqskit.utils.typing import is_real_number
+from itertools import chain, zip_longest
 
 
 _logger = logging.getLogger(__name__)
 
 
-class QSearchSynthesisPass(SynthesisPass):
+class SecondQSearchSynthesisPass(SynthesisPass):
     """
     A pass implementing the QSearch A* synthesis algorithm.
 
@@ -135,12 +136,60 @@ class QSearchSynthesisPass(SynthesisPass):
         self.partial_success_threshold = partial_success_threshold
         self.cost = cost
         self.max_layer = max_layer
-        self.instantiate_options: dict[str, Any] = {}
+        self.instantiate_options: dict[str, Any] = {
+            'cost_fn_gen': self.cost,
+        }
         self.instantiate_options.update(instantiate_options)
         self.store_partial_solutions = store_partial_solutions
         self.partials_per_depth = partials_per_depth
 
-    async def synthesize(
+    async def synthesize(self, data: PassData, target: UnitaryMatrix, max_cnot_gates: int, default_circuit: Circuit) -> Circuit:
+        # Synthesize every circuit in the ensemble
+        circs: list[Circuit] = [d for d in data['scan_sols'][1:]]
+        if len(circs) > 0:
+            for c in circs:
+                assert(isinstance(c, Circuit))
+
+            utries = [c.get_unitary() for c in circs]
+            if self.use_calculated_error:
+                new_success_threshold = self.success_threshold * data["error_percentage_allocated"]
+                self.success_threshold = new_success_threshold
+
+            new_circs: list[list[Circuit]] = await get_runtime().map(
+                self.synthesize_circ,
+                utries,
+                data=data,
+                default_circuit=default_circuit
+            )
+            for i, circs in enumerate(new_circs):
+                if not isinstance(circs, list):
+                    print(len(utries), len(new_circs), len(circs), type(circs), flush=True)
+                assert(isinstance(circs, list))
+                for c in circs:
+                    assert(isinstance(c, Circuit))
+
+            for i, circs in enumerate(new_circs):
+                new_circs[i] = sorted(circs, key=lambda x: x.count(CNOTGate()))
+                for j, c in enumerate(new_circs[i]):
+                    if c.count(CNOTGate()) >= max_cnot_gates: # Only take shorter circuits
+                        new_circs[i][j] = None
+            
+            # Now interleave so you get a decent mix
+            new_circs = list(chain(*zip_longest(*new_circs, fillvalue=None)))
+            new_circs: list[tuple[Circuit, float]] = [(c, self.cost(c, target)) for c in new_circs if c is not None]
+        else:
+            new_circs = []
+
+        new_circs.append((default_circuit, 0))
+
+        assert(isinstance(new_circs[0][0], Circuit))
+
+        data['scan_sols'] = new_circs
+
+        return new_circs[0][0]
+
+
+    async def synthesize_circ(
         self,
         utry: UnitaryMatrix | StateVector | StateSystem,
         data: PassData,
@@ -165,17 +214,12 @@ class QSearchSynthesisPass(SynthesisPass):
         # Begin the search with an initial layer
         frontier = Frontier(utry, self.heuristic_function)
         initial_layer = layer_gen.gen_initial_layer(utry, data)
-
         initial_layer.instantiate(utry, **instantiate_options)
         frontier.add(initial_layer, 0)
 
         # Track best circuit, initially the initial layer
         best_dist = self.cost.calc_cost(initial_layer, utry)
-        best_circ = initial_layer
-        best_layer = 0
 
-        # Track partial solutions
-        psols: dict[int, list[tuple[Circuit, float]]] = {}
 
         scan_sols: list[Circuit] = [default_circuit.copy()]
 
@@ -185,8 +229,7 @@ class QSearchSynthesisPass(SynthesisPass):
         if best_dist < self.success_threshold:
             _logger.debug('Successful synthesis.')
             scan_sols.append(initial_layer.copy())
-            data['scan_sols'] = scan_sols
-            return initial_layer
+            return scan_sols
 
         default_count = default_circuit.count(CNOTGate())
         # Main loop
@@ -212,34 +255,13 @@ class QSearchSynthesisPass(SynthesisPass):
                 dist = self.cost.calc_cost(circuit, utry)
                 circ_count = circuit.count(CNOTGate())
 
-                if self.store_partial_solutions:
-                    if dist < self.partial_success_threshold and circ_count <= default_count:
-                        scan_sols.append(circuit.copy())
+                if dist < self.partial_success_threshold and circ_count <= default_count:
+                    scan_sols.append(circuit.copy())
 
-                    if layer not in psols:
-                        psols[layer] = []
-
-                    psols[layer].append((circuit.copy(), dist))
-
-                    if len(psols[layer]) > self.partials_per_depth:
-                        psols[layer].sort(key=lambda x: x[1])
-                        del psols[layer][-1]
 
                 if dist < self.success_threshold:
                     _logger.debug('Successful synthesis.')
-                    if self.store_partial_solutions:
-                        data['psols'] = psols
-                        data['scan_sols'] = scan_sols
-
-                    # Return circuit with highest distance
-                    max_dist = 0.0
-                    max_circ = default_circuit
-                    for scan_sol in scan_sols:
-                        dist = self.cost.calc_cost(scan_sol, utry)
-                        if dist > max_dist:
-                            max_circ = scan_sol
-
-                    return max_circ
+                    return scan_sols
 
                 if dist < best_dist:
                     plural = '' if layer == 0 else 's'
@@ -248,32 +270,12 @@ class QSearchSynthesisPass(SynthesisPass):
                         f'layer{plural} and cost: {dist:.12e}.',
                     )
                     best_dist = dist
-                    best_circ = circuit
-                    best_layer = layer
 
                 if self.max_layer is None or layer + 1 < self.max_layer:
                     frontier.add(circuit, layer + 1)
 
-        _logger.warning('Frontier emptied.')
-        _logger.warning(
-            'Returning best known circuit with %d layer%s and cost: %e.'
-            % (best_layer, '' if best_layer == 1 else 's', best_dist),
-        )
+        return scan_sols
 
-
-        if self.store_partial_solutions:
-            data['psols'] = psols
-            data['scan_sols'] = scan_sols
-
-        # Return circuit with highest distance
-        max_dist = 0.0
-        max_circ = default_circuit
-        for scan_sol in scan_sols:
-            dist = self.cost.calc_cost(scan_sol, utry)
-            if dist > max_dist:
-                max_circ = scan_sol
-
-        return max_circ
 
     def _get_layer_gen(self, data: PassData) -> LayerGenerator:
         """
@@ -295,6 +297,7 @@ class QSearchSynthesisPass(SynthesisPass):
 
         return layer_gen
 
+
     async def run(self, circuit: Circuit, data: PassData) -> None:
         """Perform the pass's operation, see :class:`BasePass` for more."""
-        circuit.become(await self.synthesize(data.target, data, default_circuit=circuit))
+        circuit.become(await self.synthesize(data, target=data.target, max_cnot_gates=circuit.count(CNOTGate()), default_circuit=data['scan_sols'][0]))

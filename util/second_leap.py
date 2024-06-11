@@ -300,7 +300,7 @@ class SecondLEAPSynthesisPass(BasePass):
         # Main loop
         step = 0
         while not frontier.empty():
-            print("Iteration", step, best_layer, data.get("block_num", 0), flush=True)
+            # print("Iteration", step, best_layer, data.get("block_num", 0), flush=True)
             data['frontier'] = frontier
             data["best_dist"] = best_dist
             data["best_dists"] = best_dists
@@ -489,7 +489,7 @@ class SecondLEAPSynthesisPass(BasePass):
     async def run(self, circuit: Circuit, data: PassData) -> None:
         """Perform the pass's operation, see :class:`BasePass` for more."""
         datas: list[PassData] = [data.copy() for _ in data['scan_sols']]
-        print(len(datas), data.get("block_num"), data.get("super_block_num"))
+        # print(len(datas), data.get("block_num"), data.get("super_block_num"))
         if self.full_checkpoint_dir:
             full_checkpoint_dir = self.full_checkpoint_dir
             if self.append_block_id:
@@ -507,6 +507,8 @@ class SecondLEAPSynthesisPass(BasePass):
             self.save_data_files = [join(
                 full_checkpoint_dir, f'block_{block_num}_{i}.data',
             ) for i in range(len(data['scan_sols']))]
+
+            # print(self.save_data_files, flush=True)
 
             for i, save_data_file in enumerate(self.save_data_files):
                 if exists(save_data_file):

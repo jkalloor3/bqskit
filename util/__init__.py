@@ -4,3 +4,4 @@ from .common import *
 from .stats import *
 from .fix_global_phase import FixGlobalPhasePass
 from .calculate_error_pass import CalculateErrorBoundPass
+from .second_qsearch import SecondQSearchSynthesisPass

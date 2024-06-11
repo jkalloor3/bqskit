@@ -107,7 +107,9 @@ class CreateEnsemblePass(BasePass):
             numbers = np.arange(0, len(psols[i]))
             # weight by number of CNOTs multiplied by log of distance
 
-            weight_eqn = lambda x: int(psols[i][x].count(CNOTGate())) + int(-1 * np.log10(dists[i][x] + (self.success_threshold / 1000)))
+            # weight_eqn = lambda x: int(psols[i][x].count(CNOTGate())) + int(-1 * np.log10(dists[i][x] + (self.success_threshold / 1000)))
+            # weight_eqn = lambda x: int(psols[i][x].count(CNOTGate()))
+            weight_eqn = lambda x: 1
             weights = np.array([weight_eqn(j) for j in range(len(psols[i]))])
             # weights = np.exp(weights - np.max(weights))
             weights = weights / np.sum(weights)
@@ -142,6 +144,8 @@ class CreateEnsemblePass(BasePass):
         )
 
         # all_circs_dists = np.array(all_circs_dists)
+        print("Semi-Final Number of Ensemble Circs: ", len(all_circs_dists))
+        
         all_circs_dists = [(circ, dist) for circ, dist in all_circs_dists if dist < self.success_threshold]
 
         print("Final Number of Ensemble Circs: ", len(all_circs_dists))
@@ -166,6 +170,8 @@ class CreateEnsemblePass(BasePass):
 
         # print(num_sols_per_block)
 
+        # print([len(block_data[i]['scan_sols']) for i in range(len(block_data))])
+
         # TODO: Add some randomness
         for i, block in enumerate(block_data):
             pts.append(block['point'])
@@ -185,6 +191,7 @@ class CreateEnsemblePass(BasePass):
             num_sols *= len(psols[i])
 
 
+        print([len(psols[i]) for i in range(len(psols))])
         print("Total Potential Solutions", num_sols)
 
         self.num_circs = min(self.num_circs, num_sols)

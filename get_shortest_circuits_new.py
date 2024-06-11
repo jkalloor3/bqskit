@@ -81,7 +81,8 @@ def gpu_workflow(tol: int, checkpoint_proj: str) -> WorkflowLike:
     return workflow
 
 
-def get_shortest_circuits(circ_name: str, tol: int, timestep: int) -> list[Circuit]:
+def get_shortest_circuits(circ_name: str, tol: int, timestep: int,
+                          num_unique_circs: int = 100) -> list[Circuit]:
     circ = load_circuit(circ_name)
     
     # workflow = gpu_workflow(tol, f"{circ_name}_{tol}_{timestep}")
@@ -150,7 +151,7 @@ def get_shortest_circuits(circ_name: str, tol: int, timestep: int) -> list[Circu
                 ),
                 CreateEnsemblePass(success_threshold=err_thresh, 
                                    use_calculated_error=True, 
-                                   num_circs=50, 
+                                   num_circs=num_unique_circs, 
                                    cost=generator, 
                                    solve_exact_dists=True),
                 FixGlobalPhasePass(),
@@ -161,7 +162,7 @@ def get_shortest_circuits(circ_name: str, tol: int, timestep: int) -> list[Circu
             allocate_error=True,
             allocate_error_gate=CNOTGate(),
         ),
-        CreateEnsemblePass(success_threshold=err_thresh, num_circs=500, cost=generator, solve_exact_dists=False),
+        CreateEnsemblePass(success_threshold=err_thresh, num_circs=num_unique_circs, cost=generator, solve_exact_dists=False),
         JiggleEnsemblePass(success_threshold=err_thresh, num_circs=10000, use_ensemble=True),
         UnfoldPass()
     ]
@@ -181,7 +182,8 @@ if __name__ == '__main__':
     circ_name = argv[1]
     timestep = int(argv[2])
     tol = int(argv[3])
-    circs, error_bound, actual_error, count = get_shortest_circuits(circ_name, tol, timestep)
+    num_unique_circs = int(argv[4])
+    circs, error_bound, actual_error, count = get_shortest_circuits(circ_name, tol, timestep, num_unique_circs=num_unique_circs)
     sorted_circs = sorted(circs, key=lambda c: c.count(CNOTGate()))
     circ = load_circuit(circ_name)
     target = circ.get_unitary()
@@ -197,4 +199,4 @@ if __name__ == '__main__':
     print("Min Distance", min(dists))
     print("Mean Distance", np.mean(dists))
     # print([c.get_unitary().get_distance_from(circ.get_unitary()) for c in circs[:20]])
-    save_circuits(circs, circ_name, tol, timestep)
+    save_circuits(circs, circ_name, tol, timestep, ignore_timestep=True, extra_str=f"_{num_unique_circs}_circ")

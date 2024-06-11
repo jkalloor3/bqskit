@@ -25,8 +25,8 @@ class AStarHeuristic(HeuristicFunction):
 
     def __init__(
         self,
-        heuristic_factor: float = 10.0,
-        cost_factor: float = 1.0,
+        heuristic_factor: float = 0,
+        cost_factor: float = 0,
         cost_gen: CostFunctionGenerator = HilbertSchmidtCostGenerator(),
     ) -> None:
         """

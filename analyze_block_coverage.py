@@ -50,6 +50,9 @@ def get_shortest_circuits(circ_name: str, big_block_size: int, small_block_size:
     twoq_coverage_big = [0 for _ in big_labels]
     twoq_coverage_small = [0 for _ in small_labels]
 
+    twoq_gate_counts = []
+    gate_counts = []
+
     for big_block in data[ForEachBlockPass.key][0]:
         # print(list(big_block.keys()))
         coverage_big[big_block["num_qubits"] - 2] += big_block["num_gates"]
@@ -57,6 +60,8 @@ def get_shortest_circuits(circ_name: str, big_block_size: int, small_block_size:
         for small_block in big_block[ForEachBlockPass.key][0]:
             coverage_small[small_block["num_qubits"] - 2] += small_block["num_gates"]
             twoq_coverage_small[small_block["num_qubits"] - 2] += small_block["block_twoq_count"]
+            twoq_gate_counts.append(small_block["block_twoq_count"])
+            gate_counts.append(small_block["num_gates"])
 
     # print(big_data)
     # print(small_data)
@@ -72,31 +77,34 @@ def get_shortest_circuits(circ_name: str, big_block_size: int, small_block_size:
     })
     # exit(0)
 
-    return coverage_small
+    return gate_counts
 
 if __name__ == '__main__':
     big_block_sizes = [8]
     small_block_sizes = [3]
     fig, axes = plt.subplots(1, 3, figsize=(15, 5))
-    # circ_names = ["tfxy_6", "qc_binary_5q", "qc_optimized_5q"]
-    circ_names = ["shor_12", "vqe_12", "vqe_14"]
+    circ_names = ["tfxy_6", "qc_binary_5q", "qc_optimized_5q"]
+    # circ_names = ["shor_12", "vqe_12", "vqe_14"]
     for i, ax in enumerate(axes):
         circ_name = circ_names[i]
         circ = load_circuit(circ_name)
         rows = []
         for bb in big_block_sizes:
             for sb in small_block_sizes:
-                rows.append([bb, *get_shortest_circuits(circ_name, bb, sb)])
-                print(rows[-1])
+                row = get_shortest_circuits(circ_name, bb, sb)
+                ax.hist(row, bins=range(min(row), max(row) + 2), edgecolor='black', align='left')
+                ax.set_title(f"Gate counts for {circ_name}")
+                ax.set_xlabel("Gate counts")
 
-        df = pd.DataFrame(
-            rows,
-            columns=["Big Block Size", "2", "3"]
-        )
+    
+        # df = pd.DataFrame(
+        #     rows,
+        #     columns=["Big Block Size", "2", "3"]
+        # )
 
-        df.plot(x="Big Block Size", kind="bar", stacked=True, ax=ax)
+        # df.plot(x="Big Block Size", kind="bar", stacked=True, ax=ax)
 
-        ax.set_title(f"Gate coverage for {circ_name}")
+        # ax.set_title(f"Gate coverage for {circ_name}")
 
     # fig: plt.Figure = plot_data(gate_coverage_data)
 
