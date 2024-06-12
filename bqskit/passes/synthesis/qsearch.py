@@ -298,3 +298,4 @@ class QSearchSynthesisPass(SynthesisPass):
     async def run(self, circuit: Circuit, data: PassData) -> None:
         """Perform the pass's operation, see :class:`BasePass` for more."""
         circuit.become(await self.synthesize(data.target, data, default_circuit=circuit))
+        print([self.cost.calc_cost(c, data.target) for c in data['scan_sols']])  

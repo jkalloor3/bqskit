@@ -33,15 +33,15 @@ def get_shortest_circuits(circ_name: str, tol: int, timestep: int,
     
     # workflow = gpu_workflow(tol, f"{circ_name}_{tol}_{timestep}")
 
-    extra_err_thresh = 1e-8
+    extra_err_thresh = 1e-5 * err_thresh
     err_thresh = 10 ** (-1 * tol)
-    generator_phase = HilbertSchmidtCostGenerator()
+    generator_phase = FrobeniusNoPhaseCostGenerator()
     # generator = FrobeniusNoPhaseCostGenerator()
     generator = HilbertSchmidtCostGenerator()
     layer_gen = SimpleLayerGenerator(single_qudit_gate_1=VariableUnitaryGate(1))
 
     instantiation_options = {
-        'multistarts': 8,
+        # 'multistarts': 1,
         'ftol': extra_err_thresh,
         'diff_tol_r': 1e-6,
         'max_iters': 100000,
@@ -54,7 +54,7 @@ def get_shortest_circuits(circ_name: str, tol: int, timestep: int,
     big_block_size = 8
     small_block_size = 3
 
-    heuristic = AStarHeuristic(10, 1, cost_gen=generator)
+    heuristic = AStarHeuristic(3, 1, cost_gen=generator)
 
     synthesis_pass = QSearchSynthesisPass(
         heuristic_function=heuristic,
@@ -62,7 +62,7 @@ def get_shortest_circuits(circ_name: str, tol: int, timestep: int,
         store_partial_solutions=True,
         success_threshold = extra_err_thresh,
         partial_success_threshold=err_thresh,
-        cost=generator,
+        cost=generator_phase,
         instantiate_options=instantiation_options,
         use_calculated_error=True
     )
@@ -72,7 +72,7 @@ def get_shortest_circuits(circ_name: str, tol: int, timestep: int,
         layer_generator=layer_gen,
         success_threshold = extra_err_thresh,
         partial_success_threshold=err_thresh,
-        cost=generator,
+        cost=generator_phase,
         instantiate_options=instantiation_options,
         use_calculated_error=True
     )
@@ -105,8 +105,8 @@ def get_shortest_circuits(circ_name: str, tol: int, timestep: int,
             allocate_error=True,
             allocate_error_gate=CNOTGate(),
         ),
-        CreateEnsemblePass(success_threshold=err_thresh, num_circs=num_unique_circs, cost=generator_phase, solve_exact_dists=False),
-        JiggleEnsemblePass(success_threshold=err_thresh, num_circs=10000, use_ensemble=True, cost=generator_phase),
+        CreateEnsemblePass(success_threshold=err_thresh, num_circs=num_unique_circs, cost=generator, solve_exact_dists=False),
+        JiggleEnsemblePass(success_threshold=err_thresh, num_circs=10000, use_ensemble=True, cost=generator),
         UnfoldPass()
     ]
     num_workers = 256
@@ -116,6 +116,7 @@ def get_shortest_circuits(circ_name: str, tol: int, timestep: int,
     approx_circuits: list[Circuit] = data["ensemble"]
     print("Num Circs", len(approx_circuits))
     actual_error = target.get_frobenius_distance(out_circ.get_unitary())
+    print(actual_error)
     cost_error = generator.calc_cost(out_circ, target)
     assert(np.allclose(actual_error, cost_error))
     return approx_circuits, data.error, actual_error, out_circ.count(CNOTGate())
@@ -135,11 +136,11 @@ if __name__ == '__main__':
     print("Lowest Count", count)
     print([c.count(CNOTGate()) for c in circs[:20]])
     # print([c.get_unitary().get_frobenius_distance(circ.get_unitary()) for c in])
-    # with mp.Pool() as pool:
-    #     dists = pool.map(get_distance, circs)
-    # # dists = [get_distance(c) for c in circs]
-    # print("Max Distance", max(dists))
-    # print("Min Distance", min(dists))
-    # print("Mean Distance", np.mean(dists))
-    # # print([c.get_unitary().get_distance_from(circ.get_unitary()) for c in circs[:20]])
-    # save_circuits(circs, circ_name, tol, timestep, ignore_timestep=True, extra_str=f"_{num_unique_circs}_circ")
+    with mp.Pool() as pool:
+        dists = pool.map(get_distance, circs)
+    # dists = [get_distance(c) for c in circs]
+    print("Max Distance", max(dists))
+    print("Min Distance", min(dists))
+    print("Mean Distance", np.mean(dists))
+    # print([c.get_unitary().get_distance_from(circ.get_unitary()) for c in circs[:20]])
+    save_circuits(circs, circ_name, tol, timestep, ignore_timestep=True, extra_str=f"_{num_unique_circs}_circ_qsearch")

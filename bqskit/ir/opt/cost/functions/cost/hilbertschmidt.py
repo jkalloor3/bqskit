@@ -142,9 +142,6 @@ class FrobeniusNoPhaseCost(
         utry = self.circuit.get_unitary(params)
         diff = self.target - utry
         cost = np.abs(np.trace(diff @ diff.conj().T))
-        # print("Params:", params)
-        # print("Cost:", cost)
-        # print(cost)
         return cost
 
     def get_grad(self, params: RealVector) -> npt.NDArray[np.float64]:

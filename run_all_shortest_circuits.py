@@ -9,7 +9,7 @@ header = """#!/bin/bash -l
 #SBATCH -q regular
 #SBATCH -A m4141
 #SBATCH -C cpu
-#SBATCH --time=02:55:00
+#SBATCH --time=11:55:00
 #SBATCH -N 1
 #SBATCH --signal=B:USR1@1
 #SBATCH --output=./slurm_logs/{file}{extra}_{unique_circs}/{circ}/{tol}_tol
@@ -25,7 +25,8 @@ if __name__ == '__main__':
     # file = "get_ensemble_stats_new"
     # file = "get_counts"
     # file = "get_ensemble_expectations"
-    file = "get_shortest_circuits_new"
+    # file = "get_shortest_circuits_new"
+    file = "get_shortest_circuits_qsearch"
     # file = "plot_ensemble_data"
     # file = "run_simulations"
     # file = "full_compile"
@@ -36,7 +37,7 @@ if __name__ == '__main__':
     # tols = range(1, 7)
     tols = [1,3,5,7]
     unique_circss = [1, 5, 20, 100, 1000, 10000]
-    extra = "_bounded"
+    extra = ""
     for circ in circs:
         for timestep in [0]:
             for tol in tols:
