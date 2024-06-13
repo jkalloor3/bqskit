@@ -32,9 +32,8 @@ def get_shortest_circuits(circ_name: str, tol: int, timestep: int,
     circ = load_circuit(circ_name)
     
     # workflow = gpu_workflow(tol, f"{circ_name}_{tol}_{timestep}")
-
-    extra_err_thresh = 1e-5 * err_thresh
     err_thresh = 10 ** (-1 * tol)
+    extra_err_thresh = 1e-5 * err_thresh
     generator_phase = FrobeniusNoPhaseCostGenerator()
     # generator = FrobeniusNoPhaseCostGenerator()
     generator = HilbertSchmidtCostGenerator()
