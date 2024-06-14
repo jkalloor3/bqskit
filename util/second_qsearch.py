@@ -301,4 +301,4 @@ class SecondQSearchSynthesisPass(SynthesisPass):
     async def run(self, circuit: Circuit, data: PassData) -> None:
         """Perform the pass's operation, see :class:`BasePass` for more."""
         circuit.become(await self.synthesize(data, target=data.target, max_cnot_gates=circuit.count(CNOTGate()), default_circuit=data['scan_sols'][0]))
-        print([self.cost.calc_cost(c, data.target) for c in data['scan_sols']]) # Print the costs of the circuits
+        # print([self.cost.calc_cost(c, data.target) for c in data['scan_sols']]) # Print the costs of the circuits
