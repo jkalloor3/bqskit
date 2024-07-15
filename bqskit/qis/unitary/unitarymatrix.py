@@ -238,16 +238,20 @@ class UnitaryMatrix(Unitary, StateVectorMap, NDArrayOperatorsMixin):
         return np.exp(-1j * np.angle(num))
 
     def get_frobenius_norm(self) -> float:
-        inner_product = np.real(np.trace(self.numpy.conj().T @ self.numpy))
-        # inner_product = np.abs(np.sum(np.einsum("ij,ij->", diff.conj().T, diff)))
+        # inner_product = np.real(np.trace(self.numpy.conj().T @ self.numpy))
+        inner_product = np.abs(np.sum(np.einsum("ij,ij->", self.conj(), self)))
         return inner_product
-
+    
+    def get_flat_vector(self) -> np.ndarray[np.float128]:
+        a = np.real(self.numpy.flatten())
+        b = np.imag(self.numpy.flatten())
+        return np.concatenate((a, b))
 
     def get_frobenius_distance(self, other: UnitaryLike) -> float:
         other = UnitaryMatrix(other, check_arguments=False)
         diff: UnitaryMatrix = self - other
-        inner_product = np.real(np.trace(diff.conj().T @ diff))
-        # inner_product = np.abs(np.sum(np.einsum("ij,ij->", diff.conj().T, diff)))
+        # inner_product = np.real(np.trace(diff.conj().T @ diff))
+        inner_product = np.abs(np.sum(np.einsum("ij,ij->", diff.conj(), diff)))
         return inner_product
 
     def get_statevector(self, in_state: StateLike) -> StateVector:

@@ -268,6 +268,7 @@ class ForEachBlockPass(BasePass):
         c = Counter(block_gates)
         total_gates = sum(block_gates)
         if self.allocate_error:
+            # print("Error Percentages", [i / total_gates * data.get("error_percentage_allocated", 1) for i in block_gates])
             for i in range(len(block_datas)):
                 block_datas[i]["error_percentage_allocated"] = block_gates[i] * data.get("error_percentage_allocated", 1) / total_gates 
 

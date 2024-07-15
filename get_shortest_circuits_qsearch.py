@@ -8,10 +8,8 @@ from bqskit.ir.gates import CNOTGate, GlobalPhaseGate, VariableUnitaryGate
 from bqskit.passes import *
 from bqskit.ir.opt.cost.functions import HilbertSchmidtCostGenerator, FrobeniusNoPhaseCostGenerator
 from bqskit.passes.search.heuristics import AStarHeuristic
-from bqskit.ir.opt.minimizers.lbfgs import LBFGSMinimizer
-from qfactorjax.qfactor import QFactorJax
 
-from util import SecondQSearchSynthesisPass
+from util import SecondQSearchSynthesisPass, SubselectEnsemblePass
 
 from bqskit import enable_logging
 
@@ -33,7 +31,7 @@ def get_shortest_circuits(circ_name: str, tol: int, timestep: int,
     
     # workflow = gpu_workflow(tol, f"{circ_name}_{tol}_{timestep}")
     err_thresh = 10 ** (-1 * tol)
-    extra_err_thresh = 1e-5 * err_thresh
+    extra_err_thresh = 1e-2 * err_thresh
     generator_phase = FrobeniusNoPhaseCostGenerator()
     # generator = FrobeniusNoPhaseCostGenerator()
     generator = HilbertSchmidtCostGenerator()
@@ -97,6 +95,8 @@ def get_shortest_circuits(circ_name: str, tol: int, timestep: int,
                                    num_circs=num_unique_circs, 
                                    cost=generator_phase, 
                                    solve_exact_dists=True),
+                JiggleEnsemblePass(success_threshold=err_thresh, num_circs=num_unique_circs * 50, use_ensemble=True, cost=generator, use_calculated_error=True),
+                SubselectEnsemblePass(success_threshold=err_thresh, num_circs=num_unique_circs),
                 UnfoldPass()
             ],
             calculate_error_bound=True,
@@ -105,7 +105,7 @@ def get_shortest_circuits(circ_name: str, tol: int, timestep: int,
             allocate_error_gate=CNOTGate(),
         ),
         CreateEnsemblePass(success_threshold=err_thresh, num_circs=num_unique_circs, cost=generator, solve_exact_dists=False),
-        JiggleEnsemblePass(success_threshold=err_thresh, num_circs=10000, use_ensemble=True, cost=generator),
+        JiggleEnsemblePass(success_threshold=err_thresh, num_circs=1000, use_ensemble=True, cost=generator),
         UnfoldPass()
     ]
     num_workers = 256
@@ -142,4 +142,4 @@ if __name__ == '__main__':
     print("Min Distance", min(dists))
     print("Mean Distance", np.mean(dists))
     # print([c.get_unitary().get_distance_from(circ.get_unitary()) for c in circs[:20]])
-    save_circuits(circs, circ_name, tol, timestep, ignore_timestep=True, extra_str=f"_{num_unique_circs}_circ_qsearch")
+    save_circuits(circs, circ_name, tol, timestep, ignore_timestep=True, extra_str=f"_{num_unique_circs}_circ_qsearch_subselect")
