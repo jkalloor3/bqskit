@@ -3,10 +3,14 @@ import cirq.circuits.circuit
 import cirq.sim
 from bqskit.ir.circuit import Circuit
 from sys import argv
+from scipy.stats import entropy
 import numpy as np
 
 import matplotlib.pyplot as plt
 import random
+from bqskit.ir.gates.parameterized.u3 import U3Gate
+from bqskit.ir.point import CircuitPoint
+
 
 from qiskit import QuantumCircuit
 from qiskit_aer import AerSimulator
@@ -22,7 +26,17 @@ import multiprocessing as mp
 
 import cirq
 
+def run_circuit(circuit: QuantumCircuit, shots: int = 1024):
+    global calc_func
+    results = sim.run(circuit, num_shots=shots).result()
+    noisy_counts = results.get_counts(circuit)
+    return noisy_counts
 
+
+def prob_squared(N, result: dict, shots: int):
+    # Calculate sum(p(x)^2)
+    probs = [v / shots for v in result.values()]
+    return sum(p*p for p in probs)
 
 def create_pauli_noise_model(rb_fid_1q, rb_fid_2q):
     rb_err_1q = 1 - rb_fid_1q
@@ -127,7 +141,8 @@ def get_ensemble_mags(ens_size):
         y = results_dict
         total_dict = {k: x.get(k, 0) + y.get(k, 0) for k in set(x) | set(y)}
         
-    return calc_func(c.num_qubits, total_dict, shots=shots * len(ensemble))
+    # return calc_func(c.num_qubits, total_dict, shots=shots * len(ensemble))
+    return prob_squared(c.num_qubits, total_dict, shots=shots * len(ensemble))
 
 
 def execute_circuit(circuit: QuantumCircuit):
@@ -138,6 +153,12 @@ def execute_circuit(circuit: QuantumCircuit):
 
 
 def get_qcirc(circ: Circuit):
+    for cycle, op in circ.operations_with_cycles():
+        if op.num_qudits == 1:
+            params = U3Gate().calc_params(op.get_unitary())
+            point = CircuitPoint(cycle, op.location[0])
+            circ.replace_gate(point, U3Gate(), op.location, params)
+
     q_circ = bqskit_to_qiskit(circ)
     q_circ.measure_all()
     # (time.time() - start)
@@ -168,7 +189,8 @@ if __name__ == '__main__':
 
     initial_circ = load_circuit(circ_name)
     target = initial_circ.get_unitary()
-    circs = load_compiled_circuits(circ_name, tol, timestep)
+    num_unique_circs = int(argv[4])
+    circs = load_compiled_circuits(circ_name, tol, timestep, ignore_timestep=True, extra_str=f"_{num_unique_circs}_circ_final")
 
     # Store approximate solutions
     all_utries = []
@@ -177,7 +199,7 @@ if __name__ == '__main__':
     base_excitations = []
     noisy_excitations = []
 
-    calc_func = excitation_displacement
+    calc_func = prob_squared
 
 
     qiskit_circ = bqskit_to_qiskit(initial_circ)
@@ -192,7 +214,7 @@ if __name__ == '__main__':
     with mp.Pool() as pool:
        all_qcircs = pool.map(get_qcirc, circs)
 
-    ensemble_mags = []
+    ensemble_mags = [0,0,0,0,0,0]
     ensemble_sizes = [1, 10, 100, 1000, 2000]
 
 

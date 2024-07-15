@@ -10,6 +10,8 @@ from re import findall
 from typing import cast, Sequence
 from pathlib import Path
 
+from copy import deepcopy
+
 from bqskit.compiler.basepass import BasePass
 from bqskit.compiler.workflow import Workflow
 from bqskit.passes.alias import PassAlias
@@ -34,8 +36,7 @@ class SaveIntermediatePass(BasePass):
 
     def __init__(
         self,
-        path_to_save_dir: str,
-        project_name: str | None = None,
+        project_dir: str,
         save_as_qasm: bool = True,
         overwrite: bool = False
     ) -> None:
@@ -51,35 +52,21 @@ class SaveIntermediatePass(BasePass):
         Raises:
             ValueError: If `path_to_save_dir` is not an existing directory.
         """
-        if exists(path_to_save_dir):
-            self.pathdir = path_to_save_dir
+        if exists(project_dir):
+            if not overwrite:
+                _logger.error("Directory already exists!")
+                return
+            self.pathdir = project_dir
             if self.pathdir[-1] != '/':
                 self.pathdir += '/'
         else:
-            Path(path_to_save_dir).mkdir(parents=True, exist_ok=True)
+            Path(project_dir).mkdir(parents=True, exist_ok=True)
             _logger.warning(
-                f'Path {path_to_save_dir} does not exist',
+                f'Path {project_dir} does not exist',
             )
-            self.pathdir = path_to_save_dir
-        self.projname = project_name if project_name is not None \
-            else 'unnamed_project'
+            self.pathdir = project_dir
 
-        enum = 1
-        if exists(join(self.pathdir,self.projname)):
-            if overwrite:
-                shutil.rmtree(join(self.pathdir,self.projname))
-            else:
-                while exists(join(self.pathdir, self.projname + f'_{enum}')):
-                    enum += 1
-                self.projname += f'_{enum}'
-                _logger.warning(
-                    f'Path {path_to_save_dir} already exists, '
-                    f'saving to {self.pathdir + self.projname} '
-                    'instead.',
-                )
-
-        mkdir(join(self.pathdir,self.projname))
-
+        # mkdir(join(self.pathdir,self.projname))
         self.as_qasm = save_as_qasm
 
     async def run(self, circuit: Circuit, data: PassData) -> None:
@@ -92,8 +79,7 @@ class SaveIntermediatePass(BasePass):
                 blocks_to_save.append((enum, op))
 
         # Set up path and file names
-        structure_file = join(self.pathdir,self.projname , 'structure.pickle')
-        print(structure_file)
+        structure_file = join(self.pathdir, 'structure.pickle')
         num_digits = len(str(len(blocks_to_save)))
 
         structure_list: list[list[int]] = []
@@ -115,11 +101,11 @@ class SaveIntermediatePass(BasePass):
             subcircuit.unfold((0, 0))
             if self.as_qasm:
                 await ToU3Pass().run(subcircuit, PassData(subcircuit))
-                with open(join(self.pathdir, self.projname, f'block_{enum}.qasm'), 'w') as f:
+                with open(join(self.pathdir, f'block_{enum}.qasm'), 'w') as f:
                     f.write(OPENQASM2Language().encode(subcircuit))
             else:
                 with open(
-                    join(self.pathdir, self.projname, f'block_{enum}.pickle'), 'wb',
+                    join(self.pathdir, f'block_{enum}.pickle'), 'wb',
                 ) as f:
                     pickle.dump(subcircuit, f)
 
@@ -149,14 +135,12 @@ class RestoreIntermediatePass(BasePass):
                 `structure.pickle` is invalid.
         """
         self.proj_dir = project_directory
-        self.block_list: list[str] = []
+        # self.block_list: list[str] = []
         self.as_circuit_gate = as_circuit_gate
-        # We will detect automatically if blocks are saved as qasm or pickle
-        self.saved_as_qasm = False
 
         self.load_blocks = load_blocks
 
-    def reload_blocks(self) -> None:
+    def reload_blocks(proj_dir: str, structure: list) -> tuple[list[str], bool]:
         """
         Updates the `block_list` variable with the current contents of the
         `proj_dir`.
@@ -165,19 +149,21 @@ class RestoreIntermediatePass(BasePass):
             ValueError: if there are more block files than indices in the
             `structure.pickle`.
         """
-        files = sorted(listdir(self.proj_dir))
+        files = sorted(listdir(proj_dir))
         # Files are of the form block_*.pickle or block_*.qasm
-        self.block_list = [f for f in files if 'block_' in f]
-        pickle_list = [f for f in self.block_list if ".pickle" in f]
+        block_list = [f for f in files if 'block_' in f]
+        pickle_list = [f for f in block_list if ".pickle" in f]
+        saved_as_qasm = False
         if len(pickle_list) == 0:
-            self.saved_as_qasm = True
-            self.block_list = [f for f in self.block_list if ".qasm" in f]
+            saved_as_qasm = True
+            block_list = [f for f in block_list if ".qasm" in f]
         else:
-            self.block_list = pickle_list
-        if len(self.block_list) > len(self.structure):
+            block_list = pickle_list
+        if len(block_list) > len(structure):
             raise ValueError(
-                f'More block files ({len(self.block_list), len(pickle_list)}) than indices ({len(self.structure)}) in `{self.proj_dir}/structure.pickle` {self.block_list}',
+                f'More block files ({len(block_list), len(pickle_list)}) than indices ({len(structure)}) in `{proj_dir}/structure.pickle` {block_list}',
             )
+        return block_list, saved_as_qasm
 
     async def run(self, circuit: Circuit, data: PassData) -> None:
         """
@@ -199,38 +185,39 @@ class RestoreIntermediatePass(BasePass):
             )
 
         with open(self.proj_dir + '/structure.pickle', 'rb') as f:
-            self.structure = pickle.load(f)
+            structure = pickle.load(f)
 
-        if not isinstance(self.structure, list):
+        if not isinstance(structure, list):
             raise TypeError('The provided `structure.pickle` is not a list.')
         
-        if self.load_blocks:
-            self.reload_blocks()
+        block_list, saved_as_qasm = RestoreIntermediatePass.reload_blocks(self.proj_dir, structure)
 
         # Get circuit from checkpoint, ignore previous circuit
         new_circuit = Circuit(circuit.num_qudits, circuit.radixes)
-        for block in self.block_list:
+        for block in block_list:
             # Get block
             block_num = int(findall(r'\d+', block)[0])
-            if self.saved_as_qasm:
+            if saved_as_qasm:
                 with open(join(self.proj_dir, block)) as f:
                     block_circ = OPENQASM2Language().decode(f.read())
             else:
                 with open(join(self.proj_dir, block), "rb") as f:
                     block_circ = pickle.load(f)
             # Get location
-            block_location = self.structure[block_num]
+            block_location = structure[block_num]
             if block_circ.num_qudits != len(block_location):
                 raise ValueError(
                     f'{block} and `structure.pickle` locations are '
                     'different sizes.',
                 )
             # Append to circuit
-            new_circuit.append_circuit(block_circ, block_location, as_circuit_gate=self.as_circuit_gate)
+            try:
+                new_circuit.append_circuit(block_circ, block_location, as_circuit_gate=self.as_circuit_gate)
+            except Exception as e:
+                print(self.proj_dir)
+                raise e
         
         circuit.become(new_circuit)
-        # Check if the circuit has been partitioned, if so, try to replace
-        # blocks
 
 class CheckpointRestartPass(PassAlias):
     def __init__(self, base_checkpoint_dir: str, 
@@ -248,33 +235,33 @@ class CheckpointRestartPass(PassAlias):
         self.base_checkpoint_dir = base_checkpoint_dir
         self.project_name = project_name
         self.save_as_qasm = save_as_qasm
-        self.passes = default_passes
+        self.default_passes = default_passes
         self.append_block_id = append_block_id
 
     def get_passes(self, block_id: str) -> list[BasePass]:
         """Return the passes to be run, see :class:`PassAlias` for more."""
         full_checkpoint_dir = join(self.base_checkpoint_dir, self.project_name)
         if self.append_block_id:
-            self.base_checkpoint_dir = full_checkpoint_dir
-            self.project_name = f"block_{block_id}/"
             full_checkpoint_dir = join(full_checkpoint_dir, f"block_{block_id}/")
 
         
         # Check if checkpoint files exist
         if not exists(join(full_checkpoint_dir, "structure.pickle")):
             _logger.info("Checkpoint does not exist!")
-            save_pass = SaveIntermediatePass(self.base_checkpoint_dir, self.project_name, 
-                                             save_as_qasm=self.save_as_qasm, overwrite=True)
-            self.passes.append(save_pass)
+            save_pass = SaveIntermediatePass(full_checkpoint_dir, 
+                                             save_as_qasm=self.save_as_qasm,
+                                               overwrite=True)
+            passes = deepcopy(self.default_passes)
+            passes.append(save_pass)
         else:
             # Already checkpointed, restore
             _logger.info("Restoring from Checkpoint!")
             print("RESTORING FROM CHECKPOINT")
-            self.passes = [
+            passes = [
                 RestoreIntermediatePass(full_checkpoint_dir, as_circuit_gate=True)
             ]
 
-        return self.passes
+        return passes
     
     async def run(self, circuit: Circuit, data: PassData) -> None:
         """Perform the pass's operation, see :class:`BasePass` for more."""

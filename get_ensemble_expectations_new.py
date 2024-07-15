@@ -65,37 +65,6 @@ def excitation_displacement(u: UnitaryMatrix):
         dis += qub*((1.0 - z)/2.0)
     return dis
 
-# def local_magnetization_orig(N, result: dict, shots: int, qub: int):
-#     """Compute average magnetization from results of qk.execution.
-#     Args:
-#     - N: number of spins
-#     - result (dict): a dictionary with the counts for each qubit, see qk.result.result module
-#     - shots (int): number of trials
-#     Return:
-#     - average_mag (float)
-#     """
-#     mag = 0
-#     q_idx = N - qub -1
-#     pers = [0 for _ in range(2 ** N)]
-#     for spin_str, count in result.items():
-#         # print(count / shots, end=",")
-#         ind = int(spin_str, base=2)
-#         pers[ind] = count / shots
-#         spin_int = [1 - 2 * float(spin_str[q_idx])]
-#         mag += (sum(spin_int) / len(spin_int)) * count
-#     print(pers)
-#     average_mag = mag / shots
-#     return average_mag
-
-# def excitation_displacement_orig(N, result: dict, shots: int):
-#     dis = 0
-#     for qub in range(1, N):
-#         z = local_magnetization_orig(N,result, shots, qub)
-#         dis += qub*((1.0 - z)/2.0)
-#         print(dis)
-#         exit(0)
-#     return dis
-
 def get_ensemble_mags(i):
     global all_utries
     global target

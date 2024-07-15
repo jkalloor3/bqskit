@@ -4,6 +4,8 @@ import numpy as np
 # Generate a super ensemble for some error bounds
 from bqskit.ir.gates import CNOTGate
 from bqskit.qis import UnitaryMatrix
+import pickle
+import random 
 
 from util import load_circuit, load_compiled_circuits, get_unitary, save_unitaries
 from util import load_unitaries, save_send_unitaries, save_target
@@ -46,9 +48,14 @@ if __name__ == '__main__':
             print(e)
             continue
 
-        with mp.Pool() as pool:
-            # tols = pool.map(get_distance, circs)
-            # cnot_counts = pool.map(get_cnot_count, circs)
-            unitaries = pool.map(get_numpy_circ, circs)
+        small_circs = random.sample(circs, 1000)
 
-        save_compiled_unitaries_varied(unitaries, circ_name, tol, variance)
+        pickle.dump(small_circs, open("small_circs.pkl", "wb"))
+        exit(0)
+
+        # with mp.Pool() as pool:
+        #     # tols = pool.map(get_distance, circs)
+        #     # cnot_counts = pool.map(get_cnot_count, circs)
+        #     unitaries = pool.map(get_numpy_circ, circs)
+
+        # save_compiled_unitaries_varied(unitaries, circ_name, tol, variance)

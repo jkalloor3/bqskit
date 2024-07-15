@@ -5,3 +5,7 @@ from .stats import *
 from .fix_global_phase import FixGlobalPhasePass
 from .calculate_error_pass import CalculateErrorBoundPass
 from .second_qsearch import SecondQSearchSynthesisPass
+from .subselect_ensemble_pass import SubselectEnsemblePass
+from .analyze_distribution import AnalyzeDistributionPass
+from .generate_probs_pass import GenerateProbabilityPass
+from .select_ensemble_pass import SelectFinalEnsemblePass
