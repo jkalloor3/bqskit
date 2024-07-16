@@ -15,7 +15,7 @@ header = """#!/bin/bash -l
 #SBATCH --output=./slurm_logs/{file}{extra}_{unique_circs}/{circ}/{tol}_tol
 
 module load conda
-conda activate /pscratch/sd/j/jkalloor/justin_env_clone
+conda activate /pscratch/sd/j/jkalloor/ensemble_env
 echo "python {file}.py {circ} {timestep} {tol} {unique_circs}"
 python {file}.py {circ} {timestep} {tol} {unique_circs}
 """
