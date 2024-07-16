@@ -27,7 +27,7 @@ from os.path import join
 
 from util import save_circuits, load_circuit, FixGlobalPhasePass, CalculateErrorBoundPass
 
-# enable_logging(True)
+enable_logging(True)
 
 def get_distance(circ1: Circuit) -> float:
     global target
@@ -44,8 +44,8 @@ def get_shortest_circuits(circ_name: str, tol: int, timestep: int,
     generator = FrobeniusNoPhaseCostGenerator()
     phase_generator = HilbertSchmidtCostGenerator()
 
-    base_checkpoint_dir = "checkpoints"
-    proj_name = f"{circ_name}_{timestep}_{tol}_final"
+    checkpoint_dir = f"fixed_block_checkpoints/{circ_name}_{timestep}_{tol}"
+    # proj_name = f"{circ_name}_{timestep}_{tol}_final"
     # base_checkpoint_dir = None
     # proj_name = None
     big_block_size = 6
@@ -69,10 +69,7 @@ def get_shortest_circuits(circ_name: str, tol: int, timestep: int,
         partial_success_threshold=err_thresh,
         cost=generator,
         instantiate_options=instantiation_options,
-        use_calculated_error=True,
-        checkpoint_dir=base_checkpoint_dir,
-        checkpoint_proj=proj_name,
-        append_block_id=True
+        use_calculated_error=True
     )
 
     second_synthesis_pass = SecondLEAPSynthesisPass(
@@ -81,24 +78,21 @@ def get_shortest_circuits(circ_name: str, tol: int, timestep: int,
         partial_success_threshold=err_thresh,
         cost=generator,
         instantiate_options=instantiation_options,
-        checkpoint_dir=base_checkpoint_dir,
-        checkpoint_proj=proj_name,
-        append_block_id=True,
         use_calculated_error=True
     )
 
     leap_workflow = [
-        CheckpointRestartPass(base_checkpoint_dir, proj_name, 
+        CheckpointRestartPass(checkpoint_dir, 
                                 default_passes=[
-                                    QuickPartitioner(block_size=big_block_size),
-                                ], save_as_qasm=False),
+                                    ScanPartitioner(block_size=small_block_size),
+                                    ScanPartitioner(block_size=big_block_size),
+                                ]),
+        # CheckpointRestartPass(base_checkpoint_dir, proj_name, 
+        #         default_passes=[
+        #             ScanPartitioner(block_size=big_block_size),
+        #         ]),
         ForEachBlockPass(
             [
-                CheckpointRestartPass(base_checkpoint_dir, proj_name, 
-                        default_passes=[
-                            ScanPartitioner(block_size=small_block_size),
-                        ], save_as_qasm=False,
-                        append_block_id=True),
                 ForEachBlockPass(
                     [
                         synthesis_pass,
