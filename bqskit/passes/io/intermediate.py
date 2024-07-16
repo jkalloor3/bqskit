@@ -3,8 +3,8 @@ from __future__ import annotations
 
 import logging
 import pickle
-from os import listdir, mkdir
-from os.path import exists, join
+from os import listdir
+from os.path import exists, join, isdir
 import shutil
 from re import findall
 from typing import cast, Sequence
@@ -24,6 +24,14 @@ from bqskit.passes.util.converttou3 import ToU3Pass
 from bqskit.utils.typing import is_sequence
 
 _logger = logging.getLogger(__name__)
+
+
+def contains_subdirectory_with_os_listdir(directory):
+    for item in listdir(directory):
+        item_path = join(directory, item)
+        if isdir(item_path):
+            return True
+    return False
 
 
 class SaveIntermediatePass(BasePass):
@@ -219,12 +227,9 @@ class RestoreIntermediatePass(BasePass):
         
         circuit.become(new_circuit)
 
-class CheckpointRestartPass(PassAlias):
-    def __init__(self, base_checkpoint_dir: str, 
-                 project_name: str,
-                 default_passes: BasePass | Sequence[BasePass],
-                 save_as_qasm: bool = True,
-                 append_block_id: bool = False) -> None:
+class CheckpointRestartPass(BasePass):
+    def __init__(self, checkpoint_dir: str, 
+                 default_passes: BasePass | Sequence[BasePass]) -> None:
         """Group together one or more `passes`."""
         if not is_sequence(default_passes):
             default_passes = [cast(BasePass, default_passes)]
@@ -232,38 +237,24 @@ class CheckpointRestartPass(PassAlias):
         if not isinstance(default_passes, list):
             default_passes = list(default_passes)
 
-        self.base_checkpoint_dir = base_checkpoint_dir
-        self.project_name = project_name
-        self.save_as_qasm = save_as_qasm
+        self.checkpoint_dir = checkpoint_dir
         self.default_passes = default_passes
-        self.append_block_id = append_block_id
-
-    def get_passes(self, block_id: str) -> list[BasePass]:
-        """Return the passes to be run, see :class:`PassAlias` for more."""
-        full_checkpoint_dir = join(self.base_checkpoint_dir, self.project_name)
-        if self.append_block_id:
-            full_checkpoint_dir = join(full_checkpoint_dir, f"block_{block_id}/")
-
-        
-        # Check if checkpoint files exist
-        if not exists(join(full_checkpoint_dir, "structure.pickle")):
+    
+    async def run(self, circuit: Circuit, data: PassData) -> None:
+        """Perform the pass's operation, see :class:`BasePass` for more."""
+        # block_id = data.get("block_num", "0")
+        data["checkpoint_dir"] = self.checkpoint_dir
+        if not exists(join(self.checkpoint_dir, "circuit.pickle")):
             _logger.info("Checkpoint does not exist!")
-            save_pass = SaveIntermediatePass(full_checkpoint_dir, 
-                                             save_as_qasm=self.save_as_qasm,
-                                               overwrite=True)
-            passes = deepcopy(self.default_passes)
-            passes.append(save_pass)
+            await Workflow(self.default_passes).run(circuit, data)
+            Path(self.checkpoint_dir).mkdir(parents=True, exist_ok=True)
+            pickle.dump(circuit, open(join(self.checkpoint_dir, "circuit.pickle"), "wb"))
+            pickle.dump(data, open(join(self.checkpoint_dir, "data.pickle"), "wb"))
         else:
             # Already checkpointed, restore
             _logger.info("Restoring from Checkpoint!")
             print("RESTORING FROM CHECKPOINT")
-            passes = [
-                RestoreIntermediatePass(full_checkpoint_dir, as_circuit_gate=True)
-            ]
-
-        return passes
-    
-    async def run(self, circuit: Circuit, data: PassData) -> None:
-        """Perform the pass's operation, see :class:`BasePass` for more."""
-        block_id = data.get("block_num", "0")
-        await Workflow(self.get_passes(block_id)).run(circuit, data)
+            new_circuit = pickle.load(open(join(self.checkpoint_dir, "circuit.pickle"), "rb"))
+            circuit.become(new_circuit)
+            new_data = pickle.load(open(join(self.checkpoint_dir, "data.pickle"), "rb"))
+            data.update(new_data)

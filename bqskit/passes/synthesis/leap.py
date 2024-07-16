@@ -55,9 +55,6 @@ class LEAPSynthesisPass(SynthesisPass):
         instantiate_options: dict[str, Any] = {},
         partial_success_threshold: float = 1e-3,
         use_calculated_error: bool = False,
-        checkpoint_dir: str | None = None,
-        checkpoint_proj: str | None = None,
-        append_block_id: bool =True
     ) -> None:
         """
         Construct a search-based synthesis pass.
@@ -168,13 +165,6 @@ class LEAPSynthesisPass(SynthesisPass):
         self.instantiate_options.update(instantiate_options)
         self.store_partial_solutions = store_partial_solutions
         self.partials_per_depth = partials_per_depth
-        self.append_block_id = append_block_id
-        if checkpoint_dir is not None and checkpoint_proj is not None:
-            self.full_checkpoint_dir = join(checkpoint_dir, checkpoint_proj)
-            print(self.full_checkpoint_dir)
-        else:
-            _logger.info("No checkpoint directory provided.")
-            self.full_checkpoint_dir = None
 
 
     async def synthesize(
@@ -226,10 +216,9 @@ class LEAPSynthesisPass(SynthesisPass):
                 _logger.debug('Successful synthesis.')
                 scan_sols.append(initial_layer.copy())
                 data['scan_sols'] = scan_sols
-                if self.full_checkpoint_dir is not None:
+                if save_data_file is not None:
                     # Dump data and circuit with empty Frontier
-                    frontier.pop()
-                    data['frontier'] = frontier
+                    data["leap_finished"] = True
                     pickle.dump(data, open(save_data_file, "wb"))
                 return initial_layer
             
@@ -260,7 +249,7 @@ class LEAPSynthesisPass(SynthesisPass):
             data["psols"] = psols
             data["scan_sols"] = scan_sols
             step += 1
-            if self.full_checkpoint_dir is not None and step % 10 == 0:
+            if save_data_file is not None and step % 10 == 0:
                 # Dump data and circuit
                 pickle.dump(data, open(save_data_file, "wb"))
             
@@ -314,9 +303,8 @@ class LEAPSynthesisPass(SynthesisPass):
                             max_circ = scan_sol
 
                     # Save data and circuit
-                    if self.full_checkpoint_dir is not None:
-                        frontier.clear()
-                        data["frontier"] = frontier
+                    if save_data_file is not None:
+                        data["leap_finished"] = True
                         pickle.dump(data, open(save_data_file, "wb"))
 
                     return max_circ
@@ -352,10 +340,10 @@ class LEAPSynthesisPass(SynthesisPass):
             'Returning best known circuit with %d layer%s and cost: %e.'
             % (best_layer, '' if best_layer == 1 else 's', best_dist),
         )
+
         if self.store_partial_solutions:
             data['psols'] = psols
             data['scan_sols'] = scan_sols
-            print("NUMBER P SOLS", len(scan_sols))
 
         # Return circuit with highest distance
         max_dist = best_dist
@@ -366,9 +354,8 @@ class LEAPSynthesisPass(SynthesisPass):
                 max_circ = scan_sol
 
         # Save data and circuit
-        if self.full_checkpoint_dir is not None:
-            frontier.clear()
-            data["frontier"] = frontier
+        if save_data_file is not None:
+            data["leap_finished"] = True
             pickle.dump(data, open(save_data_file, "wb"))
 
         return default_circuit
@@ -477,34 +464,45 @@ class LEAPSynthesisPass(SynthesisPass):
         """Perform the pass's operation, see :class:`BasePass` for more."""
         frontier = None
         save_data_file = None
-        # Things needed for saving data
-        if self.full_checkpoint_dir:
-            full_checkpoint_dir = self.full_checkpoint_dir
-            if self.append_block_id:
-                super_block_num = data.get('super_block_num', '00')
-                full_checkpoint_dir = join(self.full_checkpoint_dir, f"block_{super_block_num}/")
+        save_data_file = data.get("checkpoint_data_file", None)
+        if save_data_file:
+            assert(exists(save_data_file))
+            # data = pickle.load(open(save_data_file, "rb"))
+            frontier = data.get('frontier', None)
+            leap_finished = data.get('leap_finished', False)
+            if leap_finished:
+                _logger.debug('Block is already finished!')
+                return
+            data['leap_finished'] = False
+        
+        # # Things needed for saving data
+        # if self.full_checkpoint_dir:
+        #     full_checkpoint_dir = self.full_checkpoint_dir
+        #     if self.append_block_id:
+        #         super_block_num = data.get('super_block_num', '00')
+        #         full_checkpoint_dir = join(self.full_checkpoint_dir, f"block_{super_block_num}/")
 
 
-            block_num: str = data.get('block_num', '0')
-            save_data_file = join(
-                full_checkpoint_dir, f'block_{block_num}.data',
-            )
+        #     block_num: str = data.get('block_num', '0')
+        #     save_data_file = join(
+        #         full_checkpoint_dir, f'block_{block_num}.data',
+        #     )
 
-            if exists(save_data_file):
-                _logger.debug(f'Reloading block {block_num}!')
-                # Reload ind from previous stop
-                with open(save_data_file, 'rb') as df:
-                    new_data = pickle.load(df)
-                    data.update(new_data)
-                frontier: Frontier = data.get('frontier', None)
-                if frontier is not None and frontier.empty():
-                    _logger.debug('Block is already finished!')
-                    return
-            else:
-                _logger.debug(f'Initializing block!')
-                # Initial checkpoint
-                with open(save_data_file, 'wb') as df:
-                    data['frontier'] = None
-                    pickle.dump(data, df)
+        #     if exists(save_data_file):
+        #         _logger.debug(f'Reloading block {block_num}!')
+        #         # Reload ind from previous stop
+        #         with open(save_data_file, 'rb') as df:
+        #             new_data = pickle.load(df)
+        #             data.update(new_data)
+        #         frontier: Frontier = data.get('frontier', None)
+        #         if frontier is not None and frontier.empty():
+        #             _logger.debug('Block is already finished!')
+        #             return
+        #     else:
+        #         _logger.debug(f'Initializing block!')
+        #         # Initial checkpoint
+        #         with open(save_data_file, 'wb') as df:
+        #             data['frontier'] = None
+        #             pickle.dump(data, df)
 
         circuit.become(await self.synthesize(data.target, data, default_circuit=circuit, frontier=frontier, save_data_file=save_data_file))

@@ -4,6 +4,9 @@ from __future__ import annotations
 import functools
 import logging
 from typing import Callable, List
+import pickle
+from os.path import join, exists
+from pathlib import Path
 
 # from bqskit.compiler.basepass import _sub_do_work
 from collections import Counter
@@ -184,6 +187,9 @@ class ForEachBlockPass(BasePass):
         else:
             replace_filter = self.replace_filter
 
+        should_checkpoint = 'checkpoint_dir' in data
+        checkpoint_dir = data.get('checkpoint_dir', "")
+
         # Make room in data for block data
         if self.key not in data:
             data[self.key] = []
@@ -209,7 +215,8 @@ class ForEachBlockPass(BasePass):
         if len(blocks) == 0:
             data[self.key].append([])
             return
-
+        
+        print("NUMBER OF BLOCKS", len(blocks))
         # Get the machine model
         model = data.model
         coupling_graph = data.connectivity
@@ -219,56 +226,76 @@ class ForEachBlockPass(BasePass):
         block_datas: list[PassData] = []
         block_gates = []
         for i, (cycle, op) in enumerate(blocks):
-
-            # Form Subcircuit
-            if isinstance(op.gate, CircuitGate):
-                subcircuit = op.gate._circuit.copy()
-                subcircuit.set_params(op.params)
-            else:
-                subcircuit = Circuit.from_operation(op)
-
-            # Form Submodel
-            subradixes = [circuit.radixes[q] for q in op.location]
-            subnumbering = {op.location[i]: i for i in range(len(op.location))}
-            submodel = MachineModel(
-                len(op.location),
-                coupling_graph.get_subgraph(op.location, subnumbering),
-                model.gate_set,
-                subradixes,
-            )
-
-            # We are cubing here so that blocks with more CNOT gates 
-            # are given more error budget
-            skewed_gates = subcircuit.count(self.allocate_error_gate) ** self.allocate_skew_factor
-            block_gates.append(skewed_gates)
-
-            # Form Subdata
-            block_data: PassData = PassData(subcircuit)
-            block_data['subnumbering'] = subnumbering
-            block_data['model'] = submodel
-            block_data['point'] = CircuitPoint(cycle, op.location[0])
-            block_data['calculate_error_bound'] = self.calculate_error_bound
+            # Check if checkpoint exists:
             # Need to zero pad block ids for consistency
             num_digits = len(str(circuit.num_operations))
-            block_data['block_num'] = str(self.blocks_to_run[i]).zfill(num_digits)
-            block_data['super_block_num'] = data.get("block_num", "00")
-            for key in data:
-                if key.startswith(self.pass_down_key_prefix):
-                    block_data[key] = data[key]
-                elif key.startswith(
-                    self.pass_down_block_specific_key_prefix,
-                ) and i in data[key]:
-                    block_data[key] = data[key][i]
-            block_data.seed = data.seed
+            block_num = str(self.blocks_to_run[i]).zfill(num_digits)
+            save_data_file = join(checkpoint_dir, f'block_{block_num}.data')
+            save_circuit_file = join(checkpoint_dir, f'block_{block_num}.pickle')
+            if should_checkpoint and exists(save_data_file):
+                subcircuit = pickle.load(open(save_circuit_file, 'rb'))
+                block_data = pickle.load(open(save_data_file, 'rb'))
+            else:
+                # Form Subcircuit
+                if isinstance(op.gate, CircuitGate):
+                    subcircuit = op.gate._circuit.copy()
+                    subcircuit.set_params(op.params)
+                else:
+                    subcircuit = Circuit.from_operation(op)
 
+                # Form Submodel
+                subradixes = [circuit.radixes[q] for q in op.location]
+                subnumbering = {op.location[i]: i for i in range(len(op.location))}
+                submodel = MachineModel(
+                    len(op.location),
+                    coupling_graph.get_subgraph(op.location, subnumbering),
+                    model.gate_set,
+                    subradixes,
+                )
+
+                # We are cubing here so that blocks with more CNOT gates 
+                # are given more error budget
+
+                # Form Subdata
+                block_data: PassData = PassData(subcircuit)
+                block_data['subnumbering'] = subnumbering
+                block_data['model'] = submodel
+                block_data['point'] = CircuitPoint(cycle, op.location[0])
+                block_data['calculate_error_bound'] = self.calculate_error_bound
+                block_data['block_num'] = block_num
+                for key in data:
+                    if key.startswith(self.pass_down_key_prefix):
+                        block_data[key] = data[key]
+                    elif key.startswith(
+                        self.pass_down_block_specific_key_prefix,
+                    ) and i in data[key]:
+                        block_data[key] = data[key][i]
+                block_data.seed = data.seed
+
+                if should_checkpoint:
+                    # Create checkpoint directory if it doesn't exist
+                    # Dump initial subcircuit and block in it
+                    Path(checkpoint_dir).mkdir(parents=True, exist_ok=True)
+                    pickle.dump(block_data, open(save_data_file, 'wb'))
+                    pickle.dump(subcircuit, open(save_circuit_file, 'wb'))
+
+            # Change next subdirectory
+            if should_checkpoint:
+                # Update checkpoint dir, circ file, and data file
+                block_data["checkpoint_dir"] = join(checkpoint_dir, f'block_{block_num}')
+                block_data["checkpoint_circ_file"] = save_circuit_file
+                block_data["checkpoint_data_file"] = save_data_file
             subcircuits.append(subcircuit)
             block_datas.append(block_data)
+            # TODO: This is expensive, need to find a better way to do this
+            unfolded_circ = subcircuit.copy()
+            unfolded_circ.unfold_all()
+            skewed_gates = unfolded_circ.count(self.allocate_error_gate) ** self.allocate_skew_factor
+            block_gates.append(skewed_gates)
 
         # Assign error as percentage of block
-        c = Counter(block_gates)
         total_gates = sum(block_gates)
         if self.allocate_error:
-            # print("Error Percentages", [i / total_gates * data.get("error_percentage_allocated", 1) for i in block_gates])
             for i in range(len(block_datas)):
                 block_datas[i]["error_percentage_allocated"] = block_gates[i] * data.get("error_percentage_allocated", 1) / total_gates 
 
