@@ -4,25 +4,36 @@ from bqskit import compile
 import numpy as np
 # Generate a super ensemble for some error bounds
 from bqskit.passes import *
-import pickle
+from util import JiggleCircPass, GetErrorsPass
 
 from bqskit.qis.unitary import UnitaryMatrix
 from bqskit.ir.opt.cost.functions import HilbertSchmidtCostGenerator
-import glob
+from bqskit.compiler.compiler import Compiler, WorkflowLike
 
-initial_circ = Circuit.from_file("ensemble_benchmarks/heisenberg_3.qasm")
+initial_circ = Circuit.from_file("ensemble_benchmarks/hubbard_4.qasm")
 
-un_1 = initial_circ.get_unitary()
+workflow = [
+    ScanPartitioner(3),
+    ForEachBlockPass([
+        JiggleCircPass(),
+    ]),
+    GetErrorsPass()
+]
 
-new_params = initial_circ.params.copy()
-new_params[0] = -3
+# un_1 = initial_circ.get_unitary()
 
-target = initial_circ.get_unitary(new_params)
+# new_params = initial_circ.params.copy()
+# new_params[0] = -3
 
+# target = initial_circ.get_unitary(new_params)
 
-print(un_1.get_frobenius_distance(target))
-print(un_1.get_distance_from(target))
+# print(un_1.get_frobenius_distance(target))
+# print(un_1.get_distance_from(target))
 
-cost = HilbertSchmidtCostGenerator()
+# cost = HilbertSchmidtCostGenerator()
 
-print(cost.calc_cost(initial_circ, target))
+# print(cost.calc_cost(initial_circ, target))
+
+compiler = Compiler(num_workers=256)
+
+compiled_circuit = compiler.compile(initial_circ, workflow)

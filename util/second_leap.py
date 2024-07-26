@@ -54,7 +54,8 @@ class SecondLEAPSynthesisPass(BasePass):
         min_prefix_size: int = 3,
         instantiate_options: dict[str, Any] = {},
         partial_success_threshold: float = 1e-3,
-        use_calculated_error: bool = False
+        use_calculated_error: bool = False,
+        max_psols: int = 5,
     ) -> None:
         """
         Construct a search-based synthesis pass.
@@ -156,6 +157,7 @@ class SecondLEAPSynthesisPass(BasePass):
         }
         self.use_calculated_error = use_calculated_error
         self.instantiate_options.update(instantiate_options)
+        self.max_psols = max_psols
 
     async def synthesize(self, data: PassData, target: UnitaryMatrix, max_cnot_gates: int, default_circuit: Circuit, datas: list[PassData], save_data_files: list[str] = None) -> Circuit:
         # Synthesize every circuit in the ensemble
@@ -214,6 +216,7 @@ class SecondLEAPSynthesisPass(BasePass):
         """Synthesize `utry`, see :class:`SynthesisPass` for more."""
         # Initialize run-dependent options
         instantiate_options = self.instantiate_options.copy()
+        instantiate_options['ftol'] = self.success_threshold
         
         utry, data, save_data_file = utry_data
 
@@ -322,6 +325,14 @@ class SecondLEAPSynthesisPass(BasePass):
 
                 if dist < self.partial_success_threshold:
                     scan_sols.append(circuit.copy())
+                    data['scan_sols'] = scan_sols
+                    if len(scan_sols) >= self.max_psols:
+                        # return here
+                        # Save data and circuit
+                        if save_data_file is not None:
+                            data["second_leap_finished"] = True
+                            pickle.dump(data, open(save_data_file, "wb"))
+                        return scan_sols
 
                 if dist < self.success_threshold:
                     _logger.debug(f'Successful synthesis with distance {dist:.6e}.')
@@ -477,6 +488,7 @@ class SecondLEAPSynthesisPass(BasePass):
             # We want a separate file for each psol in block of form
             # "checkpoint_dir/block_{num}_{i}.data"
             save_data_files = [save_file.replace(".data", f"_{i}.data") for i in range(len(data['scan_sols']))]
+            _logger.debug("Second LEAP: Saving data files from %s", save_data_files)
         else:
             save_data_files = [None for _ in data['scan_sols']]
 
@@ -485,5 +497,11 @@ class SecondLEAPSynthesisPass(BasePass):
                 with open(save_data_file, 'wb') as df:
                     datas[i]['frontier'] = None
                     pickle.dump(datas[i], df)
+            elif save_data_file and exists(save_data_file):
+                frontier: Frontier | None = datas[i]['frontier']
+                if frontier is None:
+                    _logger.debug("How is this possible for frontier?")
+                else:
+                    _logger.debug(f"Second leap frontier {i} is empty: {frontier.empty()}")
 
         circuit.become(await self.synthesize(data, target=data.target, max_cnot_gates=circuit.count(CNOTGate()), default_circuit=data['scan_sols'][0], datas=datas, save_data_files=save_data_files))

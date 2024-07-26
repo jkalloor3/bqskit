@@ -9,3 +9,4 @@ from .subselect_ensemble_pass import SubselectEnsemblePass
 from .analyze_distribution import AnalyzeDistributionPass
 from .generate_probs_pass import GenerateProbabilityPass
 from .select_ensemble_pass import SelectFinalEnsemblePass
+from .jiggle_circ_pass import JiggleCircPass, GetErrorsPass

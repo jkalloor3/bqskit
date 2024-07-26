@@ -55,6 +55,7 @@ class LEAPSynthesisPass(SynthesisPass):
         instantiate_options: dict[str, Any] = {},
         partial_success_threshold: float = 1e-3,
         use_calculated_error: bool = False,
+        max_psols: int = 10,
     ) -> None:
         """
         Construct a search-based synthesis pass.
@@ -165,6 +166,7 @@ class LEAPSynthesisPass(SynthesisPass):
         self.instantiate_options.update(instantiate_options)
         self.store_partial_solutions = store_partial_solutions
         self.partials_per_depth = partials_per_depth
+        self.max_psols = max_psols
 
 
     async def synthesize(
@@ -182,6 +184,7 @@ class LEAPSynthesisPass(SynthesisPass):
         if self.use_calculated_error:
             self.success_threshold = self.success_threshold * data["error_percentage_allocated"]
             self.partial_success_threshold = self.partial_success_threshold * data["error_percentage_allocated"]
+            instantiate_options['ftol'] = self.success_threshold
         # Seed the PRNG
         if 'seed' not in instantiate_options:
             instantiate_options['seed'] = data.seed
@@ -277,7 +280,16 @@ class LEAPSynthesisPass(SynthesisPass):
                 if self.store_partial_solutions:
                     if dist < self.partial_success_threshold and circ_count <= default_count:
                         scan_sols.append(circuit.copy())
-
+                        data['psols'] = psols
+                        data['scan_sols'] = scan_sols
+                        if len(scan_sols) >= self.max_psols:
+                            # return here
+                            # Save data and circuit
+                            if save_data_file is not None:
+                                data["leap_finished"] = True
+                                pickle.dump(data, open(save_data_file, "wb"))
+                            return default_circuit
+                        
                     if layer not in psols:
                         psols[layer] = []
 
@@ -468,8 +480,11 @@ class LEAPSynthesisPass(SynthesisPass):
         if save_data_file:
             assert(exists(save_data_file))
             # data = pickle.load(open(save_data_file, "rb"))
-            frontier = data.get('frontier', None)
+            frontier: Frontier | None = data.get('frontier', None)
             leap_finished = data.get('leap_finished', False)
+            _logger.debug(f'Loading data from {save_data_file}')
+            if frontier is not None:
+                _logger.debug(f'Frontier is empty: {frontier.empty()}')
             if leap_finished:
                 _logger.debug('Block is already finished!')
                 return
