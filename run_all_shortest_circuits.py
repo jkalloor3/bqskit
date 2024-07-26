@@ -12,7 +12,7 @@ header = """#!/bin/bash -l
 #SBATCH --time=11:55:00
 #SBATCH -N 1
 #SBATCH --signal=B:USR1@1
-#SBATCH --output=./slurm_logs/{file}{extra}_{unique_circs}/{circ}/{tol}_tol
+#SBATCH --output=./slurm_logs/{file}{extra}_{unique_circs}/{circ}/{tol}_tol_block_size_8
 
 module load conda
 conda activate /pscratch/sd/j/jkalloor/ensemble_env

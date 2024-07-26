@@ -39,46 +39,54 @@ def get_shortest_circuits(circ_name: str, tol: int, timestep: int,
     circ = load_circuit(circ_name)
     
     # workflow = gpu_workflow(tol, f"{circ_name}_{tol}_{timestep}")
-    err_thresh = 10 ** (-1 * tol)
-    extra_err_thresh = 1e-3 * err_thresh
-    generator = FrobeniusNoPhaseCostGenerator()
+    err_thresh = np.sqrt(10 ** (-1 * tol))
+    extra_err_thresh = 3e-2 * err_thresh
     phase_generator = HilbertSchmidtCostGenerator()
-
-    checkpoint_dir = f"fixed_block_checkpoints/{circ_name}_{timestep}_{tol}"
+    big_block_size = 7
+    small_block_size = 3
+    checkpoint_dir = f"fixed_block_checkpoints/{circ_name}_{timestep}_{tol}_{big_block_size}_{small_block_size}/"
     # proj_name = f"{circ_name}_{timestep}_{tol}_final"
     # base_checkpoint_dir = None
     # proj_name = None
-    big_block_size = 6
-    small_block_size = 3
 
     layer_gen = SimpleLayerGenerator(single_qudit_gate_1=VariableUnitaryGate(1))
 
-    instantiation_options = {
+    fast_instantiation_options = {
         # 'multistarts': 1,
         'ftol': extra_err_thresh,
-        'diff_tol_r': 1e-6,
-        'max_iters': 100000,
+        'diff_tol_r': 1e-4,
+        'max_iters': 10000,
         'min_iters': 100,
-        'method': 'qfactor',
+        # 'method': 'qfactor',
     }
+
+    # fast_instantiation_options = {
+    #         # 'multistarts': 1,
+    #         'ftol': extra_err_thresh,
+    #         'diff_tol_r': 1e-3,
+    #         'max_iters': 10000,
+    #         'min_iters': 100,
+    # }
 
     synthesis_pass = LEAPSynthesisPass(
         store_partial_solutions=True,
         layer_generator=layer_gen,
         success_threshold = extra_err_thresh,
         partial_success_threshold=err_thresh,
-        cost=generator,
-        instantiate_options=instantiation_options,
-        use_calculated_error=True
+        cost=phase_generator,
+        instantiate_options=fast_instantiation_options,
+        use_calculated_error=True,
+        max_psols=5
     )
 
     second_synthesis_pass = SecondLEAPSynthesisPass(
         success_threshold = extra_err_thresh,
         layer_generator=layer_gen,
         partial_success_threshold=err_thresh,
-        cost=generator,
-        instantiate_options=instantiation_options,
-        use_calculated_error=True
+        cost=phase_generator,
+        instantiate_options=fast_instantiation_options,
+        use_calculated_error=True,
+        max_psols=3
     )
 
     leap_workflow = [
@@ -87,10 +95,6 @@ def get_shortest_circuits(circ_name: str, tol: int, timestep: int,
                                     ScanPartitioner(block_size=small_block_size),
                                     ScanPartitioner(block_size=big_block_size),
                                 ]),
-        # CheckpointRestartPass(base_checkpoint_dir, proj_name, 
-        #         default_passes=[
-        #             ScanPartitioner(block_size=big_block_size),
-        #         ]),
         ForEachBlockPass(
             [
                 ForEachBlockPass(
@@ -103,23 +107,23 @@ def get_shortest_circuits(circ_name: str, tol: int, timestep: int,
                     allocate_error=True,
                     allocate_error_gate=CNOTGate(),
                 ),
-                # CreateEnsemblePass(success_threshold=err_thresh, 
-                #                    use_calculated_error=True, 
-                #                    num_circs=num_unique_circs,
-                #                 #    num_random_ensembles=5,
-                #                    cost=phase_generator, 
-                #                    solve_exact_dists=True),
-                # JiggleEnsemblePass(success_threshold=err_thresh, num_circs=10000, use_ensemble=True, cost=phase_generator),
-                # SubselectEnsemblePass(success_threshold=err_thresh, num_circs=100),
-                # GenerateProbabilityPass(size=50),
+                CreateEnsemblePass(success_threshold=err_thresh, 
+                                   use_calculated_error=True, 
+                                   num_circs=num_unique_circs,
+                                #    num_random_ensembles=5,
+                                   cost=phase_generator, 
+                                   solve_exact_dists=True),
+                JiggleEnsemblePass(success_threshold=err_thresh, num_circs=5000, use_ensemble=True, cost=phase_generator),
+                SubselectEnsemblePass(success_threshold=err_thresh, num_circs=100),
+                GenerateProbabilityPass(size=50),
                 UnfoldPass(),
             ],
             calculate_error_bound=True,
-            error_cost_gen=generator,
+            error_cost_gen=phase_generator,
             allocate_error=True,
             allocate_error_gate=CNOTGate(),
         ),
-        # SelectFinalEnsemblePass(size=20000)
+        SelectFinalEnsemblePass(size=500)
     ]
     num_workers = 256
     compiler = Compiler(num_workers=num_workers)

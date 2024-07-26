@@ -63,13 +63,14 @@ class PassData(MutableMapping[str, Any]):
     def target(self) -> StateVector | UnitaryMatrix | StateSystem:
         """Return the current target unitary or state."""
         if isinstance(self._target, Circuit):
-            self._target = self._target.get_unitary()
+            if self._target.num_qudits <= 8:
+                self._target = self._target.get_unitary()
 
         return self._target
 
     @target.setter
-    def target(self, _val: StateVector | UnitaryMatrix | StateSystem) -> None:
-        if not isinstance(_val, (StateVector, UnitaryMatrix, StateSystem)):
+    def target(self, _val: StateVector | UnitaryMatrix | StateSystem | Circuit) -> None:
+        if not isinstance(_val, (StateVector, UnitaryMatrix, StateSystem, Circuit)):
             raise TypeError(
                 f'Cannot assign type {type(_val)} to target.'
                 ' Expected either a StateVector, StateSystem,'

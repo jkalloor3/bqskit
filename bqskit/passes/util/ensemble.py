@@ -9,7 +9,7 @@ from bqskit.compiler.passdata import PassData
 from bqskit.ir.circuit import Circuit, CircuitPoint, Operation, CircuitLocationLike
 from bqskit.runtime import get_runtime
 from typing import Any
-from bqskit.ir.opt.cost.functions import HilbertSchmidtResidualsGenerator, HilbertSchmidtCostGenerator, FrobeniusNoPhaseCostGenerator
+from bqskit.ir.opt.cost.functions import HilbertSchmidtResidualsGenerator, HilbertSchmidtCostGenerator, FrobeniusCostGenerator
 from bqskit.ir.opt.minimizers.lbfgs import LBFGSMinimizer
 from bqskit.ir.opt.cost.generator import CostFunctionGenerator
 from bqskit.ir.gates import CircuitGate
@@ -19,7 +19,7 @@ import numpy as np
 
 _logger = logging.getLogger(__name__)
 
-
+frob_cost = FrobeniusCostGenerator()
 class CreateEnsemblePass(BasePass):
     """Converts single-qubit general unitary gates to U3 Gates."""
 
@@ -57,7 +57,6 @@ class CreateEnsemblePass(BasePass):
         #     'method': 'minimization',
         #     'minimizer': LBFGSMinimizer(),
         # }
-    # no_phase_cost = FrobeniusNoPhaseCostGenerator()
     async def unfold_circ(
             config_dist: tuple[list[CircuitGate], float], 
             circuit: Circuit, 
@@ -65,6 +64,7 @@ class CreateEnsemblePass(BasePass):
             locations: list[CircuitLocationLike], 
             solve_exact_dists: bool = False, 
             cost: CostFunctionGenerator = HilbertSchmidtCostGenerator(),
+            success_threshold: float = 1e-4,
             target: UnitaryMatrix = None) -> tuple[Circuit, float]:
         
         config, dist = config_dist
@@ -78,10 +78,12 @@ class CreateEnsemblePass(BasePass):
         copied_circuit.unfold_all()
 
         if solve_exact_dists:
+            orig_dist = dist
             dist = cost.calc_cost(copied_circuit, target)
+            frob_dist = frob_cost.calc_cost(copied_circuit, target)
             # dist_2 = CreateEnsemblePass.no_phase_cost.calc_cost(copied_circuit, target)
 
-            # print("Exact Dist: ", dist, "No Phase Dist: ", dist_2, flush=True)
+            print("Exact Dist: ", dist, "Upperbound: ", orig_dist, "Frob Dist:", frob_dist, "Success Threshold: ", success_threshold, flush=True)
 
         return copied_circuit, dist
 
@@ -91,6 +93,7 @@ class CreateEnsemblePass(BasePass):
         psols: list[list[Circuit]],
         pts: list[CircuitPoint],
         dists: list[list[float]],
+        targets: list[UnitaryMatrix],
         target: UnitaryMatrix = None
     ) -> Circuit:
         """Assemble a circuit from a list of block indices."""
@@ -141,7 +144,14 @@ class CreateEnsemblePass(BasePass):
 
         all_ensembles = []
 
-        for inds in all_inds:
+        for k, inds in enumerate(all_inds):
+            if k == 0:
+                print("CNOT based sampling")
+            elif k == 1:
+                print("CNOT sqrt based sampling")
+            else:
+                print("Other sampling")
+
             # Randomly sample a bunch of psols
             while (num_circs < self.num_circs and trials < self.num_circs * 10):
                 random_inds = inds[:, trials]
@@ -155,6 +165,11 @@ class CreateEnsemblePass(BasePass):
                     circ_list = [psols[i][ind] for i, ind in enumerate(random_inds)]
                     new_config = [CircuitGate(circ) for circ in circ_list]
                     all_combos.append((new_config, total_dist))
+                    # print("Dists: ", [dists[i][ind] for i, ind in enumerate(random_inds)], "Total Dist: ", total_dist, flush=True)
+                    actual_dists = [self.cost.calc_cost(psols[i][ind], targets[i]) for i, ind in enumerate(random_inds)]
+                    # print("Actual Dists: ", actual_dists, flush=True)
+                    frob_dists = [frob_cost.calc_cost(psols[i][ind], targets[i]) for i, ind in enumerate(random_inds)]
+                    # print("Frob Dists: ", frob_dists, flush=True)
                     num_circs += 1
 
             # Add original circuit
@@ -171,10 +186,13 @@ class CreateEnsemblePass(BasePass):
                 locations=locations,
                 solve_exact_dists=self.solve_exact_dists,
                 cost=self.cost,
+                success_threshold=self.success_threshold,
                 target=target
             )
 
             dists = [dist for circ, dist in all_circs_dists]
+
+            print("Final Dists: ", dists, flush=True)
             
             all_circs_dists = [(circ, dist) for circ, dist in all_circs_dists if dist < self.success_threshold]
 
@@ -183,6 +201,8 @@ class CreateEnsemblePass(BasePass):
             if len(all_circs_dists) > 1:
                 # Get rid of the default case
                 all_circs_dists.pop()
+
+            print("Final Number of Circs: ", len(all_circs_dists), flush=True)
 
             # print("Final Number of Ensemble Circs: ", len(all_circs_dists))
 
@@ -227,7 +247,7 @@ class CreateEnsemblePass(BasePass):
 
         self.num_circs = min(self.num_circs, num_sols)
 
-        return psols, pts, dists
+        return psols, pts, dists, targets
 
     async def run(self, circuit: Circuit, data: PassData) -> None:
         """Perform the pass's operation, see :class:`BasePass` for more."""
@@ -239,9 +259,9 @@ class CreateEnsemblePass(BasePass):
         if self.use_calculated_error:
             self.success_threshold = self.success_threshold * data["error_percentage_allocated"]
 
-        approx_circs, pts, dists = self.parse_data(circuit, block_data)
+        approx_circs, pts, dists, targets = self.parse_data(circuit, block_data)
         
-        all_ensembles: list[tuple[Circuit, float]] = await self.assemble_circuits(circuit, approx_circs, pts, dists=dists, target=data.target)
+        all_ensembles: list[tuple[Circuit, float]] = await self.assemble_circuits(circuit, approx_circs, pts, dists=dists, targets=targets, target=data.target)
 
         data["scan_sols"] = []
         data["ensemble"] = []

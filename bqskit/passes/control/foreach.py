@@ -233,6 +233,7 @@ class ForEachBlockPass(BasePass):
             save_data_file = join(checkpoint_dir, f'block_{block_num}.data')
             save_circuit_file = join(checkpoint_dir, f'block_{block_num}.pickle')
             if should_checkpoint and exists(save_data_file):
+                _logger.debug(f'Loading block {i} from checkpoint.')
                 subcircuit = pickle.load(open(save_circuit_file, 'rb'))
                 block_data = pickle.load(open(save_data_file, 'rb'))
             else:

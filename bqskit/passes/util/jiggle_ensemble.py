@@ -16,11 +16,13 @@ from bqskit.qis import UnitaryMatrix
 import numpy as np
 from math import ceil
 from itertools import chain
+import time
 _logger = logging.getLogger(__name__)
 
 
-class JiggleEnsemblePass(BasePass):
+class  JiggleEnsemblePass(BasePass):
     """Converts single-qubit general unitary gates to U3 Gates."""
+    num_jiggles = 0
 
     def __init__(self, success_threshold = 1e-4, 
                  num_circs = 1000,
@@ -58,30 +60,17 @@ class JiggleEnsemblePass(BasePass):
         circ_copy.set_params(params)
         return circ_copy
 
-    async def jiggle_circ(self, circ_dist: tuple[Circuit, float], target: UnitaryMatrix, num_circs: int):
-        circ, dist = circ_dist
-        
-        params = circ.params
-
-        if len(params) < 10:
-            # print(circ.gate_counts)
-            # print("WTF NO PARAMS")
-            for i in range(circ.num_qudits):
-                # Add a layer of U3 gates
-                circ.append_gate(U3Gate(), (i,), [0, 0, 0])
-            params = circ.params
-        # print(f"Num Params: {len(params)}")
-        cost_fn = self.cost.gen_cost(circ.copy(), target)
-        # extra_diff = max(self.success_threshold - dists[i], self.success_threshold / len(params)) 
-        all_circs = []
-        
-        for _ in range(num_circs):
+    async def single_jiggle(self, params, circ, dist, target, num):
+        print("Starting Jiggle", flush=True)
+        start = time.time()
+        circs = []
+        for _ in range(num):
             circ_cost = self.cost.calc_cost(circ, target)
+            cost_fn = self.cost.gen_cost(circ.copy(), target)
 
             trials = 0
 
             best_params = np.array(params.copy(), dtype=np.float64)
-
 
             extra_diff = max(self.success_threshold - dist, self.success_threshold / len(params))
             # extra_diff = self.success_threshold * 10
@@ -110,7 +99,30 @@ class JiggleEnsemblePass(BasePass):
             # print(circ_cost, self.success_threshold, trials)
             circ_copy = circ.copy()
             circ_copy.set_params(best_params)
-            all_circs.append(circ_copy)
+            circs.append(circ_copy)
+        JiggleEnsemblePass.num_jiggles += 1
+        print(f"Single Jiggle ({JiggleEnsemblePass.num_jiggles}) time {time.time() - start}", flush=True)
+        return circs
+
+
+    async def jiggle_circ(self, circ_dist: tuple[Circuit, float], target: UnitaryMatrix, num_circs: int):
+        circ, dist = circ_dist
+        
+        params = circ.params
+
+        if len(params) < 10:
+            # print(circ.gate_counts)
+            # print("WTF NO PARAMS")
+            for i in range(circ.num_qudits):
+                # Add a layer of U3 gates
+                circ.append_gate(U3Gate(), (i,), [0, 0, 0])
+            params = circ.params
+        all_circs = []
+
+        print(f"Awaiting All {num_circs // 50} Jiggles")
+        all_circs = await get_runtime().map(self.single_jiggle, [params] * (num_circs // 50), circ=circ, dist=dist, target=target, num=50)
+        all_circs = list(chain.from_iterable(all_circs))
+        print("Done All Jiggles")
         return all_circs
 
 
@@ -152,8 +164,9 @@ class JiggleEnsemblePass(BasePass):
                                                 target=data.target,
                                                 num_circs = ceil(self.num_circs / len(circuits)))
 
-
+            print("Done Jiggling Circs")
             all_circs = list(chain.from_iterable(all_circs))
+            print("Number of Circs", len(all_circs))
             data["ensemble"].append(all_circs)
         return
 
