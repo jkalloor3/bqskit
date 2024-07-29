@@ -41,7 +41,7 @@ if __name__ == '__main__':
     # circs =  ["shor_12", "qft_10", "vqe_12"]
     # tols = range(1, 7)
     tols = [1,3]
-    unique_circss = [100] #, 5, 20, 100, 1000, 10000]
+    unique_circss = [200] #, 5, 20, 100, 1000, 10000]
     extra = ""
     for circ in circs:
         for timestep in [0]:

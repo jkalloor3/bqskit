@@ -154,7 +154,7 @@ if __name__ == '__main__':
     circs, error_bound, count = get_shortest_circuits(circ_name, tol, timestep, num_unique_circs=num_unique_circs)
     sorted_circs = sorted(circs, key=lambda c: c.count(CNOTGate()))
     circ = load_circuit(circ_name)
-    target = circ.get_unitary()
+    # target = circ.get_unitary()
     print("Error Bound", error_bound)
     # print("Actual Error", actual_error)
     print("Lowest Count", count)

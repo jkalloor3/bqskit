@@ -83,7 +83,7 @@ class CreateEnsemblePass(BasePass):
             frob_dist = frob_cost.calc_cost(copied_circuit, target)
             # dist_2 = CreateEnsemblePass.no_phase_cost.calc_cost(copied_circuit, target)
 
-            print("Exact Dist: ", dist, "Upperbound: ", orig_dist, "Frob Dist:", frob_dist, "Success Threshold: ", success_threshold, flush=True)
+            # print("Exact Dist: ", dist, "Upperbound: ", orig_dist, "Frob Dist:", frob_dist, "Success Threshold: ", success_threshold, flush=True)
 
         return copied_circuit, dist
 
@@ -94,6 +94,7 @@ class CreateEnsemblePass(BasePass):
         pts: list[CircuitPoint],
         dists: list[list[float]],
         targets: list[UnitaryMatrix],
+        thresholds: list[float],
         target: UnitaryMatrix = None
     ) -> Circuit:
         """Assemble a circuit from a list of block indices."""
@@ -111,6 +112,7 @@ class CreateEnsemblePass(BasePass):
         inds_4 = [[] for _ in range(len(psols))]
         default_inds = [[-1] for _ in range(len(psols))]
         random_inds = [[] for _ in range(len(psols))]
+        possible_solutions = 1
         for i in range(len(psols)):
             assert(len(psols[i]) > 0)
             numbers = np.arange(0, len(psols[i]))
@@ -132,6 +134,7 @@ class CreateEnsemblePass(BasePass):
             inds_3[i] = np.random.choice(numbers, p=weights_3, size=(self.num_circs * 10))
             inds_4[i] = np.random.choice(numbers, p=weights_4, size=(self.num_circs * 10))
             random_inds[i] = np.random.choice(numbers, size=(self.num_circs * 10))
+            possible_solutions *= len(psols[i])
 
         inds_1 = np.array(inds_1)
         inds_2 = np.array(inds_2)
@@ -152,6 +155,8 @@ class CreateEnsemblePass(BasePass):
             else:
                 print("Other sampling")
 
+            num_collisions = 0
+
             # Randomly sample a bunch of psols
             while (num_circs < self.num_circs and trials < self.num_circs * 10):
                 random_inds = inds[:, trials]
@@ -159,16 +164,19 @@ class CreateEnsemblePass(BasePass):
                 # print(total_dist, flush=True)
                 trials += 1
                 if (str(random_inds) in used_inds):
+                    num_collisions += 1
                     continue
                 else:
                     used_inds.add(str(random_inds))
                     circ_list = [psols[i][ind] for i, ind in enumerate(random_inds)]
                     new_config = [CircuitGate(circ) for circ in circ_list]
                     all_combos.append((new_config, total_dist))
-                    # print("Dists: ", [dists[i][ind] for i, ind in enumerate(random_inds)], "Total Dist: ", total_dist, flush=True)
-                    actual_dists = [self.cost.calc_cost(psols[i][ind], targets[i]) for i, ind in enumerate(random_inds)]
+                    if total_dist > self.success_threshold:
+                        print("Dists: ", [dists[i][ind] for i, ind in enumerate(random_inds)], "Thresholds: ", thresholds, flush=True)
+                        print("Total Dist: ", total_dist, "Threshold: ", self.success_threshold, flush=True)
+                    # actual_dists = [self.cost.calc_cost(psols[i][ind], targets[i]) for i, ind in enumerate(random_inds)]
                     # print("Actual Dists: ", actual_dists, flush=True)
-                    frob_dists = [frob_cost.calc_cost(psols[i][ind], targets[i]) for i, ind in enumerate(random_inds)]
+                    # frob_dists = [frob_cost.calc_cost(psols[i][ind], targets[i]) for i, ind in enumerate(random_inds)]
                     # print("Frob Dists: ", frob_dists, flush=True)
                     num_circs += 1
 
@@ -192,7 +200,8 @@ class CreateEnsemblePass(BasePass):
 
             dists = [dist for circ, dist in all_circs_dists]
 
-            print("Final Dists: ", dists, flush=True)
+            # print("Final Dists: ", dists, flush=True)
+            initial_circs = len(dists)
             
             all_circs_dists = [(circ, dist) for circ, dist in all_circs_dists if dist < self.success_threshold]
 
@@ -202,9 +211,9 @@ class CreateEnsemblePass(BasePass):
                 # Get rid of the default case
                 all_circs_dists.pop()
 
-            print("Final Number of Circs: ", len(all_circs_dists), flush=True)
+            # print("Final Number of Circs: ", len(all_circs_dists), flush=True)
 
-            # print("Final Number of Ensemble Circs: ", len(all_circs_dists))
+            print("Possible Solutions: ", possible_solutions, "Initial Circs: ", initial_circs, "Final Circs: ", len(all_circs_dists), "Num Collisions: ", num_collisions, flush=True)
 
             all_ensembles.append(all_circs_dists)
 
@@ -223,15 +232,17 @@ class CreateEnsemblePass(BasePass):
         dists: list[list[float]] = [[] for _ in block_data]
         pts: list[CircuitPoint] = []
         targets: list[UnitaryMatrix] = []
+        thresholds: list[float] = []
 
         num_sols = 1
-        print("PARSING DATA", flush=True)
+        # print("PARSING DATA", flush=True)
 
         for i, block in enumerate(block_data):
             pts.append(block['point'])
             targets.append(block["target"])
             exact_block: Circuit = blocked_circuit[pts[-1]].gate._circuit.copy()  # type: ignore  # noqa
             exact_block.set_params(blocked_circuit[pts[-1]].params)
+            thresholds.append(block["error_percentage_allocated"] * self.success_threshold)
 
             if 'scan_sols' not in block:
                 print("NO SCAN SOLS")
@@ -242,12 +253,12 @@ class CreateEnsemblePass(BasePass):
             num_sols *= len(psols[i])
 
 
-        print([len(psols[i]) for i in range(len(psols))])
-        print("Total Potential Solutions", num_sols)
+        # print([len(psols[i]) for i in range(len(psols))])
+        # print("Total Potential Solutions", num_sols)
 
         self.num_circs = min(self.num_circs, num_sols)
 
-        return psols, pts, dists, targets
+        return psols, pts, dists, targets, thresholds
 
     async def run(self, circuit: Circuit, data: PassData) -> None:
         """Perform the pass's operation, see :class:`BasePass` for more."""
@@ -259,9 +270,9 @@ class CreateEnsemblePass(BasePass):
         if self.use_calculated_error:
             self.success_threshold = self.success_threshold * data["error_percentage_allocated"]
 
-        approx_circs, pts, dists, targets = self.parse_data(circuit, block_data)
+        approx_circs, pts, dists, targets, thresholds = self.parse_data(circuit, block_data)
         
-        all_ensembles: list[tuple[Circuit, float]] = await self.assemble_circuits(circuit, approx_circs, pts, dists=dists, targets=targets, target=data.target)
+        all_ensembles: list[tuple[Circuit, float]] = await self.assemble_circuits(circuit, approx_circs, pts, dists=dists, targets=targets, thresholds=thresholds, target=data.target)
 
         data["scan_sols"] = []
         data["ensemble"] = []

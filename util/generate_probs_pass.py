@@ -45,7 +45,7 @@ class GenerateProbabilityPass(BasePass):
 
         for _ in range(num_reps):
             if self.size > len(ensemble):
-                print("How tf is this possible")
+                print(f"How tf is this possible {len(ensemble)}")
                 # print(ensemble[0])
                 size = len(ensemble)
             else:

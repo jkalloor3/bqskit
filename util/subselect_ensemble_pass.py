@@ -79,7 +79,7 @@ class SubselectEnsemblePass(BasePass):
             new_ensemble_inds = SubselectEnsemblePass.get_inds(k_means.labels_, self.num_circs)
             new_ensemble = [ensemble[i] for i in new_ensemble_inds]
 
-            # print("Final Ensemble Size", len(new_ensemble), flush=True)
+            print("Post sub-select Ensemble Size", len(new_ensemble), flush=True)
 
             all_ensembles.append(new_ensemble)
 
