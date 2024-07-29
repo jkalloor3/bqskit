@@ -13,7 +13,6 @@ from bqskit.runtime import get_runtime
 import pickle
 from bqskit.ir.opt.cost.functions import  HilbertSchmidtCostGenerator, FrobeniusNoPhaseCostGenerator
 from bqskit.ir.opt.minimizers.lbfgs import LBFGSMinimizer
-from qfactorjax.qfactor import QFactorJax
 
 from util import SecondLEAPSynthesisPass, SubselectEnsemblePass, GenerateProbabilityPass, SelectFinalEnsemblePass
 
@@ -27,7 +26,7 @@ from os.path import join
 
 from util import save_circuits, load_circuit, FixGlobalPhasePass, CalculateErrorBoundPass
 
-enable_logging(True)
+# enable_logging(True)
 
 def get_distance(circ1: Circuit) -> float:
     global target
@@ -89,12 +88,22 @@ def get_shortest_circuits(circ_name: str, tol: int, timestep: int,
         max_psols=3
     )
 
+    fast_partitioner_passes = [
+        QuickPartitioner(block_size=big_block_size),
+        ForEachBlockPass(
+            [ScanPartitioner(block_size=small_block_size)],
+        )
+    ]
+
+    good_partitioner_passes = [
+        ScanPartitioner(block_size=small_block_size),
+        ScanPartitioner(block_size=big_block_size)
+    ]
+
+
     leap_workflow = [
         CheckpointRestartPass(checkpoint_dir, 
-                                default_passes=[
-                                    ScanPartitioner(block_size=small_block_size),
-                                    ScanPartitioner(block_size=big_block_size),
-                                ]),
+                                default_passes=fast_partitioner_passes),
         ForEachBlockPass(
             [
                 ForEachBlockPass(
@@ -125,7 +134,7 @@ def get_shortest_circuits(circ_name: str, tol: int, timestep: int,
         ),
         SelectFinalEnsemblePass(size=500)
     ]
-    num_workers = 256
+    num_workers = 128
     compiler = Compiler(num_workers=num_workers)
     # target = circ.get_unitary()
     out_circ, data = compiler.compile(circ, workflow=leap_workflow, request_data=True)
