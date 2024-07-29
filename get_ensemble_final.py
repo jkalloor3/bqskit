@@ -27,7 +27,7 @@ from os.path import join
 
 from util import save_circuits, load_circuit, FixGlobalPhasePass, CalculateErrorBoundPass
 
-enable_logging(True)
+# enable_logging(True)
 
 def get_distance(circ1: Circuit) -> float:
     global target
@@ -125,7 +125,7 @@ def get_shortest_circuits(circ_name: str, tol: int, timestep: int,
         ),
         SelectFinalEnsemblePass(size=500)
     ]
-    num_workers = 256
+    num_workers = 32
     compiler = Compiler(num_workers=num_workers)
     # target = circ.get_unitary()
     out_circ, data = compiler.compile(circ, workflow=leap_workflow, request_data=True)
@@ -145,7 +145,7 @@ if __name__ == '__main__':
     circs, error_bound, count = get_shortest_circuits(circ_name, tol, timestep, num_unique_circs=num_unique_circs)
     sorted_circs = sorted(circs, key=lambda c: c.count(CNOTGate()))
     circ = load_circuit(circ_name)
-    target = circ.get_unitary()
+    # target = circ.get_unitary()
     print("Error Bound", error_bound)
     # print("Actual Error", actual_error)
     print("Lowest Count", count)

@@ -167,9 +167,6 @@ class SecondLEAPSynthesisPass(BasePass):
                 assert(isinstance(c, Circuit))
 
             utries = [(c.get_unitary(), datas[i], save_data_files[i]) for i, c in enumerate(circs)]
-            if self.use_calculated_error:
-                new_success_threshold = self.success_threshold * data["error_percentage_allocated"]
-                self.success_threshold = new_success_threshold
 
             new_circs: list[list[Circuit]] = await get_runtime().map(
                 self.synthesize_circ,
@@ -214,17 +211,25 @@ class SecondLEAPSynthesisPass(BasePass):
         utry_data: tuple[UnitaryMatrix | StateVector | StateSystem, PassData, str | None],
     ) -> list[Circuit]:
         """Synthesize `utry`, see :class:`SynthesisPass` for more."""
+
+        utry, data, save_data_file = utry_data
+        if self.use_calculated_error:
+            success_threshold = self.success_threshold * data["error_percentage_allocated"]
+            partial_success_threshold = self.partial_success_threshold * data["error_percentage_allocated"]
+            # self.success_threshold = new_success_threshold
+        else:
+            success_threshold = self.success_threshold
+            partial_success_threshold = self.partial_success_threshold
+
         # Initialize run-dependent options
         instantiate_options = self.instantiate_options.copy()
-        instantiate_options['ftol'] = self.success_threshold
-        
-        utry, data, save_data_file = utry_data
+        instantiate_options['ftol'] = success_threshold
 
         frontier = data.get("frontier", None)
 
         if data.get("second_leap_finished", False):
             _logger.debug('Block is already finished!')
-            print(f"Block is finished!", flush=True)
+            # print(f"Block is finished!", flush=True)
             return data['scan_sols']
 
         # Seed the PRNG
@@ -255,7 +260,7 @@ class SecondLEAPSynthesisPass(BasePass):
             _logger.debug(f'Search started, initial layer has cost: {best_dist}.')
 
             # Evalute initial layer
-            if best_dist < self.success_threshold:
+            if best_dist < success_threshold:
                 _logger.debug('Successful synthesis.')
                 scan_sols.append(initial_layer.copy())
                 data['scan_sols'] = scan_sols
@@ -323,7 +328,7 @@ class SecondLEAPSynthesisPass(BasePass):
             for circuit in circuits:
                 dist = self.cost.calc_cost(circuit, utry)
 
-                if dist < self.partial_success_threshold:
+                if dist < partial_success_threshold:
                     scan_sols.append(circuit.copy())
                     data['scan_sols'] = scan_sols
                     if len(scan_sols) >= self.max_psols:
@@ -334,7 +339,7 @@ class SecondLEAPSynthesisPass(BasePass):
                             pickle.dump(data, open(save_data_file, "wb"))
                         return scan_sols
 
-                if dist < self.success_threshold:
+                if dist < success_threshold:
                     _logger.debug(f'Successful synthesis with distance {dist:.6e}.')
                     if save_data_file:
                         data["second_leap_finished"] = True
@@ -342,7 +347,7 @@ class SecondLEAPSynthesisPass(BasePass):
                         pickle.dump(data, open(save_data_file, "wb"))
                     return scan_sols
 
-                if self.check_new_best(layer + 1, dist, best_layer, best_dist):
+                if self.check_new_best(layer + 1, dist, best_layer, best_dist, success_threshold):
                     plural = '' if layer == 0 else 's'
                     _logger.debug(
                         f'New best circuit found with {layer + 1} layer{plural}'
@@ -385,6 +390,7 @@ class SecondLEAPSynthesisPass(BasePass):
         dist: float,
         best_layer: int,
         best_dist: float,
+        success_threshold: float,
     ) -> bool:
         """
         Check if the new layer depth and dist are a new best node.
@@ -401,12 +407,12 @@ class SecondLEAPSynthesisPass(BasePass):
         better_layer = (
             dist < best_dist
             and (
-                best_dist >= self.success_threshold
+                best_dist >= success_threshold
                 or layer <= best_layer
             )
         )
         better_dist_and_layer = (
-            dist < self.success_threshold and layer < best_layer
+            dist < success_threshold and layer < best_layer
         )
         return better_layer or better_dist_and_layer
 
@@ -498,7 +504,9 @@ class SecondLEAPSynthesisPass(BasePass):
                     datas[i]['frontier'] = None
                     pickle.dump(datas[i], df)
             elif save_data_file and exists(save_data_file):
-                frontier: Frontier | None = datas[i]['frontier']
+                with open(save_data_file, 'rb') as df:
+                    datas[i] = pickle.load(df)
+                frontier: Frontier | None = datas[i].get("frontier", None)
                 if frontier is None:
                     _logger.debug("How is this possible for frontier?")
                 else:

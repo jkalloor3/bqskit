@@ -182,9 +182,12 @@ class LEAPSynthesisPass(SynthesisPass):
         instantiate_options = self.instantiate_options.copy()
 
         if self.use_calculated_error:
-            self.success_threshold = self.success_threshold * data["error_percentage_allocated"]
-            self.partial_success_threshold = self.partial_success_threshold * data["error_percentage_allocated"]
+            success_threshold = self.success_threshold * data["error_percentage_allocated"]
+            partial_success_threshold = self.partial_success_threshold * data["error_percentage_allocated"]
             instantiate_options['ftol'] = self.success_threshold
+        else:
+            success_threshold = self.success_threshold
+            partial_success_threshold = self.partial_success_threshold
         # Seed the PRNG
         if 'seed' not in instantiate_options:
             instantiate_options['seed'] = data.seed
@@ -215,7 +218,7 @@ class LEAPSynthesisPass(SynthesisPass):
             _logger.debug(f'Search started, initial layer has cost: {best_dist}.')
 
             # Evalute initial layer
-            if best_dist < self.success_threshold:
+            if best_dist < success_threshold:
                 _logger.debug('Successful synthesis.')
                 scan_sols.append(initial_layer.copy())
                 data['scan_sols'] = scan_sols
@@ -278,7 +281,7 @@ class LEAPSynthesisPass(SynthesisPass):
                 circ_count = circuit.count(CNOTGate())
 
                 if self.store_partial_solutions:
-                    if dist < self.partial_success_threshold and circ_count <= default_count:
+                    if dist < partial_success_threshold and circ_count <= default_count:
                         scan_sols.append(circuit.copy())
                         data['psols'] = psols
                         data['scan_sols'] = scan_sols
@@ -299,7 +302,7 @@ class LEAPSynthesisPass(SynthesisPass):
                         psols[layer].sort(key=lambda x: x[1])
                         del psols[layer][-1]
 
-                if dist < self.success_threshold:
+                if dist < success_threshold:
                     _logger.debug(f'Successful synthesis with distance {dist:.6e}.')
                     if self.store_partial_solutions:
                         data['psols'] = psols
@@ -321,7 +324,7 @@ class LEAPSynthesisPass(SynthesisPass):
 
                     return max_circ
 
-                if self.check_new_best(layer + 1, dist, best_layer, best_dist):
+                if self.check_new_best(layer + 1, dist, best_layer, best_dist, success_threshold):
                     plural = '' if layer == 0 else 's'
                     _logger.debug(
                         f'New best circuit found with {layer + 1} layer{plural}'
@@ -378,6 +381,7 @@ class LEAPSynthesisPass(SynthesisPass):
         dist: float,
         best_layer: int,
         best_dist: float,
+        success_threshold: float,
     ) -> bool:
         """
         Check if the new layer depth and dist are a new best node.
@@ -394,12 +398,12 @@ class LEAPSynthesisPass(SynthesisPass):
         better_layer = (
             dist < best_dist
             and (
-                best_dist >= self.success_threshold
+                best_dist >= success_threshold
                 or layer <= best_layer
             )
         )
         better_dist_and_layer = (
-            dist < self.success_threshold and layer < best_layer
+            dist < success_threshold and layer < best_layer
         )
         return better_layer or better_dist_and_layer
 

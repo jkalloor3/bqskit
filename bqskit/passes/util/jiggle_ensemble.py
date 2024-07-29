@@ -61,9 +61,10 @@ class  JiggleEnsemblePass(BasePass):
         return circ_copy
 
     async def single_jiggle(self, params, circ, dist, target, num):
-        print("Starting Jiggle", flush=True)
+        # print("Starting Jiggle", flush=True)
         start = time.time()
         circs = []
+        unique_unitaries = []
         for _ in range(num):
             circ_cost = self.cost.calc_cost(circ, target)
             cost_fn = self.cost.gen_cost(circ.copy(), target)
@@ -99,9 +100,20 @@ class  JiggleEnsemblePass(BasePass):
             # print(circ_cost, self.success_threshold, trials)
             circ_copy = circ.copy()
             circ_copy.set_params(best_params)
+            # Debugging:
+            new_un = circ_copy.get_unitary()
+            unique = True
+            for un in unique_unitaries:
+                if np.allclose(un[0], new_un):
+                    print("DUPLICATE! Old Params:", un[1], " New Params:", best_params)
+                    unique = False
+                    break
+            
+            if unique:
+                unique_unitaries.append((new_un, best_params))
             circs.append(circ_copy)
         JiggleEnsemblePass.num_jiggles += 1
-        print(f"Single Jiggle ({JiggleEnsemblePass.num_jiggles}) time {time.time() - start}", flush=True)
+        # print(f"Single Jiggle ({JiggleEnsemblePass.num_jiggles}) time {time.time() - start}", flush=True)
         return circs
 
 
@@ -119,10 +131,10 @@ class  JiggleEnsemblePass(BasePass):
             params = circ.params
         all_circs = []
 
-        print(f"Awaiting All {num_circs // 50} Jiggles")
+        # print(f"Awaiting All {num_circs // 50} Jiggles")
         all_circs = await get_runtime().map(self.single_jiggle, [params] * (num_circs // 50), circ=circ, dist=dist, target=target, num=50)
         all_circs = list(chain.from_iterable(all_circs))
-        print("Done All Jiggles")
+        # print("Done All Jiggles"pyth)
         return all_circs
 
 
@@ -131,7 +143,7 @@ class  JiggleEnsemblePass(BasePass):
         _logger.debug('Converting single-qubit general gates to U3Gates.')
 
         # Collected one solution from synthesis
-        print("Starting JIGGLE ENSEMBLE")
+        # print("Starting JIGGLE ENSEMBLE")
 
         params = circuit.params
 
