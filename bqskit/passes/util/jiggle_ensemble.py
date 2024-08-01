@@ -132,7 +132,7 @@ class  JiggleEnsemblePass(BasePass):
         all_circs = []
 
         # print(f"Awaiting All {num_circs // 50} Jiggles")
-        all_circs = await get_runtime().map(self.single_jiggle, [params] * (num_circs // 50), circ=circ, dist=dist, target=target, num=50)
+        all_circs = await get_runtime().map(self.single_jiggle, [params] * ceil(num_circs / 50), circ=circ, dist=dist, target=target, num=50)
         all_circs = list(chain.from_iterable(all_circs))
         # print("Done All Jiggles"pyth)
         return all_circs
