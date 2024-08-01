@@ -89,10 +89,8 @@ def get_shortest_circuits(circ_name: str, tol: int, timestep: int,
     )
 
     fast_partitioner_passes = [
-        QuickPartitioner(block_size=big_block_size),
-        ForEachBlockPass(
-            [ScanPartitioner(block_size=small_block_size)],
-        )
+        QuickPartitioner(block_size=small_block_size),
+        QuickPartitioner(block_size=big_block_size)
     ]
 
     good_partitioner_passes = [

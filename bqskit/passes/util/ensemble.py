@@ -113,6 +113,8 @@ class CreateEnsemblePass(BasePass):
         default_inds = [[-1] for _ in range(len(psols))]
         random_inds = [[] for _ in range(len(psols))]
         possible_solutions = 1
+
+        print("LEN PSOLS", len(psols))
         for i in range(len(psols)):
             assert(len(psols[i]) > 0)
             numbers = np.arange(0, len(psols[i]))
