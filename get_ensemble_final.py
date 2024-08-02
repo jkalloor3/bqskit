@@ -88,20 +88,24 @@ def get_shortest_circuits(circ_name: str, tol: int, timestep: int,
         max_psols=3
     )
 
+    slow_partitioner_passes = [
+        ScanPartitioner(block_size=small_block_size),
+        ScanPartitioner(block_size=big_block_size),
+    ]
+
     fast_partitioner_passes = [
         QuickPartitioner(block_size=small_block_size),
-        QuickPartitioner(block_size=big_block_size)
+        QuickPartitioner(block_size=big_block_size),
     ]
 
-    good_partitioner_passes = [
-        ScanPartitioner(block_size=small_block_size),
-        ScanPartitioner(block_size=big_block_size)
-    ]
-
+    if circ.num_qudits > 20:
+        partitioner_passes = fast_partitioner_passes
+    else:
+        partitioner_passes = slow_partitioner_passes
 
     leap_workflow = [
         CheckpointRestartPass(checkpoint_dir, 
-                                default_passes=fast_partitioner_passes),
+                                default_passes=partitioner_passes),
         ForEachBlockPass(
             [
                 ForEachBlockPass(

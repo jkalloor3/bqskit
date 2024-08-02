@@ -24,6 +24,7 @@ from itertools import chain
 from sklearn.cluster import KMeans
 from sklearn.decomposition import PCA
 from sklearn.manifold import TSNE
+import pickle
 
 
 _logger = logging.getLogger(__name__)
@@ -65,6 +66,10 @@ class SubselectEnsemblePass(BasePass):
         all_ensembles = []
         original_ensembles = data["ensemble"]
 
+        if "finished_subselect" in data:
+            print("Already Subselected", flush=True)
+            return
+
         for ensemble in data["ensemble"]:
 
             ensemble_vec = np.array([c.get_unitary().get_flat_vector() for c in ensemble])
@@ -85,6 +90,11 @@ class SubselectEnsemblePass(BasePass):
 
         data["original_ensemble"] = original_ensembles
         data["ensemble"] = all_ensembles
+
+        if "checkpoint_dir" in data:
+            data["finished_subselect"] = True
+            checkpoint_data_file = data["checkpoint_data_file"]
+            pickle.dump(data, open(checkpoint_data_file, "wb"))
 
         return
 
