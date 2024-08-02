@@ -16,6 +16,7 @@ from bqskit.ir.gates import CircuitGate
 from bqskit.ir.gates import CNOTGate
 from bqskit.qis import UnitaryMatrix
 import numpy as np
+import pickle
 
 _logger = logging.getLogger(__name__)
 
@@ -148,12 +149,12 @@ class CreateEnsemblePass(BasePass):
         all_ensembles = []
 
         for k, inds in enumerate(all_inds):
-            if k == 0:
-                print("CNOT based sampling")
-            elif k == 1:
-                print("CNOT sqrt based sampling")
-            else:
-                print("Other sampling")
+            # if k == 0:
+            #     print("CNOT based sampling")
+            # elif k == 1:
+            #     print("CNOT sqrt based sampling")
+            # else:
+            #     print("Other sampling")
 
             num_collisions = 0
 
@@ -205,6 +206,12 @@ class CreateEnsemblePass(BasePass):
             
             all_circs_dists = [(circ, dist) for circ, dist in all_circs_dists if dist < self.success_threshold]
 
+            if len(all_circs_dists) == 0:
+                print(all_circs_dists, flush=True)
+                print("No Circuits Found", flush=True)
+                return None
+
+
             assert len(all_circs_dists) > 0
 
             if len(all_circs_dists) > 1:
@@ -213,7 +220,7 @@ class CreateEnsemblePass(BasePass):
 
             # print("Final Number of Circs: ", len(all_circs_dists), flush=True)
 
-            print("Possible Solutions: ", possible_solutions, "Initial Circs: ", initial_circs, "Final Circs: ", len(all_circs_dists), "Num Collisions: ", num_collisions, flush=True)
+            # print("Possible Solutions: ", possible_solutions, "Initial Circs: ", initial_circs, "Final Circs: ", len(all_circs_dists), "Num Collisions: ", num_collisions, flush=True)
 
             all_ensembles.append(all_circs_dists)
 
@@ -267,12 +274,22 @@ class CreateEnsemblePass(BasePass):
         # Get scan_sols for each circuit_gate
         block_data = data[ForEachBlockPass.key]
 
+
         if self.use_calculated_error:
             self.success_threshold = self.success_threshold * data["error_percentage_allocated"]
 
         approx_circs, pts, dists, targets, thresholds = self.parse_data(circuit, block_data)
+
+        if "finished_create_ensemble" in data:
+            print("Ensemble Already Found", flush=True)
+            return
         
         all_ensembles: list[tuple[Circuit, float]] = await self.assemble_circuits(circuit, approx_circs, pts, dists=dists, targets=targets, thresholds=thresholds, target=data.target)
+
+        if all_ensembles is None:
+            print("No Circuits Found", flush=True)
+            print(circuit, flush=True)
+            exit(1)
 
         data["scan_sols"] = []
         data["ensemble"] = []
@@ -282,6 +299,12 @@ class CreateEnsemblePass(BasePass):
 
             data["scan_sols"].append(all_circs)
             data["ensemble"].append([circ for circ, dist in all_circs])
+
+        if "checkpoint_dir" in data:
+            checkpoint_data_file = data["checkpoint_data_file"]
+            data["finished_create_ensemble"] = True
+            pickle.dump(data, open(checkpoint_data_file, "wb"))
+        
         return
 
         

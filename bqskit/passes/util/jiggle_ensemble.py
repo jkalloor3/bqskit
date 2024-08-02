@@ -17,6 +17,8 @@ import numpy as np
 from math import ceil
 from itertools import chain
 import time
+import pickle 
+
 _logger = logging.getLogger(__name__)
 
 
@@ -62,9 +64,9 @@ class  JiggleEnsemblePass(BasePass):
 
     async def single_jiggle(self, params, circ, dist, target, num):
         # print("Starting Jiggle", flush=True)
-        start = time.time()
+        # start = time.time()
         circs = []
-        unique_unitaries = []
+        # unique_unitaries = []
         for _ in range(num):
             circ_cost = self.cost.calc_cost(circ, target)
             cost_fn = self.cost.gen_cost(circ.copy(), target)
@@ -74,14 +76,13 @@ class  JiggleEnsemblePass(BasePass):
             best_params = np.array(params.copy(), dtype=np.float64)
 
             extra_diff = max(self.success_threshold - dist, self.success_threshold / len(params))
-            # extra_diff = self.success_threshold * 10
 
-
-            while circ_cost < self.success_threshold and trials < 50:
-                if len(params) < 30:
-                    num_params_to_jiggle = len(params) - 1
+            while trials < 20:
+                trial_costs = []
+                if len(params) < 10:
+                    num_params_to_jiggle = ceil(len(params) / 2)
                 else:
-                    num_params_to_jiggle = int(np.random.uniform() * len(params) / 2) + len(params) // 10
+                    num_params_to_jiggle = int(np.random.uniform() * len(params) / 2) + ceil(len(params) / 10)
                 # num_params_to_jiggle = len(params)
                 params_to_jiggle = np.random.choice(list(range(len(params))), num_params_to_jiggle, replace=False)
                 jiggle_amounts = np.random.uniform(-1 * extra_diff, extra_diff, num_params_to_jiggle)
@@ -89,9 +90,13 @@ class  JiggleEnsemblePass(BasePass):
                 next_params = best_params.copy()
                 next_params[params_to_jiggle] = next_params[params_to_jiggle] + jiggle_amounts
                 circ_cost = cost_fn(next_params)
+                trial_costs.append(circ_cost)
                 if (circ_cost < self.success_threshold):
                     extra_diff = extra_diff * 1.5
                     best_params = next_params
+                    # Randomly choose to finish early
+                    if np.random.uniform() < 0.2 and trials > 4:
+                        break
                 else:
                     extra_diff = extra_diff / 10
                     # print("Too Big of cost, changing diff to ", extra_diff, flush=True)
@@ -101,16 +106,16 @@ class  JiggleEnsemblePass(BasePass):
             circ_copy = circ.copy()
             circ_copy.set_params(best_params)
             # Debugging:
-            new_un = circ_copy.get_unitary()
-            unique = True
-            for un in unique_unitaries:
-                if np.allclose(un[0], new_un):
-                    print("DUPLICATE! Old Params:", un[1], " New Params:", best_params)
-                    unique = False
-                    break
+            # new_un = circ_copy.get_unitary()
+            # unique = True
+            # for un in unique_unitaries:
+            #     if np.allclose(un[0], new_un):
+            #         print("DUPLICATE! Old Params == New Params:", np.allclose(un[1], best_params), " Trial Params", trial_costs, flush=True)
+            #         unique = False
+            #         break
             
-            if unique:
-                unique_unitaries.append((new_un, best_params))
+            # if unique:
+            #     unique_unitaries.append((new_un, best_params))
             circs.append(circ_copy)
         JiggleEnsemblePass.num_jiggles += 1
         # print(f"Single Jiggle ({JiggleEnsemblePass.num_jiggles}) time {time.time() - start}", flush=True)
@@ -134,7 +139,7 @@ class  JiggleEnsemblePass(BasePass):
         # print(f"Awaiting All {num_circs // 50} Jiggles")
         all_circs = await get_runtime().map(self.single_jiggle, [params] * ceil(num_circs / 50), circ=circ, dist=dist, target=target, num=50)
         all_circs = list(chain.from_iterable(all_circs))
-        # print("Done All Jiggles"pyth)
+        # print("Done All Jiggles")
         return all_circs
 
 
@@ -156,6 +161,9 @@ class  JiggleEnsemblePass(BasePass):
             self.success_threshold = self.success_threshold * data["error_percentage_allocated"]
             print("NEW", self.success_threshold)
 
+        if "finished_jiggle" in data:
+            print("Already Jiggled", flush=True)
+            return
 
         for scan_sols in data["scan_sols"]:
             all_circs = []
@@ -176,10 +184,16 @@ class  JiggleEnsemblePass(BasePass):
                                                 target=data.target,
                                                 num_circs = ceil(self.num_circs / len(circuits)))
 
-            print("Done Jiggling Circs")
             all_circs = list(chain.from_iterable(all_circs))
-            print("Number of Circs", len(all_circs))
+            print("Number of Circs post Jiggle", len(all_circs))
             data["ensemble"].append(all_circs)
+        
+        if "checkpoint_dir" in data:
+            data["finished_jiggle"] = True
+            checkpoint_data_file = data["checkpoint_data_file"]
+            pickle.dump(data, open(checkpoint_data_file, "wb"))
+
+
         return
 
         
