@@ -64,13 +64,17 @@ class SubselectEnsemblePass(BasePass):
     async def run(self, circuit: Circuit, data: PassData) -> None:
         """Perform the pass's operation, see :class:`BasePass` for more."""
         all_ensembles = []
-        original_ensembles = data["ensemble"]
+        # original_ensembles = data["ensemble"]
 
-        if "finished_subselect" in data:
-            print("Already Subselected", flush=True)
-            return
+        # if "finished_subselect" in data:
+        #     print("Already Subselected", flush=True)
+        #     return
+
+        data["finished_subselect"] = False
 
         for ensemble in data["ensemble"]:
+
+            print("Pre sub-select Ensemble Size", len(ensemble), flush=True)
 
             ensemble_vec = np.array([c.get_unitary().get_flat_vector() for c in ensemble])
             # print("Running Subselect Ensemble Pass!", flush=True)
@@ -88,8 +92,8 @@ class SubselectEnsemblePass(BasePass):
 
             all_ensembles.append(new_ensemble)
 
-        data["original_ensemble"] = original_ensembles
-        data["ensemble"] = all_ensembles
+        # data["original_ensemble"] = original_ensembles
+        data["sub_select_ensemble"] = all_ensembles
 
         if "checkpoint_dir" in data:
             data["finished_subselect"] = True

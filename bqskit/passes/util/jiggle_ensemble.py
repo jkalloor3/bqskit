@@ -161,9 +161,11 @@ class  JiggleEnsemblePass(BasePass):
             self.success_threshold = self.success_threshold * data["error_percentage_allocated"]
             print("NEW", self.success_threshold)
 
-        if "finished_jiggle" in data:
-            print("Already Jiggled", flush=True)
-            return
+        # if "finished_jiggle" in data:
+        #     print("Already Jiggled", flush=True)
+        #     return
+
+        # data["finished_jiggle"] = False
 
         for scan_sols in data["scan_sols"]:
             all_circs = []

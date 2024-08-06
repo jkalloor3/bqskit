@@ -117,10 +117,17 @@ class GenerateProbabilityPass(BasePass):
     ) -> None:
 
         print("Running Generate Probability Pass", flush=True)
-        all_ensembles: list[list[Circuit]] = data["ensemble"]
+        all_ensembles: list[list[Circuit]] = data["sub_select_ensemble"]
         all_ensemble_unitaries: list[np.ndarray] = [np.array([circ.get_unitary().numpy for circ in ensemble]) for ensemble in all_ensembles]
 
         data["ensemble_unitaries"] = all_ensemble_unitaries
+
+        if len(all_ensembles) == 0:
+            print("No ensembles to choose from")
+            print(circuit)
+            print(data.target)
+            all_ensembles: list[list[Circuit]] = data["ensemble"]
+            all_ensemble_unitaries: list[np.ndarray] = [np.array([circ.get_unitary().numpy for circ in ensemble]) for ensemble in all_ensembles]
 
         # For each ensemble, calculate chi_1 and chi_2
         chis = await get_runtime().map(self.calculate_chi_1_chi_2, all_ensemble_unitaries)
@@ -147,6 +154,7 @@ class GenerateProbabilityPass(BasePass):
         data["final_ensemble"] = best_ensemble
 
         # Now calculate the probability for this ensemble
+
         data["final_ensemble_probs"] = await self.calculate_probs(best_ensemble_unitaries, data.target)
 
         print("Calculated Probabilities")

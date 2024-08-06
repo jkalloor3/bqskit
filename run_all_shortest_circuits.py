@@ -36,8 +36,8 @@ if __name__ == '__main__':
     # circs = ["Heisenberg_7"] #, 
     # circs = ["Heisenberg_7", "TFXY_8"]
     # circs = ["tfxy_6", "qc_binary_5q"] #, "qc_gray_5q", "qc_optimized_5q"]
-    # circs = ["heisenberg7", "vqe_12", "shor_12", "qml_19", "qml_25"]
-    circs = [f"qft_{i}" for i in range(8, 24, 2)]
+    circs = ["heisenberg7", "vqe_12", "shor_12", "qml_19", "qml_25"]
+    # circs = [f"qft_{i}" for i in range(8, 24, 2)]
     # circs = ["hubbard_4"]
     # circs =  ["shor_12", "qft_10", "vqe_12"]
     # tols = range(1, 7)
