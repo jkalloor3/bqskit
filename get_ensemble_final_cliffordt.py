@@ -126,7 +126,7 @@ def get_shortest_circuits(circ_name: str, tol: int, timestep: int,
         ),
         SelectFinalEnsemblePass(size=500)
     ]
-    num_workers = 32
+    num_workers = 24
     compiler = Compiler(num_workers=num_workers)
     target = circ.get_unitary()
     out_circ, data = compiler.compile(circ, workflow=leap_workflow, request_data=True)

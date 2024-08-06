@@ -43,10 +43,11 @@ class FixedRZGate(ConstantGate, QubitGate):
 
 class ConvertToZXZXZ(BasePass):
 
-    def __init__(self, success_threshold: float = 1e-8, sub_epsilon: float = 1e-1, num_circs: int = 100):
+    def __init__(self, success_threshold: float = 1e-8, sub_epsilon: float = 1e-1, num_circs: int = 100, use_calculated_error: bool = True):
         self.success_threshold = success_threshold
         self.sub_epsilon = sub_epsilon
         self.num_circs = num_circs
+        self.use_calculated_error = use_calculated_error
 
     def get_all_zxzxz_decomps(self) -> list[Circuit]:
         # Try to fix 1 angle in ZXZXZ decomposition
@@ -106,8 +107,8 @@ class ConvertToZXZXZ(BasePass):
         locs = []
         print(circuit.gate_counts)
 
-        if "finished_zxzxz" in data:
-            return
+        # if "finished_zxzxz" in data:
+        #     return
         
         if self.use_calculated_error:
             print("OLD", self.success_threshold)
@@ -125,7 +126,7 @@ class ConvertToZXZXZ(BasePass):
 
         if len(targets) == 0:
             # Nothing to do
-            data["scan_sols"] = [circuit.copy()]
+            data["scan_sols"] = [(circuit.copy(), 0)]
             print("NO U3 GATES")
             return
 
@@ -151,13 +152,14 @@ class ConvertToZXZXZ(BasePass):
 
         dists = [cost.calc_cost(circ, data.target) for circ in new_circs]
 
-        new_circs = [circ for circ, dist in zip(new_circs, dists) if dist < success_threshold][:self.num_circs]
+        new_circs = [(circ, dist) for circ, dist in zip(new_circs, dists) if dist < success_threshold][:self.num_circs]
 
         tcount_approx = lambda circ: circ.count(RZGate()) * 30
-        counts = [tcount_approx(circ) for circ in new_circs]
+        counts = [tcount_approx(circ[0]) for circ in new_circs]
 
-        print("Final Dists: ", dists)
+        # print("Final Dists: ", dists)
         print("Final Counts: ", counts)
+        print("Final Scan Sols: ", new_circs)
 
         data["scan_sols"] = new_circs
 

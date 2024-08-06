@@ -13,7 +13,6 @@ from bqskit.runtime import get_runtime
 import pickle
 from bqskit.ir.opt.cost.functions import  HilbertSchmidtCostGenerator, FrobeniusNoPhaseCostGenerator
 from bqskit.ir.opt.minimizers.lbfgs import LBFGSMinimizer
-from qfactorjax.qfactor import QFactorJax
 
 from util import SecondLEAPSynthesisPass, SubselectEnsemblePass, GenerateProbabilityPass, SelectFinalEnsemblePass
 
