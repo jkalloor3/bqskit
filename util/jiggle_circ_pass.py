@@ -14,6 +14,8 @@ cost_1 = FrobeniusCostGenerator()
 
 cost = HilbertSchmidtCostGenerator()
 
+cost_3 = FrobeniusNoPhaseCostGenerator()
+
 
 class  GetErrorsPass(BasePass):
     """Converts single-qubit general unitary gates to U3 Gates."""
@@ -25,7 +27,9 @@ class  GetErrorsPass(BasePass):
 
         full_dist_2 = cost_1.calc_cost(unfolded_circ, data.target)
 
-        print(full_dist, full_dist_2, flush=True)
+        full_dist_3 = cost_3.calc_cost(unfolded_circ, data.target)
+
+        print(full_dist, full_dist_2, full_dist_3, flush=True)
 
         assert np.allclose(full_dist, np.sqrt(full_dist_2))
         # full_dist = dist_cost(unfolded_circ.get_unitary(), data.target)

@@ -161,9 +161,9 @@ class  JiggleEnsemblePass(BasePass):
             self.success_threshold = self.success_threshold * data["error_percentage_allocated"]
             print("NEW", self.success_threshold)
 
-        # if "finished_jiggle" in data:
-        #     print("Already Jiggled", flush=True)
-        #     return
+        if "finished_jiggle" in data and len(data["ensemble"]) > 0 and len(data["ensemble"][0]) > 0:
+            print("Already Jiggled", flush=True)
+            return
 
         # data["finished_jiggle"] = False
 

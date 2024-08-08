@@ -216,7 +216,7 @@ class ForEachBlockPass(BasePass):
             data[self.key].append([])
             return
         
-        print("NUMBER OF BLOCKS", len(blocks))
+        # print("NUMBER OF BLOCKS", len(blocks))
         # Get the machine model
         model = data.model
         coupling_graph = data.connectivity

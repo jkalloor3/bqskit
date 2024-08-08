@@ -13,8 +13,10 @@ from bqskit.runtime import get_runtime
 import pickle
 from bqskit.ir.opt.cost.functions import  HilbertSchmidtCostGenerator, FrobeniusNoPhaseCostGenerator
 from bqskit.ir.opt.minimizers.lbfgs import LBFGSMinimizer
+from bqskit.passes import ScanningGateRemovalPass
 
-from util import SecondLEAPSynthesisPass, SubselectEnsemblePass, GenerateProbabilityPass, SelectFinalEnsemblePass
+
+from util import SecondLEAPSynthesisPass, SubselectEnsemblePass, GenerateProbabilityPass, SelectFinalEnsemblePass, LEAPSynthesisPass2, QSearchSynthesisPass2
 
 from bqskit import enable_logging
 
@@ -41,7 +43,7 @@ def get_shortest_circuits(circ_name: str, tol: int, timestep: int,
     err_thresh = np.sqrt(10 ** (-1 * tol))
     extra_err_thresh = 3e-2 * err_thresh
     phase_generator = HilbertSchmidtCostGenerator()
-    big_block_size = 7
+    big_block_size = 8
     small_block_size = 3
     checkpoint_dir = f"fixed_block_checkpoints/{circ_name}_{timestep}_{tol}_{big_block_size}_{small_block_size}/"
     # proj_name = f"{circ_name}_{timestep}_{tol}_final"
@@ -59,34 +61,14 @@ def get_shortest_circuits(circ_name: str, tol: int, timestep: int,
         # 'method': 'qfactor',
     }
 
-    # fast_instantiation_options = {
-    #         # 'multistarts': 1,
-    #         'ftol': extra_err_thresh,
-    #         'diff_tol_r': 1e-3,
-    #         'max_iters': 10000,
-    #         'min_iters': 100,
-    # }
-
-    synthesis_pass = LEAPSynthesisPass(
-        store_partial_solutions=True,
-        layer_generator=layer_gen,
-        success_threshold = extra_err_thresh,
-        partial_success_threshold=err_thresh,
-        cost=phase_generator,
-        instantiate_options=fast_instantiation_options,
-        use_calculated_error=True,
-        max_psols=5
-    )
-
-    second_synthesis_pass = SecondLEAPSynthesisPass(
-        success_threshold = extra_err_thresh,
-        layer_generator=layer_gen,
-        partial_success_threshold=err_thresh,
-        cost=phase_generator,
-        instantiate_options=fast_instantiation_options,
-        use_calculated_error=True,
-        max_psols=3
-    )
+    good_instantiation_options = {
+        'multistarts': 8,
+        'ftol': 5e-16,
+        'gtol': 1e-15,
+        'diff_tol_r': 1e-6,
+        'max_iters': 100000,
+        'min_iters': 1000,
+    }
 
     slow_partitioner_passes = [
         ScanPartitioner(block_size=small_block_size),
@@ -100,8 +82,33 @@ def get_shortest_circuits(circ_name: str, tol: int, timestep: int,
 
     if circ.num_qudits > 20:
         partitioner_passes = fast_partitioner_passes
+        instantiation_options = fast_instantiation_options
     else:
         partitioner_passes = slow_partitioner_passes
+        instantiation_options = good_instantiation_options
+
+
+    synthesis_pass = LEAPSynthesisPass2(
+        store_partial_solutions=True,
+        layer_generator=layer_gen,
+        success_threshold = extra_err_thresh,
+        partial_success_threshold=err_thresh,
+        cost=phase_generator,
+        instantiate_options=instantiation_options,
+        use_calculated_error=True,
+        max_psols=5
+    )
+
+    second_synthesis_pass = SecondLEAPSynthesisPass(
+        success_threshold = extra_err_thresh,
+        layer_generator=layer_gen,
+        partial_success_threshold=err_thresh,
+        cost=phase_generator,
+        instantiate_options=instantiation_options,
+        use_calculated_error=True,
+        max_psols=3
+    )
+
 
     leap_workflow = [
         CheckpointRestartPass(checkpoint_dir, 
@@ -118,6 +125,7 @@ def get_shortest_circuits(circ_name: str, tol: int, timestep: int,
                     allocate_error=True,
                     allocate_error_gate=CNOTGate(),
                 ),
+                # ScanningGateRemovalPass(),
                 CreateEnsemblePass(success_threshold=err_thresh, 
                                    use_calculated_error=True, 
                                    num_circs=num_unique_circs,
@@ -136,7 +144,7 @@ def get_shortest_circuits(circ_name: str, tol: int, timestep: int,
         ),
         SelectFinalEnsemblePass(size=500)
     ]
-    num_workers = 256
+    num_workers = 2
     compiler = Compiler(num_workers=num_workers)
     # target = circ.get_unitary()
     out_circ, data = compiler.compile(circ, workflow=leap_workflow, request_data=True)

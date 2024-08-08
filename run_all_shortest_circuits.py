@@ -9,7 +9,7 @@ header = """#!/bin/bash -l
 #SBATCH -q regular
 #SBATCH -A m4141
 #SBATCH -C cpu
-#SBATCH --time=03:55:00
+#SBATCH --time=11:55:00
 #SBATCH -N 1
 #SBATCH --signal=B:USR1@1
 #SBATCH --output=./slurm_logs/{file}{extra}_{unique_circs}/{circ}/{tol}_tol_block_size_8
@@ -27,8 +27,9 @@ if __name__ == '__main__':
     # file = "get_counts"
     # file = "get_ensemble_expectations"
     # file = "get_shortest_circuits_new"
-    file = "get_ensemble_final"
-    # file = "run_simulations_new"
+    # file = "get_ensemble_final"
+    # file = "get_ensemble_final_cliffordt"
+    file = "run_simulations_new"
     # file = "get_shortest_circuits_qsearch"
     # file = "plot_ensemble_data"
     # file = "run_simulations"
@@ -36,13 +37,14 @@ if __name__ == '__main__':
     # circs = ["Heisenberg_7"] #, 
     # circs = ["Heisenberg_7", "TFXY_8"]
     # circs = ["tfxy_6", "qc_binary_5q"] #, "qc_gray_5q", "qc_optimized_5q"]
-    circs = ["heisenberg7", "vqe_12", "shor_12", "qml_19", "qml_25"]
-    # circs = [f"qft_{i}" for i in range(8, 24, 2)]
+    # circs = ["heisenberg7", "vqe_12", "shor_12", "qml_19", "qml_25"]
+    circs = [f"qft_{i}" for i in range(8, 24, 2)]
     # circs = ["hubbard_4"]
     # circs =  ["shor_12", "qft_10", "vqe_12"]
     # tols = range(1, 7)
     tols = [1,3]
     unique_circss = [100] #, 5, 20, 100, 1000, 10000]
+    # extra = "cliffordt"
     extra = ""
     for circ in circs:
         for timestep in [0]:
@@ -60,7 +62,7 @@ if __name__ == '__main__':
                     #     print(f"Skipping {graph_file}")
                     #     continue
 
-                    if os.path.exists(utries_file):
+                    if not os.path.exists(utries_file):
                         continue
 
 

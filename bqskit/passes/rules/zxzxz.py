@@ -12,6 +12,8 @@ from bqskit.ir.gates.constant.sx import SqrtXGate
 from bqskit.ir.gates.parameterized.rx import RXGate
 from bqskit.ir.gates.parameterized.rz import RZGate
 from bqskit.ir.gates.parameterized.u1 import U1Gate
+from bqskit.qis.unitary import UnitaryMatrix
+from bqskit.ir.gates import GlobalPhaseGate
 
 
 class ZXZXZDecomposition(BasePass):
@@ -48,29 +50,8 @@ class ZXZXZDecomposition(BasePass):
         self.always_use_rx = always_use_rx
         self.always_use_u1 = always_use_u1
 
-    async def run(self, circuit: Circuit, data: PassData) -> None:
-        """Perform the pass's operation, see :class:`BasePass` for more."""
 
-        if circuit.num_qudits != 1:
-            raise ValueError(
-                'Cannot convert multi-qudit circuit into ZXZXZ sequence.',
-            )
-
-        if circuit.radixes[0] != 2:
-            raise ValueError(
-                'Cannot convert non-qubit circuit into ZXZXZ sequence.',
-            )
-
-        # Decide on RX or SX
-        no_sx = RXGate() in data.gate_set and SqrtXGate() not in data.gate_set
-        use_rx = self.always_use_rx or no_sx
-
-        # Decide on RZ or U1
-        no_rz = U1Gate() in data.gate_set and RZGate() not in data.gate_set
-        use_u1 = self.always_use_u1 or no_rz
-
-        utry = circuit.get_unitary()
-
+    def get_zxzxz_circuit(utry: UnitaryMatrix, use_rx: bool = False, use_u1: bool = False, fix_global_phase: bool = False) -> Circuit:
         # Calculate params
         utry = np.linalg.det(utry) ** (-0.5) * utry
         i1 = cmath.phase(utry[1, 1])
@@ -110,5 +91,34 @@ class ZXZXZDecomposition(BasePass):
             new_circuit.append_gate(U1Gate(), 0, [p])
         else:
             new_circuit.append_gate(RZGate(), 0, [p])
+
+        if fix_global_phase:
+            global_phase_correction = utry.get_target_correction_factor(new_circuit.get_unitary())
+            new_circuit.append_gate(GlobalPhaseGate(1, global_phase=global_phase_correction), 0)
+
+        return new_circuit
+
+    async def run(self, circuit: Circuit, data: PassData) -> None:
+        """Perform the pass's operation, see :class:`BasePass` for more."""
+
+        if circuit.num_qudits != 1:
+            raise ValueError(
+                'Cannot convert multi-qudit circuit into ZXZXZ sequence.',
+            )
+
+        if circuit.radixes[0] != 2:
+            raise ValueError(
+                'Cannot convert non-qubit circuit into ZXZXZ sequence.',
+            )
+        
+        # Decide on RX or SX
+        no_sx = RXGate() in data.gate_set and SqrtXGate() not in data.gate_set
+        use_rx = self.always_use_rx or no_sx
+
+        # Decide on RZ or U1
+        no_rz = U1Gate() in data.gate_set and RZGate() not in data.gate_set
+        use_u1 = self.always_use_u1 or no_rz
+
+        new_circuit = ZXZXZDecomposition.get_zxzxz_circuit(circuit.get_unitary(), use_rx=use_rx, use_u1=use_u1)
 
         circuit.become(new_circuit)

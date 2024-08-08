@@ -14,7 +14,7 @@ import pickle
 from bqskit.ir.opt.cost.functions import  HilbertSchmidtCostGenerator, FrobeniusNoPhaseCostGenerator
 from bqskit.ir.opt.minimizers.lbfgs import LBFGSMinimizer
 
-from util import SecondLEAPSynthesisPass, SubselectEnsemblePass, SelectFinalEnsemblePass
+from util import GenerateProbabilityPass, SubselectEnsemblePass, SelectFinalEnsemblePass
 
 from bqskit import enable_logging
 
@@ -43,39 +43,7 @@ def get_shortest_circuits(circ_name: str, tol: int, timestep: int,
     phase_generator = HilbertSchmidtCostGenerator()
     big_block_size = 7
     small_block_size = 4
-    checkpoint_dir = f"fixed_block_checkpoints/{circ_name}_{timestep}_{tol}_{big_block_size}_{small_block_size}/"
-
-    layer_gen = SimpleLayerGenerator(single_qudit_gate_1=VariableUnitaryGate(1))
-
-    fast_instantiation_options = {
-        # 'multistarts': 1,
-        'ftol': extra_err_thresh,
-        'diff_tol_r': 1e-4,
-        'max_iters': 10000,
-        'min_iters': 100,
-        # 'method': 'qfactor',
-    }
-
-    # synthesis_pass = LEAPSynthesisPass(
-    #     store_partial_solutions=True,
-    #     layer_generator=layer_gen,
-    #     success_threshold = extra_err_thresh,
-    #     partial_success_threshold=err_thresh,
-    #     cost=phase_generator,
-    #     instantiate_options=fast_instantiation_options,
-    #     use_calculated_error=True,
-    #     max_psols=5
-    # )
-
-    # second_synthesis_pass = SecondLEAPSynthesisPass(
-    #     success_threshold = extra_err_thresh,
-    #     layer_generator=layer_gen,
-    #     partial_success_threshold=err_thresh,
-    #     cost=phase_generator,
-    #     instantiate_options=fast_instantiation_options,
-    #     use_calculated_error=True,
-    #     max_psols=3
-    # )
+    checkpoint_dir = f"cliff_t_checkpoints/{circ_name}_{timestep}_{tol}_{big_block_size}_{small_block_size}/"
 
     slow_partitioner_passes = [
         ScanPartitioner(block_size=small_block_size),
@@ -116,8 +84,8 @@ def get_shortest_circuits(circ_name: str, tol: int, timestep: int,
                 # AnalyzeBlockPass(TGate())
                 JiggleEnsemblePass(success_threshold=err_thresh, num_circs=5000, use_ensemble=True, cost=phase_generator),
                 SubselectEnsemblePass(success_threshold=err_thresh, num_circs=100),
-                # GenerateProbabilityPass(size=50),
-                # UnfoldPass(),
+                GenerateProbabilityPass(size=50),
+                UnfoldPass(),
             ],
             calculate_error_bound=True,
             error_cost_gen=phase_generator,
@@ -126,9 +94,9 @@ def get_shortest_circuits(circ_name: str, tol: int, timestep: int,
         ),
         SelectFinalEnsemblePass(size=500)
     ]
-    num_workers = 24
+    num_workers = 16
     compiler = Compiler(num_workers=num_workers)
-    target = circ.get_unitary()
+    # target = circ.get_unitary()
     out_circ, data = compiler.compile(circ, workflow=leap_workflow, request_data=True)
     approx_circuits: list[Circuit] = data["final_ensemble"]
     print("Num Circs", len(approx_circuits))
@@ -159,4 +127,4 @@ if __name__ == '__main__':
     # print("Min Distance", min(dists))
     # print("Mean Distance", np.mean(dists))
     # print([c.get_unitary().get_distance_from(circ.get_unitary()) for c in circs[:20]])
-    save_circuits(circs, circ_name, tol, timestep, ignore_timestep=True, extra_str=f"_{num_unique_circs}_circ_final")
+    save_circuits(circs, circ_name, tol, timestep, ignore_timestep=True, extra_str=f"_{num_unique_circs}_circ_cliff_t_final")

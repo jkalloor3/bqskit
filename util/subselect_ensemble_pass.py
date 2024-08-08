@@ -66,9 +66,9 @@ class SubselectEnsemblePass(BasePass):
         all_ensembles = []
         # original_ensembles = data["ensemble"]
 
-        # if "finished_subselect" in data:
-        #     print("Already Subselected", flush=True)
-        #     return
+        if "finished_subselect" in data and "sub_select_ensemble" in data:
+            print("Already Subselected", flush=True)
+            return
 
         data["finished_subselect"] = False
 

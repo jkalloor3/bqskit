@@ -36,26 +36,38 @@ if __name__ == '__main__':
     global target
 
     circ_name = argv[1]
-    tol = int(argv[2])
+    timestep = int(argv[2])
+    tol = int(argv[3])
+    num_unique_circs = int(argv[4])
 
-    # orig_circ = load_circuit(circ_name)
+    orig_circ = load_circuit(circ_name)
+
+    orig_count = get_cnot_count(orig_circ)
     # target = orig_circ.get_unitary()
 
-    for variance in [1, 5, 20, 100, 1000, 10000]:
-        try:
-            circs = load_compiled_circuits_varied(circ_name, tol, variance)
-        except Exception as e:
-            print(e)
-            continue
+    # for variance in [1, 5, 20, 100, 1000, 10000]:
+    #     try:
+    #         circs = load_compiled_circuits_varied(circ_name, tol, variance)
+    #     except Exception as e:
+    #         print(e)
+    #         continue
 
-        small_circs = random.sample(circs, 1000)
+    #     small_circs = random.sample(circs, 1000)
 
-        pickle.dump(small_circs, open("small_circs.pkl", "wb"))
-        exit(0)
+    #     pickle.dump(small_circs, open("small_circs.pkl", "wb"))
+    #     exit(0)
 
-        # with mp.Pool() as pool:
-        #     # tols = pool.map(get_distance, circs)
-        #     # cnot_counts = pool.map(get_cnot_count, circs)
-        #     unitaries = pool.map(get_numpy_circ, circs)
+    circs = load_compiled_circuits(circ_name, tol, timestep, ignore_timestep=True, extra_str=f"_{num_unique_circs}_circ_final") 
 
-        # save_compiled_unitaries_varied(unitaries, circ_name, tol, variance)
+    with mp.Pool() as pool:
+        # tols = pool.map(get_distance, circs)
+        cnot_counts = pool.map(get_cnot_count, circs)
+        # unitaries = pool.map(get_numpy_circ, circs)
+
+    
+    print("Orig CNOT Count: ", orig_count)
+
+    # print("Tols:", np.mean(tols), np.std(tols))
+    print("CNOT Counts:", np.mean(cnot_counts), np.std(cnot_counts))
+
+    # save_compiled_unitaries_varied(unitaries, circ_name, tol, variance)

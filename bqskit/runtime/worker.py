@@ -252,10 +252,10 @@ class Worker:
             try:
                 self._conn.send(out_msg)
             except Exception as e:
-                print(out_msg)
+                # print(out_msg)
                 exc_info = sys.exc_info()
                 error_str = ''.join(traceback.format_exception(*exc_info))
-                print("NOOOOOO")
+                # print("NOOOOOO")
                 exit(1)
                 
         self._outgoing.clear()

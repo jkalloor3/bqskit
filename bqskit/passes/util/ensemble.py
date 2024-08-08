@@ -114,6 +114,12 @@ class CreateEnsemblePass(BasePass):
         default_inds = [[-1] for _ in range(len(psols))]
         random_inds = [[] for _ in range(len(psols))]
         possible_solutions = 1
+
+        print("COUNTS FOR EACH PSOLS", flush=True)
+        for i in range(len(psols)):
+            print("New Counts: ", [psol.count(CNOTGate()) for psol in psols[i]], "Orig Counts: ", psols[i][-1].count(CNOTGate()), flush=True)
+
+
         for i in range(len(psols)):
             assert(len(psols[i]) > 0)
             numbers = np.arange(0, len(psols[i]))

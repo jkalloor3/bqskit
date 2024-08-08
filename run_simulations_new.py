@@ -83,8 +83,8 @@ one_q_fid = 0.9999
 two_q_fid = 0.995
 noisy_backend = create_pauli_noise_model(one_q_fid, two_q_fid)
 noise_model_backend = create_pauli_noise_model(one_q_fid, two_q_fid)
-sim = AerSimulator(noise_model=noisy_backend)
-# sim = AerSimulator()
+# sim = AerSimulator(noise_model=noisy_backend)
+sim = AerSimulator()
 sim_perf = AerSimulator()
 shots = 1024
 
@@ -126,13 +126,20 @@ def excitation_displacement(N, result: dict, shots: int):
         dis += qub*((1.0 - z)/2.0)
     return dis
 
+def tvd(p, q, shots):
+    p = {k: v/shots for k, v in p.items()}
+    q = {k: v/shots for k, v in q.items()}
+    return 0.5 * sum(abs(p.get(k, 0) - q.get(k, 0)) for k in set(p) | set(q))
+
 import itertools
-def get_ensemble_mags(ens_size):
+def get_ensemble_mags(ens_size, base_result: dict, shot_ratio: int = 1000):
     global all_qcircs
     global calc_func
 
     ensemble: list[QuantumCircuit] = random.sample(all_qcircs, ens_size)
-    results = sim.run(ensemble, num_shots=shots).result()
+    ratio = int(shot_ratio / ens_size)
+    # print(f"Running with {shots * ratio} shots for ensemble of size {ens_size}", flush=True)
+    results = sim.run(ensemble, shots=(shots * ratio)).result()
     # Sum over all c
     total_dict = {}
     for c in ensemble:
@@ -140,21 +147,21 @@ def get_ensemble_mags(ens_size):
         x = total_dict
         y = results_dict
         total_dict = {k: x.get(k, 0) + y.get(k, 0) for k in set(x) | set(y)}
-        
-    # return calc_func(c.num_qubits, total_dict, shots=shots * len(ensemble))
-    return prob_squared(c.num_qubits, total_dict, shots=shots * len(ensemble))
 
+    # print("Num Shots total", sum([v for v in total_dict.values()]), "Shots should be: ", shots*shot_ratio, "Calculated Shots: ", shots*ratio*ens_size, flush=True)
+    
+    return tvd(base_result, total_dict, shots*shot_ratio)
 
 def execute_circuit(circuit: QuantumCircuit):
     global calc_func
-    results = sim.run(circuit, num_shots=shots).result()
+    results = sim.run(circuit, shots=shots).result()
     noisy_counts = results.get_counts(circuit)
     return calc_func(circuit.num_qubits, noisy_counts, shots=shots)
 
 
 def get_qcirc(circ: Circuit):
     for cycle, op in circ.operations_with_cycles():
-        if op.num_qudits == 1:
+        if op.num_qudits == 1 and not isinstance(op.gate, U3Gate):
             params = U3Gate().calc_params(op.get_unitary())
             point = CircuitPoint(cycle, op.location[0])
             circ.replace_gate(point, U3Gate(), op.location, params)
@@ -188,10 +195,11 @@ if __name__ == '__main__':
     tol = int(argv[3])
 
     initial_circ = load_circuit(circ_name)
-    target = initial_circ.get_unitary()
+    # target = initial_circ.get_unitary()
     num_unique_circs = int(argv[4])
     circs = load_compiled_circuits(circ_name, tol, timestep, ignore_timestep=True, extra_str=f"_{num_unique_circs}_circ_final")
 
+    print("LOADED CIRCUITS", flush=True)
     # Store approximate solutions
     all_utries = []
     basic_circs = []
@@ -201,27 +209,39 @@ if __name__ == '__main__':
 
     calc_func = prob_squared
 
+    ensemble_sizes = [1, 10, 100, 1000, 2000, 4000]
+    shot_ratio = max(ensemble_sizes)
+
 
     qiskit_circ = bqskit_to_qiskit(initial_circ)
     qiskit_circ.measure_all()
-    result = sim_perf.run(qiskit_circ, shots=shots*100).result()
+    result = sim_perf.run(qiskit_circ, shots=shots*shot_ratio).result()
     result_dict = result.get_counts(qiskit_circ)
-    noisy_result = sim.run(qiskit_circ, shots=shots*100).result()
+    noisy_result = sim.run(qiskit_circ, shots=shots*shot_ratio).result()
+    print("Finished Running", flush=True)
     noisy_result_dict = noisy_result.get_counts(qiskit_circ)
-    base_excitations.append(calc_func(initial_circ.num_qudits, result_dict, shots*100))
-    noisy_excitations.append(calc_func(initial_circ.num_qudits, noisy_result_dict, shots*100))
+    base_excitations.append(tvd(result_dict, result_dict, shots*shot_ratio))
+    noisy_excitations.append(tvd(result_dict, noisy_result_dict, shots*shot_ratio))
 
-    with mp.Pool() as pool:
-       all_qcircs = pool.map(get_qcirc, circs)
+    print("Finished Base Circuits", flush=True)
+
+    # base_excitations.append(calc_func(initial_circ.num_qudits, result_dict, shots*100))
+    # noisy_excitations.append(calc_func(initial_circ.num_qudits, noisy_result_dict, shots*100))
+
+    # circs = random.sample(circs, 10000)
+
+    # with mp.Pool() as pool:
+    #    all_qcircs = pool.map(get_qcirc, circs)
+
+    all_qcircs = [get_qcirc(c) for c in circs]
 
     ensemble_mags = [0,0,0,0,0,0]
-    ensemble_sizes = [1, 10, 100, 1000, 2000]
 
 
-    print("Runing QCIRCS")
-    print(f"Base Excitation: {base_excitations[0]}, Noisy Excitation {noisy_excitations[0]}")
+    print("Runing PERFECT ENSEMBLES: ")
+    print(f"Base TVD: {base_excitations[0]}, Noisy TVD {noisy_excitations[0]}")
     for j, ens_size in enumerate(ensemble_sizes):
-        ensemble_mags[j] = get_ensemble_mags(ens_size)
-        print(f"Ensemble Size: {ens_size},  Ensemble Excitation {ensemble_mags[j]}")
+        ensemble_mags[j] = get_ensemble_mags(ens_size, result_dict, shot_ratio)
+        print(f"Ensemble Size: {ens_size},  TVD: {ensemble_mags[j]}")
 
 
