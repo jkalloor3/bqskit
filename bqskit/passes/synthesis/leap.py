@@ -153,7 +153,7 @@ class LEAPSynthesisPass(SynthesisPass):
         self.max_layer = max_layer
         self.min_prefix_size = min_prefix_size
         self.instantiate_options: dict[str, Any] = {
-            'cost_fn_gen': self.cost,
+            'cost_fn_gen': HilbertSchmidtResidualsGenerator(),
         }
         self.instantiate_options.update(instantiate_options)
         self.store_partial_solutions = store_partial_solutions

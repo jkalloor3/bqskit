@@ -29,23 +29,25 @@ if __name__ == '__main__':
     # file = "get_shortest_circuits_new"
     # file = "get_ensemble_final"
     # file = "get_ensemble_final_cliffordt"
-    file = "run_simulations_new"
+    # file = "run_simulations_new"
     # file = "get_shortest_circuits_qsearch"
     # file = "plot_ensemble_data"
     # file = "run_simulations"
-    # file = "full_compile"
+    file = "full_compile"
     # circs = ["Heisenberg_7"] #, 
     # circs = ["Heisenberg_7", "TFXY_8"]
     # circs = ["tfxy_6", "qc_binary_5q"] #, "qc_gray_5q", "qc_optimized_5q"]
-    # circs = ["heisenberg7", "vqe_12", "shor_12", "qml_19", "qml_25"]
-    circs = [f"qft_{i}" for i in range(8, 24, 2)]
+    circs = ["heisenberg7", "vqe_12", "shor_12", "qml_19", "qml_25"]
+    # circs = ["add17", "adder9", "mult16", "qae13", "qpe10", "tfim16"]
+    # circs = [f"qft_{i}" for i in range(8, 24, 4)]
     # circs = ["hubbard_4"]
     # circs =  ["shor_12", "qft_10", "vqe_12"]
     # tols = range(1, 7)
-    tols = [1,3]
+    # tols = [1,3]
+    tols = [1]
     unique_circss = [100] #, 5, 20, 100, 1000, 10000]
     # extra = "cliffordt"
-    extra = ""
+    extra = "_min"
     for circ in circs:
         for timestep in [0]:
             for tol in tols:
@@ -54,7 +56,7 @@ if __name__ == '__main__':
                     #     m = 7
                     # param_file = f"ensemble_approx_circuits_qfactor/{method}/{circ}/{tol}/{m}/{timestep}/jiggled_circ.pickle"
                     # param_file = f"/pscratch/sd/j/jkalloor/bqskit/ensemble_shortest_circuits{extra}/{circ}/{tol}/{timestep}/{circ}.pkl"
-                    utries_file = f"/pscratch/sd/j/jkalloor/bqskit/ensemble_shortest_circuits_{unique_circs}_circ_final/{circ}/{tol}/{circ}.pkl"
+                    # utries_file = f"/pscratch/sd/j/jkalloor/bqskit/ensemble_shortest_circuits_{unique_circs}_circ_final_min/{circ}/{tol}/{circ}.pkl"
                     # utries_file = f"/pscratch/sd/j/jkalloor/bqskit/ensemble_shortest_circuits_100_circ_final/qc_binary_5q/1/qc_binary_5q.pkl"
                     # graph_file = f"/pscratch/sd/j/jkalloor/bqskit/{circ}_{tol}_errors_comp.png"
 
@@ -62,8 +64,8 @@ if __name__ == '__main__':
                     #     print(f"Skipping {graph_file}")
                     #     continue
 
-                    if not os.path.exists(utries_file):
-                        continue
+                    # if os.path.exists(utries_file):
+                    #     continue
 
 
                     to_write = open(file_name, 'w')

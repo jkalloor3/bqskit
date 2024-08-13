@@ -160,7 +160,7 @@ class LEAPSynthesisPass2(SynthesisPass):
         self.max_layer = max_layer
         self.min_prefix_size = min_prefix_size
         self.instantiate_options: dict[str, Any] = {
-            'cost_fn_gen': self.cost,
+            # 'cost_fn_gen': self.cost,
         }
         self.use_calculated_error = use_calculated_error
         self.instantiate_options.update(instantiate_options)
@@ -213,14 +213,15 @@ class LEAPSynthesisPass2(SynthesisPass):
 
             # Track partial solutions
             psols: dict[int, list[tuple[Circuit, float]]] = {}
-            scan_sols: list[tuple[Circuit, float]] = [default_circuit.copy()]
+            scan_sols: list[tuple[Circuit, float]] = [(default_circuit.copy(), 0)]
 
             _logger.debug(f'Search started, initial layer has cost: {best_dist}.')
 
             # Evalute initial layer
             if best_dist < success_threshold:
                 _logger.debug('Successful synthesis.')
-                scan_sols.append(initial_layer.copy())
+                scan_sols.append((initial_layer.copy(), best_dist))
+                scan_sols.append((default_circuit.copy(), 0))
                 data['scan_sols'] = scan_sols
                 if save_data_file is not None:
                     # Dump data and circuit with empty Frontier
@@ -283,7 +284,7 @@ class LEAPSynthesisPass2(SynthesisPass):
 
                 if self.store_partial_solutions:
                     if dist < partial_success_threshold and circ_count <= default_count:
-                        scan_sols.append(circuit.copy())
+                        scan_sols.append((circuit.copy(), dist))
                         data['psols'] = psols
                         data['scan_sols'] = scan_sols
                         if len(scan_sols) >= self.max_psols:
@@ -306,6 +307,7 @@ class LEAPSynthesisPass2(SynthesisPass):
                 if dist < success_threshold:
                     _logger.debug(f'Successful synthesis with distance {dist:.6e}.')
                     if self.store_partial_solutions:
+                        scan_sols.append((default_circuit.copy(), 0))
                         data['psols'] = psols
                         data['scan_sols'] = scan_sols
 
@@ -313,8 +315,7 @@ class LEAPSynthesisPass2(SynthesisPass):
                     # Return circuit with highest distance
                     max_dist = 0.0
                     max_circ = default_circuit
-                    for scan_sol in scan_sols:
-                        dist = self.cost.calc_cost(scan_sol, utry)
+                    for scan_sol, dist in scan_sols:
                         if dist > max_dist:
                             max_circ = scan_sol
 
@@ -358,14 +359,14 @@ class LEAPSynthesisPass2(SynthesisPass):
         )
 
         if self.store_partial_solutions:
+            scan_sols.append((default_circuit.copy(), 0))
             data['psols'] = psols
             data['scan_sols'] = scan_sols
 
         # Return circuit with highest distance
         max_dist = best_dist
         max_circ = best_circ
-        for scan_sol in scan_sols:
-            dist = self.cost.calc_cost(scan_sol, utry)
+        for scan_sol, dist in scan_sols:
             if dist > max_dist:
                 max_circ = scan_sol
 
@@ -494,35 +495,5 @@ class LEAPSynthesisPass2(SynthesisPass):
                 _logger.debug('Block is already finished!')
                 return
             data['leap_finished'] = False
-        
-        # # Things needed for saving data
-        # if self.full_checkpoint_dir:
-        #     full_checkpoint_dir = self.full_checkpoint_dir
-        #     if self.append_block_id:
-        #         super_block_num = data.get('super_block_num', '00')
-        #         full_checkpoint_dir = join(self.full_checkpoint_dir, f"block_{super_block_num}/")
-
-
-        #     block_num: str = data.get('block_num', '0')
-        #     save_data_file = join(
-        #         full_checkpoint_dir, f'block_{block_num}.data',
-        #     )
-
-        #     if exists(save_data_file):
-        #         _logger.debug(f'Reloading block {block_num}!')
-        #         # Reload ind from previous stop
-        #         with open(save_data_file, 'rb') as df:
-        #             new_data = pickle.load(df)
-        #             data.update(new_data)
-        #         frontier: Frontier = data.get('frontier', None)
-        #         if frontier is not None and frontier.empty():
-        #             _logger.debug('Block is already finished!')
-        #             return
-        #     else:
-        #         _logger.debug(f'Initializing block!')
-        #         # Initial checkpoint
-        #         with open(save_data_file, 'wb') as df:
-        #             data['frontier'] = None
-        #             pickle.dump(data, df)
-
+    
         circuit.become(await self.synthesize(data.target, data, default_circuit=circuit, frontier=frontier, save_data_file=save_data_file))

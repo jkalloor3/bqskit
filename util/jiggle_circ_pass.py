@@ -10,11 +10,24 @@ from bqskit.qis import UnitaryMatrix
 import numpy as np
 
 
-cost_1 = FrobeniusCostGenerator()
+# cost_1 = FrobeniusCostGenerator()
 
 cost = HilbertSchmidtCostGenerator()
 
 cost_3 = FrobeniusNoPhaseCostGenerator()
+
+def cost_2(circuit: Circuit, target: UnitaryMatrix) -> float:
+    a = circuit.get_unitary().numpy
+    b = target.numpy
+    prod = np.einsum("ij,ij->", a, b.conj())
+    prod_2 = np.trace(np.dot(a, b.conj().T))
+    norm = np.linalg.norm(prod)
+    return 1 - (norm / a.shape[0])
+
+def cost_1(circuit: Circuit, target: UnitaryMatrix) -> float:
+    unitary = circuit.get_unitary()
+    fix = unitary.get_target_correction_factor(target) * np.eye(unitary.shape[0])
+    return cost.calc_cost(circuit, target @ fix)
 
 
 class  GetErrorsPass(BasePass):
@@ -23,33 +36,38 @@ class  GetErrorsPass(BasePass):
     async def run(self, circuit: Circuit, data: PassData) -> None:
         unfolded_circ = circuit.copy()
         unfolded_circ.unfold_all()
-        full_dist = cost.calc_cost(unfolded_circ, data.target)
+        full_dist = cost_1(unfolded_circ, data.target)
 
-        full_dist_2 = cost_1.calc_cost(unfolded_circ, data.target)
+        full_dist_2 = cost_2(unfolded_circ, data.target)
 
-        full_dist_3 = cost_3.calc_cost(unfolded_circ, data.target)
+        # full_dist_3 = cost_3.calc_cost(unfolded_circ, data.target)
 
-        print(full_dist, full_dist_2, full_dist_3, flush=True)
+        # print(full_dist, full_dist_2, full_dist_3, flush=True)
 
-        assert np.allclose(full_dist, np.sqrt(full_dist_2))
+        # assert np.allclose(full_dist, np.sqrt(full_dist_2))
         # full_dist = dist_cost(unfolded_circ.get_unitary(), data.target)
 
         block_data = data[ForEachBlockPass.key][0]
         targets: list[UnitaryMatrix] = []
 
-        dists = []
+        dists_1 = []
+        dists_2 = []
 
         for i, (cycle, op) in enumerate(circuit.operations_with_cycles()):
             block = block_data[i]
             targets.append(block["target"])
             subcircuit = op.gate._circuit.copy()
             subcircuit.set_params(op.params) 
-            dists.append(cost.calc_cost(subcircuit, block["target"]))
+            dists_1.append(cost_1(subcircuit, block["target"]))
+            dists_2.append(cost_2(subcircuit, block["target"]))
+            # residuals.append(cost_4.get_residuals(subcircuit, block["target"]))
             # dists.append(dist_cost(subcircuit.get_unitary(), block["target"]))
 
-        print("Distances", dists, flush=True)
-        print("Upperbound", sum(dists), flush=True)
+        print("Distances", dists_1, flush=True)
+        print("Distances 2", dists_2, flush=True)
+        print("Upperbound 1:", sum(dists_1), "Upperbound 2:", sum(dists_2), flush=True)
         print("Full Distance", full_dist, flush=True)
+        print("Full Distance 2", full_dist_2, flush=True)
 
 
 class  JiggleCircPass(BasePass):

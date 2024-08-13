@@ -28,7 +28,7 @@ from os.path import join
 
 from util import save_circuits, load_circuit, FixGlobalPhasePass, CalculateErrorBoundPass
 
-# enable_logging(True)
+enable_logging(True)
 
 def get_distance(circ1: Circuit) -> float:
     global target
@@ -45,12 +45,12 @@ def get_shortest_circuits(circ_name: str, tol: int, timestep: int,
     phase_generator = HilbertSchmidtCostGenerator()
     big_block_size = 8
     small_block_size = 3
-    checkpoint_dir = f"fixed_block_checkpoints/{circ_name}_{timestep}_{tol}_{big_block_size}_{small_block_size}/"
+    checkpoint_dir = f"fixed_block_checkpoints_min/{circ_name}_{timestep}_{tol}_{big_block_size}_{small_block_size}/"
     # proj_name = f"{circ_name}_{timestep}_{tol}_final"
     # base_checkpoint_dir = None
     # proj_name = None
 
-    layer_gen = SimpleLayerGenerator(single_qudit_gate_1=VariableUnitaryGate(1))
+    # layer_gen = SimpleLayerGenerator(single_qudit_gate_1=VariableUnitaryGate(1))
 
     fast_instantiation_options = {
         # 'multistarts': 1,
@@ -90,7 +90,7 @@ def get_shortest_circuits(circ_name: str, tol: int, timestep: int,
 
     synthesis_pass = LEAPSynthesisPass2(
         store_partial_solutions=True,
-        layer_generator=layer_gen,
+        # layer_generator=layer_gen,
         success_threshold = extra_err_thresh,
         partial_success_threshold=err_thresh,
         cost=phase_generator,
@@ -101,7 +101,7 @@ def get_shortest_circuits(circ_name: str, tol: int, timestep: int,
 
     second_synthesis_pass = SecondLEAPSynthesisPass(
         success_threshold = extra_err_thresh,
-        layer_generator=layer_gen,
+        # layer_generator=layer_gen,
         partial_success_threshold=err_thresh,
         cost=phase_generator,
         instantiate_options=instantiation_options,
@@ -144,11 +144,12 @@ def get_shortest_circuits(circ_name: str, tol: int, timestep: int,
         ),
         SelectFinalEnsemblePass(size=500)
     ]
-    num_workers = 2
+    num_workers = 256
     compiler = Compiler(num_workers=num_workers)
     # target = circ.get_unitary()
     out_circ, data = compiler.compile(circ, workflow=leap_workflow, request_data=True)
     approx_circuits: list[Circuit] = data["final_ensemble"]
+    print("Final Count: ", approx_circuits[0].count(CNOTGate()))
     print("Num Circs", len(approx_circuits))
     # actual_error = target.get_frobenius_distance(out_circ.get_unitary())
     # cost_error = generator.calc_cost(out_circ, target)
@@ -177,4 +178,4 @@ if __name__ == '__main__':
     # print("Min Distance", min(dists))
     # print("Mean Distance", np.mean(dists))
     # print([c.get_unitary().get_distance_from(circ.get_unitary()) for c in circs[:20]])
-    save_circuits(circs, circ_name, tol, timestep, ignore_timestep=True, extra_str=f"_{num_unique_circs}_circ_final")
+    save_circuits(circs, circ_name, tol, timestep, ignore_timestep=True, extra_str=f"_{num_unique_circs}_circ_final_min")

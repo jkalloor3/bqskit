@@ -153,7 +153,7 @@ class SecondLEAPSynthesisPass(BasePass):
         self.max_layer = max_layer
         self.min_prefix_size = min_prefix_size
         self.instantiate_options: dict[str, Any] = {
-            'cost_fn_gen': self.cost,
+            # 'cost_fn_gen': self.cost,
         }
         self.use_calculated_error = use_calculated_error
         self.instantiate_options.update(instantiate_options)
@@ -161,7 +161,7 @@ class SecondLEAPSynthesisPass(BasePass):
 
     async def synthesize(self, data: PassData, target: UnitaryMatrix, max_cnot_gates: int, default_circuit: Circuit, datas: list[PassData], save_data_files: list[str] = None) -> Circuit:
         # Synthesize every circuit in the ensemble
-        circs: list[Circuit] = [d for d in data['scan_sols'][1:]]
+        circs: list[Circuit] = [d[0] for d in data['scan_sols'][:-1]]
         if len(circs) > 0:
             for c in circs:
                 assert(isinstance(c, Circuit))
@@ -188,6 +188,7 @@ class SecondLEAPSynthesisPass(BasePass):
             # Now interleave so you get a decent mix
             new_circs = list(chain(*zip_longest(*new_circs, fillvalue=None)))
             new_circs: list[tuple[Circuit, float]] = [(c, self.cost(c, target)) for c in new_circs if c is not None]
+            # new_circs = sorted(new_circs, key=lambda x: x[1])
         else:
             new_circs = []
 
@@ -512,4 +513,4 @@ class SecondLEAPSynthesisPass(BasePass):
                 else:
                     _logger.debug(f"Second leap frontier {i} is empty: {frontier.empty()}")
 
-        circuit.become(await self.synthesize(data, target=data.target, max_cnot_gates=circuit.count(CNOTGate()), default_circuit=data['scan_sols'][0], datas=datas, save_data_files=save_data_files))
+        circuit.become(await self.synthesize(data, target=data.target, max_cnot_gates=circuit.count(CNOTGate()), default_circuit=data['scan_sols'][-1][0], datas=datas, save_data_files=save_data_files))

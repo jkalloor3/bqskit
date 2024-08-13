@@ -7,15 +7,18 @@ from bqskit.passes import *
 from util import JiggleCircPass, GetErrorsPass
 
 from bqskit.qis.unitary import UnitaryMatrix
-from bqskit.ir.opt.cost.functions import HilbertSchmidtCostGenerator
+from bqskit.ir.opt.cost.functions import HilbertSchmidtCostGenerator, HSCostGenerator
 from bqskit.compiler.compiler import Compiler, WorkflowLike
 
 initial_circ = Circuit.from_file("ensemble_benchmarks/hubbard_4.qasm")
 
+leap_pass = LEAPSynthesisPass(success_threshold=1e-3, cost=HSCostGenerator())
+
 workflow = [
     ScanPartitioner(3),
     ForEachBlockPass([
-        JiggleCircPass(),
+        # JiggleCircPass(),
+        leap_pass
     ]),
     GetErrorsPass()
 ]

@@ -3,14 +3,20 @@ from bqskit.qis import UnitaryMatrix
 from pathlib import Path
 import pickle
 import numpy as np
+import os
 
 extra = "_qsearch"
 
 def load_circuit(circ_name: str, timestep: int = 0) -> Circuit:
     if timestep > 0:
-        return Circuit.from_file(f"/pscratch/sd/j/jkalloor/bqskit/ensemble_benchmarks/{circ_name}_{timestep}.qasm")
+        file = f"/pscratch/sd/j/jkalloor/bqskit/ensemble_benchmarks/{circ_name}_{timestep}.qasm"
     else:
-        return Circuit.from_file(f"/pscratch/sd/j/jkalloor/bqskit/ensemble_benchmarks/{circ_name}.qasm")
+        file = f"/pscratch/sd/j/jkalloor/bqskit/ensemble_benchmarks/{circ_name}.qasm"
+    
+    if not os.path.exists(file):
+        file = f"/pscratch/sd/j/jkalloor/bqskit/qce23_qfactor_benchmarks/{circ_name}.qasm"
+
+    return Circuit.from_file(file)
 
 
 def save_circuits(circs: list[Circuit], circ_name: str, tol: int, timestep: int, ignore_timestep: bool = False, extra_str=extra) -> None:
