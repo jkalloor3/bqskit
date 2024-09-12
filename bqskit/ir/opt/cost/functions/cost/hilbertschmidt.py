@@ -41,11 +41,17 @@ class FrobeniusCost(
         # Get the cost
         utry = self.circuit.get_unitary(params)
         diff = self.target - utry
+        # This is Frob(u - v)
         cost = np.real(np.trace(diff @ diff.conj().T))
-        # print("Params:", params)
-        # print("Cost:", cost)
-        # print(cost)
-        return cost
+
+        # Factor Frob distance by 4N^2
+        N = self.target.shape[0] 
+
+        cost = cost / (N * N)
+
+        # This quantity should be less than HS distance as defined by 
+        # Quest Paper 
+        return np.sqrt(cost)
 
     def get_grad(self, params: RealVector) -> npt.NDArray[np.float64]:
         """Return the cost gradient given the input parameters."""
@@ -211,8 +217,12 @@ class HSCost(
         a = self.circuit.get_unitary(params)
         b = self.target
         prod = np.einsum("ij,ij->", a, b.conj())
-        norm = np.linalg.norm(prod)
-        return 1 - (norm / a.shape[0])
+        norm = np.abs(prod) ** 2
+        # Avoid numerical errors
+        if norm > a.shape[0] * a.shape[0]:
+            return 0
+        norm = max(0, norm)
+        return np.sqrt(1 - (norm / a.shape[0] / a.shape[0]))
 
     def get_grad(self, params: RealVector) -> npt.NDArray[np.float64]:
         """Return the cost gradient given the input parameters."""

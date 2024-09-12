@@ -8,10 +8,10 @@ from bqskit.compiler.passdata import PassData
 from bqskit.ir.circuit import Circuit
 from bqskit.runtime import get_runtime
 from typing import Any
-from bqskit.ir.opt.cost.functions import HilbertSchmidtCostGenerator
+from bqskit.ir.opt.cost.functions import HSCostGenerator
 from bqskit.ir.opt.minimizers.lbfgs import LBFGSMinimizer
 from bqskit.ir.opt.cost.generator import CostFunctionGenerator
-from bqskit.ir.gates import U3Gate
+from bqskit.ir.gates import U3Gate, CNOTGate
 from bqskit.qis import UnitaryMatrix
 import numpy as np
 from math import ceil
@@ -28,7 +28,7 @@ class  JiggleEnsemblePass(BasePass):
 
     def __init__(self, success_threshold = 1e-4, 
                  num_circs = 1000,
-                 cost: CostFunctionGenerator = HilbertSchmidtCostGenerator(),
+                 cost: CostFunctionGenerator = HSCostGenerator(),
                  use_ensemble: bool = True,
                  use_calculated_error: bool = True) -> None:
         """
@@ -62,13 +62,11 @@ class  JiggleEnsemblePass(BasePass):
         circ_copy.set_params(params)
         return circ_copy
 
-    async def single_jiggle(self, params, circ, dist, target, num):
+    async def single_jiggle(self, params: list[float], circ: Circuit, dist: float, target: UnitaryMatrix, num: int):
         # print("Starting Jiggle", flush=True)
         # start = time.time()
         circs = []
-        # unique_unitaries = []
         for _ in range(num):
-            circ_cost = self.cost.calc_cost(circ, target)
             cost_fn = self.cost.gen_cost(circ.copy(), target)
 
             trials = 0
@@ -85,12 +83,27 @@ class  JiggleEnsemblePass(BasePass):
                     num_params_to_jiggle = int(np.random.uniform() * len(params) / 2) + ceil(len(params) / 10)
                 # num_params_to_jiggle = len(params)
                 params_to_jiggle = np.random.choice(list(range(len(params))), num_params_to_jiggle, replace=False)
-                jiggle_amounts = np.random.uniform(-1 * extra_diff, extra_diff, num_params_to_jiggle)
+
+                try:
+                    jiggle_amounts = np.random.uniform(-1 * extra_diff, extra_diff, num_params_to_jiggle)
+                except Exception as e:
+                    print("Extra Diff", extra_diff, flush=True)
+                    print("Num Params to Jiggle", num_params_to_jiggle, flush=True)
+                    print("Len Params", len(params), flush=True)
+                    print(self.success_threshold, flush=True)
+                    print("Dist", dist, flush=True)
+                    _logger.error(e)
                 # print("jiggle_amounts", jiggle_amounts, flush=True)
                 next_params = best_params.copy()
                 next_params[params_to_jiggle] = next_params[params_to_jiggle] + jiggle_amounts
-                circ_cost = cost_fn(next_params)
+                circ_cost = cost_fn.get_cost(next_params)
                 trial_costs.append(circ_cost)
+                try:
+                    a = circ_cost < self.success_threshold
+                except Exception as e:
+                    print("Circ Cost", circ_cost, flush=True)
+                    print("Success Threshold", self.success_threshold, flush=True)
+                    _logger.error(e)
                 if (circ_cost < self.success_threshold):
                     extra_diff = extra_diff * 1.5
                     best_params = next_params
@@ -99,23 +112,10 @@ class  JiggleEnsemblePass(BasePass):
                         break
                 else:
                     extra_diff = extra_diff / 10
-                    # print("Too Big of cost, changing diff to ", extra_diff, flush=True)
                 trials += 1
             
-            # print(circ_cost, self.success_threshold, trials)
             circ_copy = circ.copy()
             circ_copy.set_params(best_params)
-            # Debugging:
-            # new_un = circ_copy.get_unitary()
-            # unique = True
-            # for un in unique_unitaries:
-            #     if np.allclose(un[0], new_un):
-            #         print("DUPLICATE! Old Params == New Params:", np.allclose(un[1], best_params), " Trial Params", trial_costs, flush=True)
-            #         unique = False
-            #         break
-            
-            # if unique:
-            #     unique_unitaries.append((new_un, best_params))
             circs.append(circ_copy)
         JiggleEnsemblePass.num_jiggles += 1
         # print(f"Single Jiggle ({JiggleEnsemblePass.num_jiggles}) time {time.time() - start}", flush=True)
@@ -137,7 +137,10 @@ class  JiggleEnsemblePass(BasePass):
         all_circs = []
 
         # print(f"Awaiting All {num_circs // 50} Jiggles")
-        all_circs = await get_runtime().map(self.single_jiggle, [params] * ceil(num_circs / 50), circ=circ, dist=dist, target=target, num=50)
+        all_circs: list[Circuit] = await get_runtime().map(self.single_jiggle, [params] * ceil(num_circs / 20), circ=circ, dist=dist, target=target, num=20)
+        
+        # print("Unitaries: ", [circ.get_unitary() for circ in all_circs[0]])
+        
         all_circs = list(chain.from_iterable(all_circs))
         # print("Done All Jiggles")
         return all_circs
@@ -148,26 +151,28 @@ class  JiggleEnsemblePass(BasePass):
         _logger.debug('Converting single-qubit general gates to U3Gates.')
 
         # Collected one solution from synthesis
-        # print("Starting JIGGLE ENSEMBLE")
+        print("Starting JIGGLE ENSEMBLE", flush=True)
+        
+        if "finished_jiggle" in data:
+            print("Already Jiggled", flush=True)
+            return
+
 
         params = circuit.params
 
-        data["ensemble"] = []
-
-        print("Number of ensembles", len(data["scan_sols"]))
+        print("Number of ensembles", len(data["ensemble"]), flush=True)
 
         if self.use_calculated_error:
             print("OLD", self.success_threshold)
             self.success_threshold = self.success_threshold * data["error_percentage_allocated"]
             print("NEW", self.success_threshold)
 
-        if "finished_jiggle" in data and len(data["ensemble"]) > 0 and len(data["ensemble"][0]) > 0:
-            print("Already Jiggled", flush=True)
-            return
+        data["finished_jiggle"] = False
 
-        # data["finished_jiggle"] = False
+        ensemble = []
+        futures = []
 
-        for scan_sols in data["scan_sols"]:
+        for scan_sols in data["ensemble"]:
             all_circs = []
             print("Number of SCAN SOLS", len(scan_sols))
 
@@ -180,15 +185,31 @@ class  JiggleEnsemblePass(BasePass):
                 dists = [self.cost.calc_cost(circuit, data.target)]
 
             circ_dists = zip(circuits, dists)
+            
+            # for i, dist in enumerate(dists):
+            #     print(dist, end=",")
+            #     if dist == np.NaN:
+            #         print("DIST IS NAN")
+            #         print("Circuit", circuits[i])
+            #         print("Target", data.target)
+            #         _logger.error("DIST IS NAN")
+            #         # dist = self.cost.calc_cost(circuit, data.target)
+            #         # dists[i] = dist
 
-            all_circs = await get_runtime().map(self.jiggle_circ,
+            all_circs_future = get_runtime().map(self.jiggle_circ,
                                                 circ_dists,
                                                 target=data.target,
                                                 num_circs = ceil(self.num_circs / len(circuits)))
+            futures.append(all_circs_future)
 
-            all_circs = list(chain.from_iterable(all_circs))
-            print("Number of Circs post Jiggle", len(all_circs))
-            data["ensemble"].append(all_circs)
+
+        all_circs = [await future for future in futures]
+
+        ensemble = [list(chain.from_iterable(all_circ)) for all_circ in all_circs]  
+        print("Number of Circs post Jiggle", [len(ens) for ens in ensemble])
+        # ensemble.append(all_circs)
+
+        data["ensemble"] = ensemble
         
         if "checkpoint_dir" in data:
             data["finished_jiggle"] = True

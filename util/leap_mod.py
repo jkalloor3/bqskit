@@ -12,7 +12,7 @@ import pickle
 from bqskit.compiler.passdata import PassData
 from bqskit.ir.circuit import Circuit
 from bqskit.ir.gates import CNOTGate
-from bqskit.ir.opt.cost.functions import HilbertSchmidtResidualsGenerator
+from bqskit.ir.opt.cost.functions import HilbertSchmidtResidualsGenerator, HilbertSchmidtCostGenerator, HSCostGenerator
 from bqskit.ir.opt.cost.generator import CostFunctionGenerator
 from bqskit.passes.search.frontier import Frontier
 from bqskit.passes.search.generator import LayerGenerator
@@ -47,7 +47,7 @@ class LEAPSynthesisPass2(SynthesisPass):
         heuristic_function: HeuristicFunction = DijkstraHeuristic(),
         layer_generator: LayerGenerator | None = None,
         success_threshold: float = 1e-8,
-        cost: CostFunctionGenerator = HilbertSchmidtResidualsGenerator(),
+        cost: CostFunctionGenerator = HSCostGenerator(),
         max_layer: int | None = None,
         store_partial_solutions: bool = False,
         partials_per_depth: int = 25,
@@ -160,7 +160,7 @@ class LEAPSynthesisPass2(SynthesisPass):
         self.max_layer = max_layer
         self.min_prefix_size = min_prefix_size
         self.instantiate_options: dict[str, Any] = {
-            # 'cost_fn_gen': self.cost,
+            'cost_fn_gen': HilbertSchmidtResidualsGenerator(),
         }
         self.use_calculated_error = use_calculated_error
         self.instantiate_options.update(instantiate_options)
@@ -182,9 +182,12 @@ class LEAPSynthesisPass2(SynthesisPass):
         instantiate_options = self.instantiate_options.copy()
 
         if self.use_calculated_error:
-            success_threshold = self.success_threshold * data["error_percentage_allocated"]
-            partial_success_threshold = self.partial_success_threshold * data["error_percentage_allocated"]
-            instantiate_options['ftol'] = self.success_threshold
+            # use sqrt
+            factor = np.sqrt(data["error_percentage_allocated"])
+            success_threshold = self.success_threshold * factor
+            partial_success_threshold = self.partial_success_threshold * factor
+            instantiate_options['ftol'] = success_threshold
+            # print("New Success Threshold", success_threshold, "New Partial Success Threshold", partial_success_threshold)
         else:
             success_threshold = self.success_threshold
             partial_success_threshold = self.partial_success_threshold
@@ -213,7 +216,7 @@ class LEAPSynthesisPass2(SynthesisPass):
 
             # Track partial solutions
             psols: dict[int, list[tuple[Circuit, float]]] = {}
-            scan_sols: list[tuple[Circuit, float]] = [(default_circuit.copy(), 0)]
+            scan_sols: list[tuple[Circuit, float]] = []
 
             _logger.debug(f'Search started, initial layer has cost: {best_dist}.')
 
@@ -288,12 +291,21 @@ class LEAPSynthesisPass2(SynthesisPass):
                         data['psols'] = psols
                         data['scan_sols'] = scan_sols
                         if len(scan_sols) >= self.max_psols:
-                            # return here
+                            scan_sols.append((default_circuit.copy(), 0))
+                            # Return circuit with least count
+                            min_count = default_count
+                            max_circ = default_circuit
+                            for scan_sol, dist in scan_sols:
+                                if scan_sol.count(CNOTGate()) < min_count:
+                                    max_circ = scan_sol
+                                    min_count = scan_sol.count(CNOTGate())
+
                             # Save data and circuit
                             if save_data_file is not None:
                                 data["leap_finished"] = True
                                 pickle.dump(data, open(save_data_file, "wb"))
-                            return default_circuit
+
+                            return max_circ
                         
                     if layer not in psols:
                         psols[layer] = []
@@ -312,12 +324,13 @@ class LEAPSynthesisPass2(SynthesisPass):
                         data['scan_sols'] = scan_sols
 
 
-                    # Return circuit with highest distance
-                    max_dist = 0.0
+                    # Return circuit with least count
+                    min_count = np.inf
                     max_circ = default_circuit
                     for scan_sol, dist in scan_sols:
-                        if dist > max_dist:
+                        if scan_sol.count(CNOTGate()) < min_count:
                             max_circ = scan_sol
+                            min_count = scan_sol.count(CNOTGate())
 
                     # Save data and circuit
                     if save_data_file is not None:
@@ -363,19 +376,20 @@ class LEAPSynthesisPass2(SynthesisPass):
             data['psols'] = psols
             data['scan_sols'] = scan_sols
 
-        # Return circuit with highest distance
-        max_dist = best_dist
-        max_circ = best_circ
+        # Return circuit with least count
+        min_count = np.inf
+        max_circ = default_circuit
         for scan_sol, dist in scan_sols:
-            if dist > max_dist:
+            if scan_sol.count(CNOTGate()) < min_count:
                 max_circ = scan_sol
+                min_count = scan_sol.count(CNOTGate())
 
         # Save data and circuit
         if save_data_file is not None:
             data["leap_finished"] = True
             pickle.dump(data, open(save_data_file, "wb"))
 
-        return default_circuit
+        return max_circ
 
     def check_new_best(
         self,
@@ -493,7 +507,19 @@ class LEAPSynthesisPass2(SynthesisPass):
                 _logger.debug(f'Frontier is empty: {frontier.empty()}')
             if leap_finished:
                 _logger.debug('Block is already finished!')
+                # Return circuit with least count
+                min_count = np.inf
+                max_circ = None
+                for scan_sol, dist in data["scan_sols"]:
+                    if scan_sol.count(CNOTGate()) < min_count:
+                        max_circ = scan_sol
+                        min_count = scan_sol.count(CNOTGate())
+                
+                if max_circ:
+                    circuit.become(max_circ)
                 return
             data['leap_finished'] = False
     
-        circuit.become(await self.synthesize(data.target, data, default_circuit=circuit, frontier=frontier, save_data_file=save_data_file))
+        new_circ = await self.synthesize(data.target, data, default_circuit=circuit, frontier=frontier, save_data_file=save_data_file)
+
+        circuit.become(new_circ)

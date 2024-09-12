@@ -10,7 +10,7 @@ from bqskit.qis import UnitaryMatrix
 import numpy as np
 
 
-# cost_1 = FrobeniusCostGenerator()
+cost1 = FrobeniusCostGenerator()
 
 cost = HilbertSchmidtCostGenerator()
 
@@ -20,14 +20,17 @@ def cost_2(circuit: Circuit, target: UnitaryMatrix) -> float:
     a = circuit.get_unitary().numpy
     b = target.numpy
     prod = np.einsum("ij,ij->", a, b.conj())
-    prod_2 = np.trace(np.dot(a, b.conj().T))
-    norm = np.linalg.norm(prod)
-    return 1 - (norm / a.shape[0])
+    norm = np.abs(prod) ** 2
+    try:
+        return np.sqrt(1 - (norm / a.shape[0] / a.shape[0]))
+    except:
+        print("Error: ", 1 - (norm / a.shape[0] / a.shape[0]), flush=True)
+        exit(1)
 
 def cost_1(circuit: Circuit, target: UnitaryMatrix) -> float:
     unitary = circuit.get_unitary()
     fix = unitary.get_target_correction_factor(target) * np.eye(unitary.shape[0])
-    return cost.calc_cost(circuit, target @ fix)
+    return cost1.calc_cost(circuit, target @ fix)
 
 
 class  GetErrorsPass(BasePass):
@@ -62,9 +65,9 @@ class  GetErrorsPass(BasePass):
             dists_2.append(cost_2(subcircuit, block["target"]))
             # residuals.append(cost_4.get_residuals(subcircuit, block["target"]))
             # dists.append(dist_cost(subcircuit.get_unitary(), block["target"]))
-
-        print("Distances", dists_1, flush=True)
-        print("Distances 2", dists_2, flush=True)
+        print("Initial Error: ", data.error, flush=True)
+        # print("Distances", dists_1, flush=True)
+        # print("Distances 2", dists_2, flush=True)
         print("Upperbound 1:", sum(dists_1), "Upperbound 2:", sum(dists_2), flush=True)
         print("Full Distance", full_dist, flush=True)
         print("Full Distance 2", full_dist_2, flush=True)

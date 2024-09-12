@@ -43,21 +43,8 @@ if __name__ == '__main__':
     orig_circ = load_circuit(circ_name)
 
     orig_count = get_cnot_count(orig_circ)
-    # target = orig_circ.get_unitary()
 
-    # for variance in [1, 5, 20, 100, 1000, 10000]:
-    #     try:
-    #         circs = load_compiled_circuits_varied(circ_name, tol, variance)
-    #     except Exception as e:
-    #         print(e)
-    #         continue
-
-    #     small_circs = random.sample(circs, 1000)
-
-    #     pickle.dump(small_circs, open("small_circs.pkl", "wb"))
-    #     exit(0)
-
-    circs = load_compiled_circuits(circ_name, tol, timestep, ignore_timestep=True, extra_str=f"_{num_unique_circs}_circ_final") 
+    circs = load_compiled_circuits(circ_name, tol, timestep, ignore_timestep=True, extra_str=f"_{num_unique_circs}_circ_final_min_post_opt") 
 
     with mp.Pool() as pool:
         # tols = pool.map(get_distance, circs)

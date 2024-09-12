@@ -12,6 +12,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from util import get_chi_1_chi_2
 from qpsolvers import solve_ls
+import pickle
 
 class GenerateProbabilityPass(BasePass):
     def __init__(
@@ -61,11 +62,13 @@ class GenerateProbabilityPass(BasePass):
     async def calculate_probs(self, ensemble: np.ndarray, target: np.ndarray):
         # For now return uniform
         # TODO: Implement Quadratic Program to 
-        # return [1 / len(ensemble) for _ in ensemble]
+        return [1 / len(ensemble) for _ in ensemble]
+        
+    '''
         M = len(ensemble)
 
-        tr_V_Us = np.zeros(M)
-        tr_Us = np.zeros((M, M))
+        tr_V_Us = np.zeros(M, dtype=np.complex128)
+        tr_Us = np.zeros((M, M), dtype=np.complex128)
 
         print(ensemble.shape)
 
@@ -107,7 +110,7 @@ class GenerateProbabilityPass(BasePass):
         probabilities = solve_ls(R.T, s, None, None, Aeq, beq, lbound, ubound, solver='clarabel')
 
         return probabilities
-
+    '''
 
 
     async def run(
@@ -117,10 +120,18 @@ class GenerateProbabilityPass(BasePass):
     ) -> None:
 
         print("Running Generate Probability Pass", flush=True)
+
+        if "finished_probs_generation" in data:
+            print("Already Generated Probs", flush=True)
+            final_ensemble = data["final_ensemble"]
+            data["final_ensemble_probs"] = [1 / len(final_ensemble) for _ in final_ensemble]
+            return
+
         all_ensembles: list[list[Circuit]] = data["sub_select_ensemble"]
         all_ensemble_unitaries: list[np.ndarray] = [np.array([circ.get_unitary().numpy for circ in ensemble]) for ensemble in all_ensembles]
 
         data["ensemble_unitaries"] = all_ensemble_unitaries
+
 
         if len(all_ensembles) == 0:
             print("No ensembles to choose from")
@@ -159,6 +170,11 @@ class GenerateProbabilityPass(BasePass):
 
         print("Calculated Probabilities")
 
+        # if "checkpoint_dir" in data:
+        #     data["finished_probs_generation"] = True
+        #     data.pop("sub_select_ensemble")
+        #     checkpoint_data_file = data["checkpoint_data_file"]
+        #     pickle.dump(data, open(checkpoint_data_file, "wb"))
         return
 
 

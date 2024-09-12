@@ -2,13 +2,11 @@ from bqskit.ir.circuit import Circuit
 from sys import argv
 from bqskit.ir.gates import CNOTGate, GlobalPhaseGate, PermutationGate
 
-from bqskit.ir.opt.cost.functions import HilbertSchmidtCostGenerator
+from bqskit.ir.opt.cost.functions import HilbertSchmidtCostGenerator, HSCostGenerator
 
 from bqskit.passes import ToVariablePass
 
 from bqskit.ir.gates import VariableUnitaryGate, CNOTGate
-
-from bqskit.compiler.machine import MachineModel
 
 from bqskit import compile
 import numpy as np
@@ -32,19 +30,23 @@ if __name__ == '__main__':
 
     # model = MachineModel(circ.num_qudits, gate_set={CNOTGate(), VariableUnitaryGate(1)})
 
-    initial_pass = [
-        ToVariablePass(convert_all_single_qudit_gates=True)
-    ]
+    # initial_pass = [
+    #     ToVariablePass(convert_all_single_qudit_gates=True)
+    # ]
 
-    circ_2 = compiler.compile(circ, initial_pass)
+    # circ_2 = compiler.compile(circ, initial_pass)
 
-    print(circ_2.gate_counts, flush=True)
+    # print(circ_2.gate_counts, flush=True)
 
     err_thresh = 10 ** (-1 * tol)
 
     extra_err_thresh = np.sqrt(1e-3 * err_thresh)
 
-    out_circ, pi, pf = compile(circ_2, optimization_level=3, max_synthesis_size=3, synthesis_epsilon=extra_err_thresh, error_threshold=np.sqrt(err_thresh), error_sim_size=8, with_mapping=True, compiler=compiler)
+    # worflow = build_workflow(circ, optimization_level=3, synthesis_epsilon=extra_err_thresh, max_synthesis_size=3, error_threshold=np.sqrt(err_thresh), error_sim_size=8)
+
+    out_circ, pi, pf = compile(circ, optimization_level=3, max_synthesis_size=3, synthesis_epsilon=extra_err_thresh, error_threshold=np.sqrt(err_thresh), error_sim_size=8, with_mapping=True, compiler=compiler)
+
+    print("FINISHED!", flush=True)
 
     loc = tuple(range(circ.num_qudits))
 
@@ -74,7 +76,7 @@ if __name__ == '__main__':
 
     target = circ.get_unitary()
 
-    dist0 = HilbertSchmidtCostGenerator().calc_cost(circ_0, target)
+    dist0 = HSCostGenerator().calc_cost(circ_0, target)
     dist2 = HilbertSchmidtCostGenerator().calc_cost(circ_2, target)
 
     # dist0 = circ_0.get_unitary().get_distance_from(circ.get_unitary())
@@ -84,7 +86,7 @@ if __name__ == '__main__':
 
     print(dist0, dist2)
 
-    print("Orig Count", circ.count(CNOTGate()))
-    print("New Count", out_circ.count(CNOTGate())) 
+    print("Orig Count", circ.count(CNOTGate()), flush=True)
+    print("New Count", out_circ.count(CNOTGate()), flush=True) 
 
-    save_circuits([(out_circ, pi, pf), circ_0, circ_2], circ_name, tol, ignore_timestep=True, extra_str="_opt3")
+    save_circuits([out_circ], circ_name, tol, timestep=timestep, ignore_timestep=True, extra_str="_opt3")

@@ -1,4 +1,4 @@
-from .analyze_block_pass import AnalyzeBlockPass
+from .analyze_block_pass import AnalyzeBlockPass, TCountPass
 from .second_leap import SecondLEAPSynthesisPass
 from .common import *
 from .stats import *

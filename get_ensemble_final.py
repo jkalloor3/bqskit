@@ -17,18 +17,12 @@ from bqskit.passes import ScanningGateRemovalPass
 
 
 from util import SecondLEAPSynthesisPass, SubselectEnsemblePass, GenerateProbabilityPass, SelectFinalEnsemblePass, LEAPSynthesisPass2, QSearchSynthesisPass2
+from util import GetErrorsPass
 
 from bqskit import enable_logging
 
-from pathlib import Path
-
-import multiprocessing as mp
-
-from os.path import join
-
 from util import save_circuits, load_circuit, FixGlobalPhasePass, CalculateErrorBoundPass
 
-enable_logging(True)
 
 def get_distance(circ1: Circuit) -> float:
     global target
@@ -36,16 +30,21 @@ def get_distance(circ1: Circuit) -> float:
 
 
 def get_shortest_circuits(circ_name: str, tol: int, timestep: int,
-                          num_unique_circs: int = 100) -> list[Circuit]:
-    circ = load_circuit(circ_name)
+                          num_unique_circs: int = 100, extra_str="") -> list[Circuit]:
+    circ = load_circuit(circ_name, opt=opt)
+
+    print("Original CNOT Count: ", circ.count(CNOTGate()))
     
     # workflow = gpu_workflow(tol, f"{circ_name}_{tol}_{timestep}")
-    err_thresh = np.sqrt(10 ** (-1 * tol))
-    extra_err_thresh = 3e-2 * err_thresh
+    if tol == 0:
+        err_thresh = 0.2
+    else:
+        err_thresh = 10 ** (-1 * tol)
+    extra_err_thresh = 1e-2 * err_thresh
     phase_generator = HilbertSchmidtCostGenerator()
     big_block_size = 8
     small_block_size = 3
-    checkpoint_dir = f"fixed_block_checkpoints_min/{circ_name}_{timestep}_{tol}_{big_block_size}_{small_block_size}/"
+    checkpoint_dir = f"fixed_block_checkpoints_min{extra_str}/{circ_name}_{timestep}_{tol}_{big_block_size}_{small_block_size}/"
     # proj_name = f"{circ_name}_{timestep}_{tol}_final"
     # base_checkpoint_dir = None
     # proj_name = None
@@ -53,7 +52,7 @@ def get_shortest_circuits(circ_name: str, tol: int, timestep: int,
     # layer_gen = SimpleLayerGenerator(single_qudit_gate_1=VariableUnitaryGate(1))
 
     fast_instantiation_options = {
-        # 'multistarts': 1,
+        'multistarts': 2,
         'ftol': extra_err_thresh,
         'diff_tol_r': 1e-4,
         'max_iters': 10000,
@@ -62,7 +61,7 @@ def get_shortest_circuits(circ_name: str, tol: int, timestep: int,
     }
 
     good_instantiation_options = {
-        'multistarts': 8,
+        'multistarts': 16,
         'ftol': 5e-16,
         'gtol': 1e-15,
         'diff_tol_r': 1e-6,
@@ -72,11 +71,13 @@ def get_shortest_circuits(circ_name: str, tol: int, timestep: int,
 
     slow_partitioner_passes = [
         ScanPartitioner(block_size=small_block_size),
+        ExtendBlockSizePass(),
         ScanPartitioner(block_size=big_block_size),
     ]
 
     fast_partitioner_passes = [
         QuickPartitioner(block_size=small_block_size),
+        ExtendBlockSizePass(),
         QuickPartitioner(block_size=big_block_size),
     ]
 
@@ -93,9 +94,9 @@ def get_shortest_circuits(circ_name: str, tol: int, timestep: int,
         # layer_generator=layer_gen,
         success_threshold = extra_err_thresh,
         partial_success_threshold=err_thresh,
-        cost=phase_generator,
+        # cost=phase_generator,
         instantiate_options=instantiation_options,
-        use_calculated_error=True,
+        # use_calculated_error=True,
         max_psols=5
     )
 
@@ -103,12 +104,11 @@ def get_shortest_circuits(circ_name: str, tol: int, timestep: int,
         success_threshold = extra_err_thresh,
         # layer_generator=layer_gen,
         partial_success_threshold=err_thresh,
-        cost=phase_generator,
+        # cost=HS,
         instantiate_options=instantiation_options,
-        use_calculated_error=True,
+        # use_calculated_error=True,
         max_psols=3
     )
-
 
     leap_workflow = [
         CheckpointRestartPass(checkpoint_dir, 
@@ -124,17 +124,19 @@ def get_shortest_circuits(circ_name: str, tol: int, timestep: int,
                     calculate_error_bound=False,
                     allocate_error=True,
                     allocate_error_gate=CNOTGate(),
+                    check_checkpoint=True
                 ),
                 # ScanningGateRemovalPass(),
                 CreateEnsemblePass(success_threshold=err_thresh, 
                                    use_calculated_error=True, 
                                    num_circs=num_unique_circs,
-                                #    num_random_ensembles=5,
-                                   cost=phase_generator, 
+                                   num_random_ensembles=2,
+                                #    cost=phase_generator, 
                                    solve_exact_dists=True),
-                JiggleEnsemblePass(success_threshold=err_thresh, num_circs=5000, use_ensemble=True, cost=phase_generator),
-                SubselectEnsemblePass(success_threshold=err_thresh, num_circs=100),
+                JiggleEnsemblePass(success_threshold=err_thresh, num_circs=2000, use_ensemble=True),
+                SubselectEnsemblePass(success_threshold=err_thresh, num_circs=200),
                 GenerateProbabilityPass(size=50),
+                # GetErrorsPass(),
                 UnfoldPass(),
             ],
             calculate_error_bound=True,
@@ -142,16 +144,20 @@ def get_shortest_circuits(circ_name: str, tol: int, timestep: int,
             allocate_error=True,
             allocate_error_gate=CNOTGate(),
         ),
-        SelectFinalEnsemblePass(size=500)
+        SelectFinalEnsemblePass(size=5000),
+        # GetErrorsPass(),
+        # UnfoldPass()
     ]
     num_workers = 256
     compiler = Compiler(num_workers=num_workers)
     # target = circ.get_unitary()
     out_circ, data = compiler.compile(circ, workflow=leap_workflow, request_data=True)
     approx_circuits: list[Circuit] = data["final_ensemble"]
-    print("Final Count: ", approx_circuits[0].count(CNOTGate()))
-    print("Num Circs", len(approx_circuits))
+    # print("Final Count: ", out_circ.count(CNOTGate()))
+    # print("Num Circs", len(approx_circuits))
     # actual_error = target.get_frobenius_distance(out_circ.get_unitary())
+    # actual_error = np.sqrt(actual_error) / np.sqrt(2 ** (circ.num_qudits + 1))
+    # print("Frob/sqrt(2N): ", actual_error, " Threshold: ", err_thresh)
     # cost_error = generator.calc_cost(out_circ, target)
     # assert(np.allclose(actual_error, cost_error))
     return approx_circuits, data.error, out_circ.count(CNOTGate())
@@ -162,9 +168,12 @@ if __name__ == '__main__':
     timestep = int(argv[2])
     tol = int(argv[3])
     num_unique_circs = int(argv[4])
-    circs, error_bound, count = get_shortest_circuits(circ_name, tol, timestep, num_unique_circs=num_unique_circs)
+    opt = bool(int(argv[5])) if len(argv) > 5 else False
+    opt_str = "_opt" if opt else ""
+    print("OPT STR", opt_str, opt, argv[5])
+    circs, error_bound, count = get_shortest_circuits(circ_name, tol, timestep, num_unique_circs=num_unique_circs, extra_str=opt_str)
     sorted_circs = sorted(circs, key=lambda c: c.count(CNOTGate()))
-    circ = load_circuit(circ_name)
+    circ = load_circuit(circ_name, opt=opt)
     # target = circ.get_unitary()
     print("Error Bound", error_bound)
     # print("Actual Error", actual_error)
@@ -178,4 +187,4 @@ if __name__ == '__main__':
     # print("Min Distance", min(dists))
     # print("Mean Distance", np.mean(dists))
     # print([c.get_unitary().get_distance_from(circ.get_unitary()) for c in circs[:20]])
-    save_circuits(circs, circ_name, tol, timestep, ignore_timestep=True, extra_str=f"_{num_unique_circs}_circ_final_min")
+    save_circuits(circs, circ_name, tol, timestep, ignore_timestep=True, extra_str=f"_{num_unique_circs}_circ_final_min_post{opt_str}_noqp")

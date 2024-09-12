@@ -61,42 +61,40 @@ class SubselectEnsemblePass(BasePass):
         return np.array(inds)
 
 
+    async def get_new_ensemble(self, ensemble: list[Circuit]) -> list[Circuit]:
+        ensemble_vec = np.array([c.get_unitary().get_flat_vector() for c in ensemble])
+        print("Running Subselect Ensemble Pass!", flush=True)
+        print(ensemble_vec.shape, flush=True)
+        # print(ensemble_vec[0], flush=True)
+        # print(ensemble_vec[1], flush=True)
+        # pca = PCA(n_components=self.pca_components).fit_transform(ensemble_vec)
+        # tsne = TSNE(n_components=self.tsne_components, method='exact').fit_transform(pca)
+        k_means = KMeans(n_clusters=self.num_circs, random_state=0, n_init="auto").fit(ensemble_vec)
+        
+        new_ensemble_inds = SubselectEnsemblePass.get_inds(k_means.labels_, self.num_circs)
+        new_ensemble = [ensemble[i] for i in new_ensemble_inds]
+
+        print("Subselected Ensemble Size: ", len(new_ensemble_inds), flush=True)
+
+        return new_ensemble
+
+
     async def run(self, circuit: Circuit, data: PassData) -> None:
         """Perform the pass's operation, see :class:`BasePass` for more."""
-        all_ensembles = []
-        # original_ensembles = data["ensemble"]
 
-        if "finished_subselect" in data and "sub_select_ensemble" in data:
+        if "finished_subselect" in data:
             print("Already Subselected", flush=True)
             return
 
         data["finished_subselect"] = False
 
-        for ensemble in data["ensemble"]:
+        all_ensembles = await get_runtime().map(self.get_new_ensemble, data["ensemble"])
 
-            print("Pre sub-select Ensemble Size", len(ensemble), flush=True)
-
-            ensemble_vec = np.array([c.get_unitary().get_flat_vector() for c in ensemble])
-            # print("Running Subselect Ensemble Pass!", flush=True)
-            # print(ensemble_vec.shape, flush=True)
-            # print(ensemble_vec[0], flush=True)
-            # print(ensemble_vec[1], flush=True)
-            # pca = PCA(n_components=self.pca_components).fit_transform(ensemble)
-            # tsne = TSNE(n_components=self.tsne_components, method='exact').fit_transform(pca)
-            k_means = KMeans(n_clusters=self.num_circs, random_state=0, n_init="auto").fit(ensemble_vec)
-            
-            new_ensemble_inds = SubselectEnsemblePass.get_inds(k_means.labels_, self.num_circs)
-            new_ensemble = [ensemble[i] for i in new_ensemble_inds]
-
-            print("Post sub-select Ensemble Size", len(new_ensemble), flush=True)
-
-            all_ensembles.append(new_ensemble)
-
-        # data["original_ensemble"] = original_ensembles
         data["sub_select_ensemble"] = all_ensembles
 
         if "checkpoint_dir" in data:
             data["finished_subselect"] = True
+            data.pop("ensemble")
             checkpoint_data_file = data["checkpoint_data_file"]
             pickle.dump(data, open(checkpoint_data_file, "wb"))
 

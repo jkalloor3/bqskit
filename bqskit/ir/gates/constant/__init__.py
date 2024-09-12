@@ -43,6 +43,7 @@ from bqskit.ir.gates.constant.y import YGate
 from bqskit.ir.gates.constant.yy import YYGate
 from bqskit.ir.gates.constant.z import ZGate
 from bqskit.ir.gates.constant.zz import ZZGate
+from bqskit.ir.gates.constant.fixed_rz import FixedRZGate
 
 __all__ = [
     'BGate',
@@ -72,6 +73,7 @@ __all__ = [
     'SdgGate',
     'ShiftGate',
     'SqrtCNOTGate',
+    'FixedRZGate',
     'SqrtISwapGate',
     'SubSwapGate',
     'SwapGate',

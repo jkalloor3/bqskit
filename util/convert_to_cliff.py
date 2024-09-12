@@ -13,7 +13,7 @@ from bqskit.passes.rules import ZXZXZDecomposition
 from bqskit.compiler.basepass import BasePass
 from bqskit.compiler.passdata import PassData
 from bqskit.ext.supermarq import supermarq_parallelism
-from bqskit.ir.gates import U3Gate, RZGate, HGate, SGate, TGate, TdgGate, SdgGate, XGate, SqrtXGate, CircuitGate, RXGate
+from bqskit.ir.gates import U3Gate, RZGate, HGate, SGate, TGate, TdgGate, SdgGate, XGate, SqrtXGate, CircuitGate, RXGate, FixedRZGate
 from bqskit.runtime import get_runtime
 from itertools import product
 import numpy as np
@@ -23,37 +23,21 @@ import subprocess
 from bqskit.ir.gates.constantgate import ConstantGate
 from bqskit.ir.gates.qubitgate import QubitGate
 
-from bqskit.ir.opt.cost.functions import  HilbertSchmidtCostGenerator, FrobeniusNoPhaseCostGenerator
-cost = HilbertSchmidtCostGenerator()
+from bqskit.ir.opt.cost.functions import  HSCostGenerator
+cost = HSCostGenerator()
 
 
 _logger = logging.getLogger(__name__)
 
-class FixedRZGate(ConstantGate, QubitGate):
-    """
-    An RZ Gate fixed to a specific angle.
-    """
-
-    _num_qudits = 1
-    _qasm_name = 'rz'
-
-    def __init__(self, theta: float) -> None:
-        pexp = np.exp(1j * theta / 2)
-        nexp = np.exp(-1j * theta / 2)
-        self._utry =  UnitaryMatrix(
-            [
-                [nexp, 0],
-                [0, pexp],
-            ],
-        )
-
 class ConvertToZXZXZ(BasePass):
 
-    def __init__(self, success_threshold: float = 1e-8, sub_epsilon: float = 1e-1, num_circs: int = 100, use_calculated_error: bool = True):
+    def __init__(self, success_threshold: float = 1e-8, sub_epsilon: float = 1e-3, num_circs: int = 100, use_calculated_error: bool = True,
+                 instantiation_options: dict[str, Any] = None):
         self.success_threshold = success_threshold
         self.sub_epsilon = sub_epsilon
         self.num_circs = num_circs
         self.use_calculated_error = use_calculated_error
+        self.instantiation_options = instantiation_options
 
     def get_all_zxzxz_decomps(self) -> list[Circuit]:
         # Try to fix 1 angle in ZXZXZ decomposition
@@ -100,7 +84,7 @@ class ConvertToZXZXZ(BasePass):
 
     async def get_zxzxz_decomp(self, target: UnitaryMatrix) -> Circuit:
         circs = self.get_all_zxzxz_decomps()
-        inst_circs = await get_runtime().map(Circuit.instantiate, circs, target=target)
+        inst_circs = await get_runtime().map(Circuit.instantiate, circs, target=target, **self.instantiation_options)
 
         default_circ = Circuit(1)
         for i in range(3):
@@ -129,14 +113,11 @@ class ConvertToZXZXZ(BasePass):
         pts = []
         targets = []
         locs = []
-
-        # if "finished_zxzxz" in data:
-        #     return
         
         if self.use_calculated_error:
-            print("OLD", self.success_threshold)
+            # print("OLD", self.success_threshold)
             success_threshold = self.success_threshold * data["error_percentage_allocated"]
-            print("NEW", self.success_threshold)
+            # print("NEW", self.success_threshold)
         else:
             success_threshold = self.success_threshold
 
@@ -155,11 +136,6 @@ class ConvertToZXZXZ(BasePass):
 
         zxzxz_circs: list[list[Circuit]] = await get_runtime().map(self.get_zxzxz_decomp, targets)
 
-
-        pot_circ_inds = [len(psol) for psol in zxzxz_circs]
-        num_potential_circs = np.prod(pot_circ_inds)
-        print("NUM POTENTIAL CIRCS", num_potential_circs)
-
         ensemble_circs = list(product(*zxzxz_circs))[:self.num_circs * 2]
 
         final_circs = []
@@ -175,7 +151,7 @@ class ConvertToZXZXZ(BasePass):
 
         dists = [cost.calc_cost(circ, data.target) for circ in new_circs]
 
-        new_circs = [(circ, dist) for circ, dist in zip(new_circs, dists) if dist < success_threshold][:self.num_circs]
+        new_circs: list[tuple[Circuit, float]] = [(circ, dist) for circ, dist in zip(new_circs, dists) if dist < success_threshold ][:self.num_circs]
 
         if len(new_circs) == 0:
             print("NO SUCCESSFUL CIRCUITS")
@@ -183,12 +159,15 @@ class ConvertToZXZXZ(BasePass):
             assert cost.calc_cost(default_circ, data.target) < success_threshold
             new_circs = [(self.get_default_circ(circuit.copy()), 0)]
 
-        tcount_approx = lambda circ: circ.count(RZGate()) * 3 * 30 + circ.count(U3Gate()) * 3 * 30 
+        tcount_approx = lambda circ: circ.num_params * 30
         counts = [tcount_approx(circ[0]) for circ in new_circs]
 
-        # print("Final Dists: ", dists)
+        print("Final Dists: ", dists)
         print("Final Counts: ", counts)
         # print("Final Scan Sols: ", new_circs)
+
+        # for circ, _ in new_circs:
+        #     print(circ.gate_counts)
 
         data["scan_sols"] = new_circs
 

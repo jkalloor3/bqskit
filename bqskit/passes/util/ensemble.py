@@ -9,14 +9,17 @@ from bqskit.compiler.passdata import PassData
 from bqskit.ir.circuit import Circuit, CircuitPoint, Operation, CircuitLocationLike
 from bqskit.runtime import get_runtime
 from typing import Any
-from bqskit.ir.opt.cost.functions import HilbertSchmidtResidualsGenerator, HilbertSchmidtCostGenerator, FrobeniusCostGenerator
+from collections import deque
+from bqskit.ir.opt.cost.functions import HSCostGenerator, HilbertSchmidtCostGenerator, FrobeniusCostGenerator
 from bqskit.ir.opt.minimizers.lbfgs import LBFGSMinimizer
 from bqskit.ir.opt.cost.generator import CostFunctionGenerator
 from bqskit.ir.gates import CircuitGate
-from bqskit.ir.gates import CNOTGate
+from bqskit.ir.gates import CNOTGate, FixedRZGate
 from bqskit.qis import UnitaryMatrix
 import numpy as np
 import pickle
+import random
+
 
 _logger = logging.getLogger(__name__)
 
@@ -26,9 +29,11 @@ class CreateEnsemblePass(BasePass):
 
     def __init__(self, success_threshold = 1e-4, 
                  num_circs = 1000,
-                 cost: CostFunctionGenerator = HilbertSchmidtCostGenerator(),
+                 cost: CostFunctionGenerator = HSCostGenerator(),
                  use_calculated_error: bool = False,
-                 solve_exact_dists: bool = False) -> None:
+                 num_random_ensembles: int = 3,
+                 solve_exact_dists: bool = False,
+                 sort_by_t: bool = False) -> None:
         """
         Construct a ToU3Pass.
 
@@ -42,6 +47,7 @@ class CreateEnsemblePass(BasePass):
         self.cost = cost
         self.solve_exact_dists = solve_exact_dists
         self.use_calculated_error = use_calculated_error
+        self.num_random_ensembles = num_random_ensembles
         self.instantiate_options={
             'min_iters': 100,
             'ftol': self.success_threshold,
@@ -50,14 +56,8 @@ class CreateEnsemblePass(BasePass):
             'dist_tol': self.success_threshold,
             'method': 'qfactor'
         }
+        self.sort_by_t = sort_by_t
 
-        # self.instantiate_options: dict[str, Any] = {
-        #     'dist_tol': self.success_threshold,
-        #     'min_iters': 100,
-        #     'cost_fn_gen': self.cost,
-        #     'method': 'minimization',
-        #     'minimizer': LBFGSMinimizer(),
-        # }
     async def unfold_circ(
             config_dist: tuple[list[CircuitGate], float], 
             circuit: Circuit, 
@@ -65,7 +65,6 @@ class CreateEnsemblePass(BasePass):
             locations: list[CircuitLocationLike], 
             solve_exact_dists: bool = False, 
             cost: CostFunctionGenerator = HilbertSchmidtCostGenerator(),
-            success_threshold: float = 1e-4,
             target: UnitaryMatrix = None) -> tuple[Circuit, float]:
         
         config, dist = config_dist
@@ -79,14 +78,114 @@ class CreateEnsemblePass(BasePass):
         copied_circuit.unfold_all()
 
         if solve_exact_dists:
-            orig_dist = dist
             dist = cost.calc_cost(copied_circuit, target)
-            frob_dist = frob_cost.calc_cost(copied_circuit, target)
-            # dist_2 = CreateEnsemblePass.no_phase_cost.calc_cost(copied_circuit, target)
-
-            # print("Exact Dist: ", dist, "Upperbound: ", orig_dist, "Frob Dist:", frob_dist, "Success Threshold: ", success_threshold, flush=True)
 
         return copied_circuit, dist
+
+
+    async def knapsack_solve(self, psol_diffs: list[list[int]], psol_dists: list[list[float]], total_dist: float, num_circs: int, greediest: bool = False) -> list:
+        '''
+        Pick an ensemble of circuits that minimizes the total number of CNOTs while keeping the total distance below a threshold
+        You must pick one psol from each list of psol_diffs.
+
+        
+
+        Args:
+            psol_diffs: list of lists of differences in CNOT counts 
+            dists: list of lists of distances
+            total_dist: total distance allowed
+
+        Returns:
+            list of list of indices to pick. Each list corresponds to a list of psols. 
+            There are `num_circs` lists in total.
+        
+        '''
+
+        # Most greedy algorithm
+        # Pick the psol that minimizes the difference in CNOT counts
+        diffs = np.ones([len(psol_diffs),len(max(psol_diffs,key = lambda x: len(x)))])
+        dists = np.zeros_like(diffs)
+        for i,j in enumerate(psol_diffs):
+            diffs[i][0:len(j)] = j
+            dists[i][0:len(j)] = psol_dists[i]
+
+        # Sort by best CNOT count diff
+        if greediest:
+            orig_inds = np.argsort(diffs[:, 0])
+        else:
+            # Pick a random ordering
+            orig_inds = np.random.choice(len(diffs), size=(len(diffs)), replace=False)
+        
+        all_valid_inds = self.BFS(orig_inds, psol_diffs, dists, total_dist, greedy=greediest)
+
+        sorted_inds = sorted(all_valid_inds, key=lambda x: x[1])
+
+        # print("SORTED Savings", [x[1] for x in sorted_inds], flush=True)
+
+        if greediest:
+            return [(x[0], x[2]) for x in sorted_inds[:num_circs]]
+        else:
+            weights = np.array([(x[1] - 0.001) for x in sorted_inds])
+            weights = weights / np.sum(weights)
+            # Add uniform distribution to encourage exploration
+            weights += 1/len(weights)
+            weights = weights / np.sum(weights)
+            try:
+                random_inds = np.random.choice(len(sorted_inds), size=(num_circs), p=weights)
+            except Exception as e:
+                print("Weights", weights, flush=True)
+                print("Sorted Inds", sorted_inds, flush=True)
+                _logger.error(e)
+                
+            return [(sorted_inds[i][0], sorted_inds[i][2]) for i in random_inds]
+    
+    def BFS(self, orig_inds, psol_diffs, dists, total_dist, greedy = False):
+        queue = deque([])
+        queue.append((orig_inds, 0, [-1 for _ in psol_diffs], 0))
+        final_inds = []
+        total_sols = 1
+        max_total_sols = 10000
+        while len(queue) > 0:
+            inds, cur_dist, greedy_inds, cnots_saved = queue.popleft()
+            if len(inds) == 0:
+                final_inds.append((greedy_inds, cnots_saved, cur_dist))
+            else:
+                ind = inds[0]
+                pos_sols = 0
+
+                if greedy:
+                    cols = np.arange(len(psol_diffs[ind]))
+                else:
+                    cols = np.random.choice(len(psol_diffs[ind]), size=(len(psol_diffs[ind])), replace=False)
+
+
+                for j in cols:
+                    dist = dists[ind][j]
+                    new_dist = cur_dist + dist
+                    if new_dist < total_dist:
+                        pos_sols += 1
+
+                new_total_sols = total_sols * pos_sols
+                if new_total_sols > max_total_sols:
+                    # Only explore one solution
+                    pos_sols = 1
+                else:
+                    pos_sols = min(pos_sols, 3)
+
+                total_sols *= pos_sols
+                for j in cols:
+                    dist = dists[ind][j]
+                    new_dist = cur_dist + dist
+                    if new_dist < total_dist:
+                        pos_sols -= 1
+                        new_greedy_inds = greedy_inds.copy()
+                        new_greedy_inds[ind] = j
+                        new_cnots_saved = cnots_saved + psol_diffs[ind][j]
+                        queue.append((inds[1:], new_dist, new_greedy_inds, new_cnots_saved))
+                    if pos_sols == 0:
+                        break
+
+        return final_inds
 
     async def assemble_circuits(
         self,
@@ -99,100 +198,102 @@ class CreateEnsemblePass(BasePass):
         target: UnitaryMatrix = None
     ) -> Circuit:
         """Assemble a circuit from a list of block indices."""
-        # print("ASSEMBLING CIRCUIT")
-        all_combos = []
-        i = 0
+        if self.sort_by_t:
+            # The fewer parameters the better
+            psols_diffs = [[(psol.num_params - psols[i][-1].num_params) for psol in psols[i]] for i in range(len(psols))]
+        else:
+            # The fewer CNOTs the better
+            psols_diffs = [[psol.count(CNOTGate()) - psols[i][-1].count(CNOTGate()) for psol in psols[i]] for i in range(len(psols))]
+        locations = [circuit[pt].location for pt in pts]
 
-        used_inds = set()
-        num_circs = 0
-        trials = 0
+        possible_sols = 1
+        for i in range(len(psols_diffs)):  
+            possible_sols *= len(psols_diffs[i])
+        
+        if possible_sols == 1:
+            print("Only one solution", flush=True)
+            circ_list = [psols[i][-1] for i in range(len(psols))]
+            default_config = [CircuitGate(circ) for circ in circ_list]
+            all_circs_dists = await CreateEnsemblePass.unfold_circ(
+                (default_config, 0),
+                circuit=circuit,
+                pts=pts,
+                locations=locations,
+                solve_exact_dists=self.solve_exact_dists,
+                cost=self.cost,
+                target=target
+            )
+            return [[all_circs_dists]]
 
-        inds_1 = [[] for _ in range(len(psols))]
-        inds_2 = [[] for _ in range(len(psols))]
-        inds_3 = [[] for _ in range(len(psols))]
-        inds_4 = [[] for _ in range(len(psols))]
-        default_inds = [[-1] for _ in range(len(psols))]
-        random_inds = [[] for _ in range(len(psols))]
-        possible_solutions = 1
+        greediest_inds = await self.knapsack_solve(
+            psols_diffs, 
+            dists, 
+            self.success_threshold * 5, 
+            self.num_circs * 5,
+            greediest=True)
+    
 
-        print("COUNTS FOR EACH PSOLS", flush=True)
-        for i in range(len(psols)):
-            print("New Counts: ", [psol.count(CNOTGate()) for psol in psols[i]], "Orig Counts: ", psols[i][-1].count(CNOTGate()), flush=True)
+        greedier_inds = await self.knapsack_solve(
+            psols_diffs, 
+            dists, 
+            self.success_threshold * 5, 
+            self.num_circs * 3,
+            greediest=False)
+
+        greedy_inds = await self.knapsack_solve(
+            psols_diffs, 
+            dists, 
+            self.success_threshold * 2, 
+            self.num_circs * 3,
+            greediest=False)
+
+        safe_greediest_inds = await self.knapsack_solve(
+            psols_diffs, 
+            dists, 
+            self.success_threshold, 
+            self.num_circs * 5,
+            greediest=True)
+
+        safe_inds = await self.knapsack_solve(
+            psols_diffs, 
+            dists, 
+            self.success_threshold, 
+            self.num_circs,
+            greediest=False)
+
+        valid_inds = await self.knapsack_solve(
+            psols_diffs, 
+            dists, 
+            self.success_threshold, 
+            self.num_circs * 10,
+            greediest=False)
 
 
-        for i in range(len(psols)):
-            assert(len(psols[i]) > 0)
-            numbers = np.arange(0, len(psols[i]))
-            # weight by number of CNOTs multiplied by log of distance
-            weight_eqn_1 = lambda x: psols[i][x].count(CNOTGate())
-            weight_eqn_2 = lambda x: np.sqrt(psols[i][x].count(CNOTGate()))
-            weight_eqn_3 = lambda x: np.sqrt(psols[i][x].count(CNOTGate())) * -1 * np.log10(dists[i][x] + self.success_threshold / 1000) # Higher weight to 
-            weight_eqn_4 = lambda x: np.sqrt(-1 * np.log10(dists[i][x] + self.success_threshold / 1000)) # Only care about distance
-            weights_1 = np.array([weight_eqn_1(j) for j in range(len(psols[i]))])
-            weights_2 = np.array([weight_eqn_2(j) for j in range(len(psols[i]))])
-            weights_3 = np.array([weight_eqn_3(j) for j in range(len(psols[i]))])
-            weights_4 = np.array([weight_eqn_4(j) for j in range(len(psols[i]))])
-            weights_1 = weights_1 / np.sum(weights_1)
-            weights_2 = weights_2 / np.sum(weights_2)
-            weights_3 = weights_3 / np.sum(weights_3)
-            weights_4 = weights_4 / np.sum(weights_4)
-            inds_1[i] = np.random.choice(numbers, p=weights_1, size=(self.num_circs * 10))
-            inds_2[i] = np.random.choice(numbers, p=weights_2, size=(self.num_circs * 10))
-            inds_3[i] = np.random.choice(numbers, p=weights_3, size=(self.num_circs * 10))
-            inds_4[i] = np.random.choice(numbers, p=weights_4, size=(self.num_circs * 10))
-            random_inds[i] = np.random.choice(numbers, size=(self.num_circs * 10))
-            possible_solutions *= len(psols[i])
+        all_inds = [greediest_inds, greedier_inds, greedy_inds, safe_greediest_inds, safe_inds]
 
-        inds_1 = np.array(inds_1)
-        inds_2 = np.array(inds_2)
-        inds_3 = np.array(inds_3)
-        inds_4 = np.array(inds_4)
-        inds_5 = np.array(random_inds)
+        for _ in range(self.num_random_ensembles):
+            all_inds.append(random.sample(valid_inds, k=(self.num_circs)))
 
-        # Metric based on distance is worst
-        all_inds = [inds_1, inds_2, inds_3, inds_5, inds_4]
+
+        print("Got all ensembles", flush=True)
 
         all_ensembles = []
 
-        for k, inds in enumerate(all_inds):
-            # if k == 0:
-            #     print("CNOT based sampling")
-            # elif k == 1:
-            #     print("CNOT sqrt based sampling")
-            # else:
-            #     print("Other sampling")
-
-            num_collisions = 0
+        for inds in all_inds:
+            uppers = []
+            all_combos = []
 
             # Randomly sample a bunch of psols
-            while (num_circs < self.num_circs and trials < self.num_circs * 10):
-                random_inds = inds[:, trials]
-                total_dist = sum(dists[i][ind] for i, ind in enumerate(random_inds))
-                # print(total_dist, flush=True)
-                trials += 1
-                if (str(random_inds) in used_inds):
-                    num_collisions += 1
-                    continue
-                else:
-                    used_inds.add(str(random_inds))
-                    circ_list = [psols[i][ind] for i, ind in enumerate(random_inds)]
-                    new_config = [CircuitGate(circ) for circ in circ_list]
-                    all_combos.append((new_config, total_dist))
-                    if total_dist > self.success_threshold:
-                        print("Dists: ", [dists[i][ind] for i, ind in enumerate(random_inds)], "Thresholds: ", thresholds, flush=True)
-                        print("Total Dist: ", total_dist, "Threshold: ", self.success_threshold, flush=True)
-                    # actual_dists = [self.cost.calc_cost(psols[i][ind], targets[i]) for i, ind in enumerate(random_inds)]
-                    # print("Actual Dists: ", actual_dists, flush=True)
-                    # frob_dists = [frob_cost.calc_cost(psols[i][ind], targets[i]) for i, ind in enumerate(random_inds)]
-                    # print("Frob Dists: ", frob_dists, flush=True)
-                    num_circs += 1
+            for random_inds, total_dist in inds:
+                circ_list = [psols[i][ind] for i, ind in enumerate(random_inds)]
+                new_config = [CircuitGate(circ) for circ in circ_list]
+                all_combos.append((new_config, total_dist))
+                uppers.append(total_dist)
 
             # Add original circuit
             circ_list = [psols[i][-1] for i in range(len(psols))]
             default_config = [CircuitGate(circ) for circ in circ_list]
             all_combos.append((default_config, 0))
-
-            locations = [circuit[pt].location for pt in pts]
             all_circs_dists = await get_runtime().map(
                 CreateEnsemblePass.unfold_circ,
                 all_combos,
@@ -201,22 +302,33 @@ class CreateEnsemblePass(BasePass):
                 locations=locations,
                 solve_exact_dists=self.solve_exact_dists,
                 cost=self.cost,
-                success_threshold=self.success_threshold,
                 target=target
             )
 
-            dists = [dist for circ, dist in all_circs_dists]
 
-            # print("Final Dists: ", dists, flush=True)
-            initial_circs = len(dists)
-            
-            all_circs_dists = [(circ, dist) for circ, dist in all_circs_dists if dist < self.success_threshold]
+            # init_dists = [dist for circ, dist in all_circs_dists]
+            # counts = [circ.count(CNOTGate()) for circ, dist in all_circs_dists]
+
+            # print("Initial Dists: ", init_dists, flush=True)
+            # uppers = [dist for circ, dist in all_circs_dists]
+            # print("Initial upperbounds: ", uppers, flush=True)
+            # print("Initial Counts: ", counts, flush=True)
+
+            all_circs_dists: list[tuple[Circuit, float]] = [(circ, dist) for circ, dist in all_circs_dists if dist < self.success_threshold][:self.num_circs]
+
+            all_circs_dists = sorted(all_circs_dists, key=lambda x: x[0].count(CNOTGate()))
+
+            # print("Selected Dists: ", [dist for circ, dist in all_circs_dists], flush=True)
+            if self.sort_by_t:
+                final_counts = [circ.num_params for circ, dist in all_circs_dists]
+            else:
+                final_counts = [circ.count(CNOTGate()) for circ, dist in all_circs_dists]
+            # print("Selected Counts: ", [circ.count(CNOTGate()) for circ, dist in all_circs_dists], flush=True)
 
             if len(all_circs_dists) == 0:
                 print(all_circs_dists, flush=True)
                 print("No Circuits Found", flush=True)
-                return None
-
+                all_ensembles.append(None)
 
             assert len(all_circs_dists) > 0
 
@@ -224,14 +336,13 @@ class CreateEnsemblePass(BasePass):
                 # Get rid of the default case
                 all_circs_dists.pop()
 
-            # print("Final Number of Circs: ", len(all_circs_dists), flush=True)
+            print("Length of Ensemble", len(all_circs_dists), "Final Average Count: ", np.mean(final_counts), flush=True)
+            all_ensembles.append((all_circs_dists, np.mean(final_counts)))
 
-            # print("Possible Solutions: ", possible_solutions, "Initial Circs: ", initial_circs, "Final Circs: ", len(all_circs_dists), "Num Collisions: ", num_collisions, flush=True)
-
-            all_ensembles.append(all_circs_dists)
-
-
-        return all_ensembles
+        # Sort by average CNOT count
+        all_ensembles = sorted(all_ensembles, key=lambda x: x[1])
+        print("Avg Counts", [x[1] for x in all_ensembles], flush=True)
+        return [x[0] for x in all_ensembles]
 
 
     def parse_data(self,
@@ -277,6 +388,12 @@ class CreateEnsemblePass(BasePass):
         """Perform the pass's operation, see :class:`BasePass` for more."""
         print("Running Ensemble Pass", flush=True)
 
+        # print("Keys", list(data.keys()), flush=True)
+
+        # if "finished_create_ensemble" in data:
+        #     print("Ensemble Already Found", flush=True)
+        #     return
+
         # Get scan_sols for each circuit_gate
         block_data = data[ForEachBlockPass.key]
 
@@ -285,30 +402,29 @@ class CreateEnsemblePass(BasePass):
             self.success_threshold = self.success_threshold * data["error_percentage_allocated"]
 
         approx_circs, pts, dists, targets, thresholds = self.parse_data(circuit, block_data)
-
-        if "finished_create_ensemble" in data:
-            print("Ensemble Already Found", flush=True)
-            return
         
-        all_ensembles: list[tuple[Circuit, float]] = await self.assemble_circuits(circuit, approx_circs, pts, dists=dists, targets=targets, thresholds=thresholds, target=data.target)
-
-        if all_ensembles is None:
-            print("No Circuits Found", flush=True)
-            print(circuit, flush=True)
-            exit(1)
+        all_ensembles: list[list[tuple[Circuit, float]]] = await self.assemble_circuits(circuit, approx_circs, pts, dists=dists, targets=targets, thresholds=thresholds, target=data.target)
 
         data["scan_sols"] = []
         data["ensemble"] = []
 
         for all_circs in all_ensembles:
             all_circs = sorted(all_circs, key=lambda x: x[0].count(CNOTGate()))
+            if len(data["scan_sols"]) == 0 and all_circs is not None:
+                data["scan_sols"].extend(all_circs)
+            if all_circs is not None:
+                data["ensemble"].append(all_circs)
 
-            data["scan_sols"].append(all_circs)
-            data["ensemble"].append([circ for circ, dist in all_circs])
+        if len(all_ensembles) == 0:
+            _logger.error("No ensembles found!!!!")
+            return
 
         if "checkpoint_dir" in data:
             checkpoint_data_file = data["checkpoint_data_file"]
             data["finished_create_ensemble"] = True
+            # No longer need block data
+            data.pop(ForEachBlockPass.key, None)
+            # print("Saving keys", list(data.keys()), flush=True)
             pickle.dump(data, open(checkpoint_data_file, "wb"))
         
         return

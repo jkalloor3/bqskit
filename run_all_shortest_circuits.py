@@ -16,8 +16,8 @@ header = """#!/bin/bash -l
 
 module load conda
 conda activate /pscratch/sd/j/jkalloor/ensemble_env
-echo "python {file}.py {circ} {timestep} {tol} {unique_circs}"
-python {file}.py {circ} {timestep} {tol} {unique_circs}
+echo "python {file}.py {circ} {timestep} {tol} {unique_circs} 0"
+python {file}.py {circ} {timestep} {tol} {unique_circs} 0
 """
 
 if __name__ == '__main__':
@@ -28,26 +28,26 @@ if __name__ == '__main__':
     # file = "get_ensemble_expectations"
     # file = "get_shortest_circuits_new"
     # file = "get_ensemble_final"
-    # file = "get_ensemble_final_cliffordt"
+    file = "get_ensemble_final_cliffordt"
     # file = "run_simulations_new"
     # file = "get_shortest_circuits_qsearch"
     # file = "plot_ensemble_data"
-    # file = "run_simulations"
-    file = "full_compile"
+    # file = "run_simulations_new"
+    # file = "full_compile"
     # circs = ["Heisenberg_7"] #, 
     # circs = ["Heisenberg_7", "TFXY_8"]
     # circs = ["tfxy_6", "qc_binary_5q"] #, "qc_gray_5q", "qc_optimized_5q"]
     circs = ["heisenberg7", "vqe_12", "shor_12", "qml_19", "qml_25"]
-    # circs = ["add17", "adder9", "mult16", "qae13", "qpe10", "tfim16"]
-    # circs = [f"qft_{i}" for i in range(8, 24, 4)]
+    circs.extend(["add17", "adder9", "mult16", "qae13", "qpe10", "tfim16", "mult64", "adder63"])
+    circs.extend([f"qft_{i}" for i in range(8, 32, 4)])
     # circs = ["hubbard_4"]
     # circs =  ["shor_12", "qft_10", "vqe_12"]
     # tols = range(1, 7)
     # tols = [1,3]
-    tols = [1]
+    tols = [0,1,3]
     unique_circss = [100] #, 5, 20, 100, 1000, 10000]
     # extra = "cliffordt"
-    extra = "_min"
+    extra = "_noqp_clifft"
     for circ in circs:
         for timestep in [0]:
             for tol in tols:
@@ -56,7 +56,8 @@ if __name__ == '__main__':
                     #     m = 7
                     # param_file = f"ensemble_approx_circuits_qfactor/{method}/{circ}/{tol}/{m}/{timestep}/jiggled_circ.pickle"
                     # param_file = f"/pscratch/sd/j/jkalloor/bqskit/ensemble_shortest_circuits{extra}/{circ}/{tol}/{timestep}/{circ}.pkl"
-                    # utries_file = f"/pscratch/sd/j/jkalloor/bqskit/ensemble_shortest_circuits_{unique_circs}_circ_final_min/{circ}/{tol}/{circ}.pkl"
+                    utries_file = f"/pscratch/sd/j/jkalloor/bqskit/ensemble_shortest_circuits_{unique_circs}_circ_final_min_post_opt/{circ}/{tol}/{circ}.pkl"
+                    log_file = f"/pscratch/sd/j/jkalloor/bqskit/slurm_logs/run_simulations_new_post_opt_{unique_circs}/{circ}/{tol}_tol_block_size_8"
                     # utries_file = f"/pscratch/sd/j/jkalloor/bqskit/ensemble_shortest_circuits_100_circ_final/qc_binary_5q/1/qc_binary_5q.pkl"
                     # graph_file = f"/pscratch/sd/j/jkalloor/bqskit/{circ}_{tol}_errors_comp.png"
 
@@ -64,16 +65,18 @@ if __name__ == '__main__':
                     #     print(f"Skipping {graph_file}")
                     #     continue
 
-                    # if os.path.exists(utries_file):
+                    # if not os.path.exists(utries_file):
                     #     continue
 
+                    # if os.path.exists(log_file):
+                    #     continue
 
                     to_write = open(file_name, 'w')
                     to_write.write(header.format(file=file, circ=circ, tol=tol, timestep=timestep, extra=extra, unique_circs=unique_circs))
                     to_write.close()
                     print(f"python {file}.py {circ} {timestep} {tol} {unique_circs}")
                     # os.system(f"python {file}.py {circ} {timestep} {tol} {unique_circs}")
-                    # time.sleep(2*sleep_time)
+                    time.sleep(2*sleep_time)
                     output = subprocess.check_output(['sbatch' , file_name])
                     print(output)
                     time.sleep(sleep_time)

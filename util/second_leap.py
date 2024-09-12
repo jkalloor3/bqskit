@@ -8,11 +8,12 @@ import numpy as np
 from scipy.stats import linregress
 from os.path import join, exists
 import pickle
+from pathlib import Path
 
 from bqskit.compiler.passdata import PassData
 from bqskit.ir.circuit import Circuit
 from bqskit.ir.gates import CNOTGate
-from bqskit.ir.opt.cost.functions import HilbertSchmidtResidualsGenerator
+from bqskit.ir.opt.cost.functions import HilbertSchmidtResidualsGenerator, HSCostGenerator
 from bqskit.ir.opt.cost.generator import CostFunctionGenerator
 from bqskit.passes.search.frontier import Frontier
 from bqskit.passes.control import ForEachBlockPass
@@ -49,7 +50,7 @@ class SecondLEAPSynthesisPass(BasePass):
         heuristic_function: HeuristicFunction = DijkstraHeuristic(),
         layer_generator: LayerGenerator | None = None,
         success_threshold: float = 1e-8,
-        cost: CostFunctionGenerator = HilbertSchmidtResidualsGenerator(),
+        cost: CostFunctionGenerator = HSCostGenerator(),
         max_layer: int | None = None,
         min_prefix_size: int = 3,
         instantiate_options: dict[str, Any] = {},
@@ -159,7 +160,7 @@ class SecondLEAPSynthesisPass(BasePass):
         self.instantiate_options.update(instantiate_options)
         self.max_psols = max_psols
 
-    async def synthesize(self, data: PassData, target: UnitaryMatrix, max_cnot_gates: int, default_circuit: Circuit, datas: list[PassData], save_data_files: list[str] = None) -> Circuit:
+    async def synthesize(self, data: PassData, target: UnitaryMatrix, default_circuit: Circuit, datas: list[PassData], save_data_files: list[str] = None) -> Circuit:
         # Synthesize every circuit in the ensemble
         circs: list[Circuit] = [d[0] for d in data['scan_sols'][:-1]]
         if len(circs) > 0:
@@ -179,6 +180,8 @@ class SecondLEAPSynthesisPass(BasePass):
                 for c in circs:
                     assert(isinstance(c, Circuit))
 
+            max_cnot_gates = default_circuit.count(CNOTGate())
+
             for i, circs in enumerate(new_circs):
                 new_circs[i] = sorted(circs, key=lambda x: x.count(CNOTGate()))
                 for j, c in enumerate(new_circs[i]):
@@ -188,7 +191,7 @@ class SecondLEAPSynthesisPass(BasePass):
             # Now interleave so you get a decent mix
             new_circs = list(chain(*zip_longest(*new_circs, fillvalue=None)))
             new_circs: list[tuple[Circuit, float]] = [(c, self.cost(c, target)) for c in new_circs if c is not None]
-            # new_circs = sorted(new_circs, key=lambda x: x[1])
+            new_circs = sorted(new_circs, key=lambda x: x[0].count(CNOTGate()))
         else:
             new_circs = []
 
@@ -215,9 +218,10 @@ class SecondLEAPSynthesisPass(BasePass):
 
         utry, data, save_data_file = utry_data
         if self.use_calculated_error:
-            success_threshold = self.success_threshold * data["error_percentage_allocated"]
-            partial_success_threshold = self.partial_success_threshold * data["error_percentage_allocated"]
-            # self.success_threshold = new_success_threshold
+            # use sqrt
+            factor = np.sqrt(data["error_percentage_allocated"])
+            success_threshold = self.success_threshold * factor
+            partial_success_threshold = self.partial_success_threshold * factor
         else:
             success_threshold = self.success_threshold
             partial_success_threshold = self.partial_success_threshold
@@ -513,4 +517,10 @@ class SecondLEAPSynthesisPass(BasePass):
                 else:
                     _logger.debug(f"Second leap frontier {i} is empty: {frontier.empty()}")
 
-        circuit.become(await self.synthesize(data, target=data.target, max_cnot_gates=circuit.count(CNOTGate()), default_circuit=data['scan_sols'][-1][0], datas=datas, save_data_files=save_data_files))
+        circuit.become(await self.synthesize(data, target=data.target, default_circuit=data['scan_sols'][-1][0], datas=datas, save_data_files=save_data_files))
+
+        # Clean up data files after finishing
+        # for save_data_file in save_data_files:
+        #     if save_data_file and exists(save_data_file):
+        #         print(f"Deleting {save_data_file}", flush=True)
+        #         Path(save_data_file).unlink()

@@ -13,6 +13,8 @@ from bqskit.ir.gates import CircuitGate
 from bqskit.ir.gates import CNOTGate
 from bqskit.qis import UnitaryMatrix
 import numpy as np
+from itertools import zip_longest, chain
+
 
 _logger = logging.getLogger(__name__)
 
@@ -28,25 +30,39 @@ class SelectFinalEnsemblePass(BasePass):
 
 
     async def unfold_circ(
-            config: list[CircuitGate], 
+            configs: list[list[CircuitGate]], 
             circuit: Circuit, 
             pts: list[CircuitPoint], 
             locations: list[CircuitLocationLike]):
         """Unfold a circuit from a list of CircuitGates."""
-        operations = [
-            Operation(cg, loc, cg._circuit.params)
-            for cg, loc
-            in zip(config, locations)
-        ]
-        copied_circuit = circuit.copy()
-        copied_circuit.batch_replace(pts, operations)
-        copied_circuit.unfold_all()
 
-        return copied_circuit
+        circs = []
+        for config in configs:
+            assert len(config) == len(pts)
+            operations = [
+                Operation(cg, loc, cg._circuit.params)
+                for cg, loc
+                in zip(config, locations)
+            ]
+            copied_circuit = circuit.copy()
+            copied_circuit.batch_replace(pts, operations)
+            copied_circuit.unfold_all()
+            circs.append(copied_circuit)
+
+        return circs
+
+    async def create_configs(self, inds_list: list[list[int]]) -> list[list[CircuitGate]]:
+        configs = []
+        for random_inds in inds_list:
+            assert len(random_inds) == len(self.ensemble)
+            circ_list = [self.ensemble[i][ind] for i, ind in enumerate(random_inds)]
+            # print("Circ List: ", [type(c) for c in circ_list])
+            new_config = [CircuitGate(circ) for circ in circ_list]
+            configs.append(new_config)
+        return configs
 
     async def assemble_circuits(
         self,
-        ensemble_probs: list[tuple[Circuit, list[float]]],
         circuit: Circuit,
         pts: list[CircuitPoint],
     ) -> Circuit:
@@ -56,41 +72,47 @@ class SelectFinalEnsemblePass(BasePass):
         all_combos = []
         i = 0
 
-        num_circs = 0
-        trials = 0
+        inds = [[] for _ in range(len(self.ensemble))]
 
-        inds = [[] for _ in range(len(ensemble_probs))]
-        for i in range(len(ensemble_probs)):
-            _, probs = ensemble_probs[i]
+        for i in range(len(self.ensemble)):
+            probs = self.probs[i]
             assert(len(probs) > 0)
             # Sample from the marginal distribution
             inds[i] = np.random.choice(np.arange(len(probs)), p=probs, size=(self.num_circs))
 
+        print("Sampled Indices", flush=True)
+
         inds = np.array(inds)
+        inds = inds.transpose().tolist()
+
+        grouped_inds = zip_longest(*(iter(inds),) * 50)
         # Combine blocks
-        for i in range(self.num_circs):
-            random_inds = inds[:, i]
-            circ_list = [ensemble_probs[i][0][ind] for i, ind in enumerate(random_inds)]
-            new_config = [CircuitGate(circ) for circ in circ_list]
-            all_combos.append(new_config)
-            num_circs += 1
+        grouped_combos = await get_runtime().map(self.create_configs, grouped_inds)
+
+        # print(f"Created {len(all_combos)} Configs", flush=True)
+
+        # grouped_combos = zip_longest(*(iter(all_combos),) * 50)
+
+        print(f"Grouped into {len(grouped_combos)} Configs", flush=True)
 
         locations = [circuit[pt].location for pt in pts]
         all_circs= await get_runtime().map(
             SelectFinalEnsemblePass.unfold_circ,
-            all_combos,
+            grouped_combos,
             circuit=circuit,
             pts=pts,
             locations=locations
         )
-        print("Semi-Final Number of Ensemble Circs: ", len(all_circs))
+
+        all_circs = list(chain.from_iterable(all_circs))
+        print("Semi-Final Number of Ensemble Circs: ", len(all_circs), flush=True)
 
         return all_circs
 
 
     def parse_data(self,
         data: dict[Any, Any],
-    ) -> tuple[list[list[tuple[Circuit, float]]], list[CircuitPoint], list[list[float]]]:
+    ) -> tuple[list[list[Circuit]], list[CircuitPoint], list[list[float]]]:
         """Parse the data outputed from synthesis."""
         block_data = data[0]
 
@@ -116,9 +138,13 @@ class SelectFinalEnsemblePass(BasePass):
         block_data = data[ForEachBlockPass.key]
         ensembles, pts, probs = self.parse_data(block_data)
 
-        ensemble_probs = list(zip(ensembles, probs))
+        # self.ensemble_probs = list(zip(ensembles, probs))
+        self.ensemble = ensembles
+        self.probs = probs
 
-        all_circs: list[Circuit] = await self.assemble_circuits(ensemble_probs, circuit=circuit, pts=pts)
+        # print(ensemble_probs[0])
+
+        all_circs: list[Circuit] = await self.assemble_circuits(circuit=circuit, pts=pts)
         all_circs = sorted(all_circs, key=lambda x: x.count(CNOTGate()))
 
         print("FINAL ENSEMBLE SIZE", len(all_circs))
