@@ -13,3 +13,4 @@ from .jiggle_circ_pass import JiggleCircPass, GetErrorsPass
 from .convert_to_cliff import ConvertToCliffordTPass, ConvertToZXZXZ, ConvertRZtoCliffordT
 from .leap_mod import LEAPSynthesisPass2
 from .qsearch_mod import QSearchSynthesisPass2
+from .distance import *

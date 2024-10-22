@@ -1,22 +1,35 @@
 """This module implements the InstantiateCount pass"""
 from __future__ import annotations
 
-import logging
 from typing import Any
 
-from bqskit.ir import Gate, Circuit
+from bqskit.ir import Circuit
+from bqskit.ir.gates import CNOTGate
 from bqskit.compiler.basepass import BasePass
 from bqskit.runtime import get_runtime
 from bqskit.compiler.passdata import PassData
 import numpy as np
-import matplotlib.pyplot as plt
 from util import get_chi_1_chi_2
 from qpsolvers import solve_ls
-import pickle
 
+def cost(utry1: np.ndarray, utry2: np.ndarray, N: int) -> float:
+    '''
+    Calculates the normalized Frobenius distance between two unitaries
+    '''
+    diff = utry1- utry2
+    # This is Frob(u - v)
+    cost = np.real(np.trace(diff @ diff.conj().T))
+
+    cost = cost / (N * N)
+
+    # This quantity should be less than HS distance as defined by 
+    # Quest Paper 
+    return np.sqrt(cost)
 class GenerateProbabilityPass(BasePass):
+    
     def __init__(
         self,
+        success_threshold: float,
         size: int,
         min_chi_1: float = 0.3,
         min_chi_2: float = 0.5
@@ -25,9 +38,11 @@ class GenerateProbabilityPass(BasePass):
         Construct a Instantiate Count pass and then 
 
         """
+        self.success_threshold = success_threshold
         self.size = size
         self.min_chi_1 = min_chi_1
         self.min_chi_2 = min_chi_2
+        self.target = None
         return
     
     async def calculate_chi_1_chi_2(self, ensemble: np.ndarray):
@@ -58,13 +73,13 @@ class GenerateProbabilityPass(BasePass):
             chi_2 += c_2
 
         return (chi_1 / num_reps, chi_2 / num_reps)
+    
+    async def calculate_bias(self, ensemble: np.ndarray):
+        mean_un = np.mean(ensemble, axis=0)
+        return cost(mean_un, self.target, self.target.num_qudits)
+
 
     async def calculate_probs(self, ensemble: np.ndarray, target: np.ndarray):
-        # For now return uniform
-        # TODO: Implement Quadratic Program to 
-        return [1 / len(ensemble) for _ in ensemble]
-        
-    '''
         M = len(ensemble)
 
         tr_V_Us = np.zeros(M, dtype=np.complex128)
@@ -110,8 +125,6 @@ class GenerateProbabilityPass(BasePass):
         probabilities = solve_ls(R.T, s, None, None, Aeq, beq, lbound, ubound, solver='clarabel')
 
         return probabilities
-    '''
-
 
     async def run(
             self, 
@@ -121,11 +134,11 @@ class GenerateProbabilityPass(BasePass):
 
         print("Running Generate Probability Pass", flush=True)
 
-        if "finished_probs_generation" in data:
-            print("Already Generated Probs", flush=True)
-            final_ensemble = data["final_ensemble"]
-            data["final_ensemble_probs"] = [1 / len(final_ensemble) for _ in final_ensemble]
-            return
+        # if "finished_probs_generation" in data:
+        #     print("Already Generated Probs", flush=True)
+        #     final_ensemble = data["final_ensemble"]
+        #     data["final_ensemble_probs"] = [1 / len(final_ensemble) for _ in final_ensemble]
+        #     return
 
         all_ensembles: list[list[Circuit]] = data["sub_select_ensemble"]
         all_ensemble_unitaries: list[np.ndarray] = [np.array([circ.get_unitary().numpy for circ in ensemble]) for ensemble in all_ensembles]
@@ -140,27 +153,35 @@ class GenerateProbabilityPass(BasePass):
             all_ensembles: list[list[Circuit]] = data["ensemble"]
             all_ensemble_unitaries: list[np.ndarray] = [np.array([circ.get_unitary().numpy for circ in ensemble]) for ensemble in all_ensembles]
 
-        # For each ensemble, calculate chi_1 and chi_2
-        chis = await get_runtime().map(self.calculate_chi_1_chi_2, all_ensemble_unitaries)
+
+        success_threshold = self.success_threshold * data["error_percentage_allocated"]
+        self.target = data.target
+        # For each ensemble, calculate the bias term
+        biases = await get_runtime().map(self.calculate_bias, all_ensemble_unitaries)
+
+        print("BIASES, ", biases)
 
         ensemble_ind = 0
-        best_chi = chis[0]
+        best_bias = biases[0]
 
-        # Select the best ensemble
-        for i, chi in enumerate(chis):
-            if chi > (self.min_chi_1, self.min_chi_2):
-                best_chi = chi
-                ensemble_ind = i
-                break
-            elif chi > best_chi:
-                best_chi = chi
-                ensemble_ind = i
+        if best_bias > success_threshold ** 2:
+            # Select the best ensemble
+            for i, bias in enumerate(biases):
+                if bias < best_bias:
+                    best_bias = bias
+                    ensemble_ind = i
+                
+                if bias < success_threshold ** 2:
+                    break
 
         best_ensemble = all_ensembles[ensemble_ind]
         best_ensemble_unitaries = all_ensemble_unitaries[ensemble_ind]
 
-        print("CHI_1", best_chi[0])
-        print("CHI_2", best_chi[1])
+        avg_cnots = np.mean([circ.count(CNOTGate()) for circ in best_ensemble])
+
+        print("Orig CNOTS", circuit.count(CNOTGate()))
+        print("Average CNOTS", avg_cnots)
+        print("Bias", best_bias, "Threshold", success_threshold)
 
         data["final_ensemble"] = best_ensemble
 

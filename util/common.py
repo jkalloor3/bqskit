@@ -9,15 +9,24 @@ extra = "_qsearch"
 
 def load_circuit(circ_name: str, timestep: int = 0, opt: bool = False) -> Circuit:
     opt_str = "_opt" if opt else ""
+    
+    if "JW" in circ_name:
+        circ_name = f"JWCircs/{circ_name}"
+    
+    ext = ".qasm"
+    
     if timestep > 0:
-        file = f"/pscratch/sd/j/jkalloor/bqskit/ensemble_benchmarks{opt_str}/{circ_name}_{timestep}.qasm"
+        file = f"/pscratch/sd/j/jkalloor/bqskit/ensemble_benchmarks{opt_str}/{circ_name}_{timestep}{ext}"
     else:
-        file = f"/pscratch/sd/j/jkalloor/bqskit/ensemble_benchmarks{opt_str}/{circ_name}.qasm"
+        file = f"/pscratch/sd/j/jkalloor/bqskit/ensemble_benchmarks{opt_str}/{circ_name}{ext}"
     
     if not os.path.exists(file):
-        file = f"/pscratch/sd/j/jkalloor/bqskit/qce23_qfactor_benchmarks{opt_str}/{circ_name}.qasm"
-
-    return Circuit.from_file(file)
+        file = f"/pscratch/sd/j/jkalloor/bqskit/qce23_qfactor_benchmarks/{circ_name}{ext}"
+    
+    if ext == ".qasm":
+        return Circuit.from_file(file)
+    else:
+        return pickle.load(open(file, "rb"))
 
 
 def save_circuits(circs: list[Circuit], circ_name: str, tol: int, timestep: int, ignore_timestep: bool = False, extra_str=extra) -> None:
