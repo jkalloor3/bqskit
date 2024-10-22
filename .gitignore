@@ -34,7 +34,7 @@ QFT/
 **/*.sh 
 **/*.qasm
 slurm_logs/*
-*.csv
+*.csv*
 **/*.json
 **/*.png
 
