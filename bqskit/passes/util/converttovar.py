@@ -16,7 +16,9 @@ _logger = logging.getLogger(__name__)
 class ToVariablePass(BasePass):
     """Converts single-qudit general unitary gates to Variable Unitary Gates."""
 
-    def __init__(self, convert_all_single_qudit_gates: bool = False) -> None:
+    def __init__(self, 
+                 convert_all_single_qudit_gates: bool = False,
+                 all_ensembles: bool = False) -> None:
         """
         Construct a ToVariablePass.
 
@@ -25,8 +27,17 @@ class ToVariablePass(BasePass):
             only the general gates, or every single qudit gate.
         """
         self.convert_all_single_qudit_gates = convert_all_single_qudit_gates
+        self.all_ensembles = all_ensembles
 
     async def run(self, circuit: Circuit, data: PassData) -> None:
+        if self.all_ensembles:
+            for ensemble in data["ensemble"]:
+                for circ,_ in ensemble:
+                    await self.run_circ(circ, data)
+        else:
+            await self.run_circ(circuit, data)
+
+    async def run_circ(self, circuit: Circuit, data: PassData) -> None:
         """Perform the pass's operation, see :class:`BasePass` for more."""
         _logger.debug(
             'Converting single-qudit general gates to VariableUnitaryGate.',

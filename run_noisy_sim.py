@@ -1,21 +1,66 @@
 from bqskit.ir.circuit import Circuit
 from bqskit.ir.gates import CNOTGate
 from sys import argv
+from scipy.stats import entropy
 import numpy as np
-from itertools import chain
 
 from bqskit.ir.gates.parameterized.u3 import U3Gate
 from bqskit.ir.point import CircuitPoint
 
+from itertools import chain
 from qiskit import QuantumCircuit, transpile
+from qiskit_aer import AerSimulator, StatevectorSimulator
 from qiskit.quantum_info import Statevector
+from qiskit_aer.noise import NoiseModel, pauli_error
+
+from bqskit.ext import bqskit_to_qiskit
 
 from util import load_circuit, load_compiled_circuits
 from util.distance import normalized_frob_dist, tvd, trace_distance, get_density_matrix, get_average_density_matrix
 
-from bqskit.ext import bqskit_to_qiskit
+import multiprocessing as mp
+
+def create_pauli_noise_model(rb_fid_1q, rb_fid_2q):
+    rb_err_1q = 1 - rb_fid_1q
+    rb_err_2q = 1 - rb_fid_2q
+
+    # Create an empty noise model
+    noise_model = NoiseModel()
+
+    # Add depolarizing error to all single qubit u1, u2, u3 gates
+    one_q_error = pauli_error([('X', rb_err_1q /3), ('Y', rb_err_1q /3), ('Z', rb_err_1q / 3), ('I', rb_fid_1q)])
+    two_q_error = pauli_error([('XX', rb_err_2q / 15), ('YX', rb_err_2q / 15), ('ZX', rb_err_2q / 15),
+                            ('XY', rb_err_2q / 15), ('YY', rb_err_2q / 15), ('ZY', rb_err_2q / 15),
+                                ('XZ', rb_err_2q / 15), ('YZ', rb_err_2q / 15), ('ZZ', rb_err_2q / 15),
+                                ('XI', rb_err_2q / 15), ('YI', rb_err_2q / 15), ('ZI', rb_err_2q / 15),
+                                ('IX', rb_err_2q / 15), ('IY', rb_err_2q / 15), ('IZ', rb_err_2q / 15), 
+                                ('II', rb_fid_2q)])
+    noise_model.add_all_qubit_quantum_error(one_q_error, ['u3'])
+    noise_model.add_all_qubit_quantum_error(two_q_error, ['cx'])
+
+    return noise_model
+
+one_q_fid = 1
+two_q_fid = 0.999
+noisy_backend = create_pauli_noise_model(one_q_fid, two_q_fid)
+sim = AerSimulator(noise_model=noisy_backend)
+sim_perf = AerSimulator(method='statevector')
+
+sv_sim = StatevectorSimulator()
 
 shots = 100
+
+def run_sv_circuits(circs: list[QuantumCircuit], noise_model: NoiseModel = None) -> list[np.ndarray]:
+    '''
+    Run a set of circuits with a given Noise Model. Calculate the full StateVector.
+    '''
+    svs: list[np.ndarray] = []
+
+    for circ in circs:
+        sv: Statevector = sv_sim.run(circ, noise_model=noise_model).result().get_statevector()
+        svs.append(sv.data)
+    
+    return svs
 
 def get_ensemble_mags(ens_size, random_states: list[np.ndarray] = None) -> tuple[list[np.ndarray[np.float64]], 
                                                                                  list[np.ndarray[np.float64]], 
@@ -23,9 +68,6 @@ def get_ensemble_mags(ens_size, random_states: list[np.ndarray] = None) -> tuple
     global all_qcircs
     global bqskit_circs
     global target
-
-    print(len(bqskit_circs), len(all_qcircs))
-
     ensemble_inds: list[int] = np.random.choice(len(bqskit_circs), ens_size)
     ensemble: list[QuantumCircuit] = [all_qcircs[i] for i in ensemble_inds]
     
@@ -39,7 +81,7 @@ def get_ensemble_mags(ens_size, random_states: list[np.ndarray] = None) -> tuple
     noisy_rhos = []
     noisy_probs = []
     for circs in random_qcircs:
-        noisy_svs = np.array([Statevector.from_instruction(circ).data for circ in circs])
+        noisy_svs = run_sv_circuits(circs, noise_model=noisy_backend)
         probs = np.array([np.abs(sv)**2 for sv in noisy_svs], dtype=np.float64)
         avg_probs = np.mean(probs, axis=0)
         noisy_rho = get_average_density_matrix(noisy_svs)
@@ -56,6 +98,7 @@ def get_qcirc(circ: Circuit):
 
     q_circ = bqskit_to_qiskit(circ)
     return q_circ
+
 
 def get_random_states(num_qubits: int, num_random_states: int = 4):
     states = []
@@ -77,16 +120,6 @@ def get_random_init_state_circuits(qcircs: list[QuantumCircuit], random_states: 
             circs.append(transpile(init_circ, optimization_level=0))
         all_qcircs.append(circs)
     return all_qcircs
-
-def aggregate_results(results: list):
-    total_dict = {}
-    for r in results:
-        # print("Result: ", r)
-        x = total_dict
-        y = r.data.meas.get_counts()
-        total_dict = {k: x.get(k, 0) + y.get(k, 0) for k in set(x) | set(y)}
-    return total_dict
-
 # Circ 
 if __name__ == '__main__':
     global all_qcircs
@@ -137,23 +170,22 @@ if __name__ == '__main__':
     rhos = [get_density_matrix(sv) for sv in svs]
     print("Len of rhos: ", len(rhos))
     true_probs = [np.abs(sv)**2 for sv in svs]
-    noisy_svs = [Statevector.from_instruction(circ).data for circ in qiskit_circs]
+    noisy_svs = run_sv_circuits(qiskit_circs, noise_model=noisy_backend)
     noisy_rhos = [get_density_matrix(sv) for sv in noisy_svs]
     noisy_dists = [trace_distance(rhos[i], noisy_rho) for i,noisy_rho in enumerate(noisy_rhos)]
-    print("Noisy Distances: ", noisy_dists)
-    
+    noisy_probs = [np.abs(sv)**2 for sv in noisy_svs]
+    noisy_tvds = [tvd(true_probs[i], noisy_probs[i]) for i in range(len(noisy_probs))]
+    print("Noisy Trace Distances: ", noisy_dists)
+    print("Noisy TVDS: ", noisy_tvds)
     
     # print("Noisy Counts: ", noisy_result_dict)
     print("Finished Running", flush=True)
     # noisy_result_dict = noisy_result.get_counts(qiskit_circ)
-    base_excitations.append(0)
-    noisy_excitations.append(np.mean(noisy_dists))
 
     all_qcircs = [get_qcirc(c) for c in bqskit_circs]
     print("Got MAP", flush=True)
 
     print("Runing PERFECT ENSEMBLES: ")
-    print(f"Base TVD: {base_excitations[0]}, Noisy TVD {noisy_excitations[0]}")
     for j, ens_size in enumerate(ensemble_sizes):
         final_rhos, final_probs, mean_un = get_ensemble_mags(ens_size, random_states)
 
@@ -166,5 +198,7 @@ if __name__ == '__main__':
             print(f"Ensemble Size: {ens_size},  Trace Distance: {tds}, TVDS: {tvds}, Frobenius Distance Normalized: {frob_dist}")
         else:
             print(f"Ensemble Size: {ens_size},  Trace Distance: {tds}, TVDS: {tvds}")
+
+
 
 

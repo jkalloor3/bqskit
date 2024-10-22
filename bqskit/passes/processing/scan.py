@@ -7,10 +7,13 @@ from os import mkdir
 import pickle
 from typing import Any
 from typing import Callable
+from itertools import chain
 
+from bqskit.runtime import get_runtime
 from bqskit.compiler.basepass import BasePass
 from bqskit.compiler.passdata import PassData
 from bqskit.ir.circuit import Circuit
+from bqskit.ir.gates import CNOTGate
 from bqskit.ir.operation import Operation
 from bqskit.ir.opt.cost.functions import HilbertSchmidtResidualsGenerator
 from bqskit.ir.opt.cost.generator import CostFunctionGenerator
@@ -34,7 +37,9 @@ class ScanningGateRemovalPass(BasePass):
         instantiate_options: dict[str, Any] = {},
         collection_filter: Callable[[Operation], bool] | None = None,
         store_all_solutions: bool = True,
-        checkpoint_proj: str = None
+        checkpoint_proj: str = None,
+        run_on_ensemble: bool = False,
+        use_calculated_error: bool = False,
     ) -> None:
         """
         Construct a ScanningGateRemovalPass.
@@ -104,9 +109,29 @@ class ScanningGateRemovalPass(BasePass):
         self.checkpoint_proj = checkpoint_proj
         if (self.checkpoint_proj and not exists(self.checkpoint_proj)):
             mkdir(self.checkpoint_proj)
+        self.run_on_ensemble = run_on_ensemble
+        self.use_calculated_error = use_calculated_error
 
     async def run(self, circuit: Circuit, data: PassData) -> None:
+        """Perform the pass's operation on the given circuit."""
+        if self.run_on_ensemble:
+            new_ensembles = []
+            ensembles = data["ensemble"]
+            save_data_file = data.get("checkpoint_data_file", None)
+            for ens in ensembles:
+                all_sols: list[list[Circuit]] = await get_runtime().map(self.run_circ, ens, data=data)
+                all_sols: list[Circuit] = list(chain(all_sols))
+                all_sols = sorted(all_sols, key=lambda x: x.count(CNOTGate()))
+                new_ensembles.append(all_sols)
+            data["ensemble"] = new_ensembles
+            return
+        else:
+            return await self.run_circ(circuit, data)
+
+
+    async def run_circ(self, circ_float: tuple[Circuit, float], data: PassData) -> list[Circuit]:
         """Perform the pass's operation, see :class:`BasePass` for more."""
+        circuit, dist = circ_float
         instantiate_options = self.instantiate_options.copy()
         if 'seed' not in instantiate_options:
             instantiate_options['seed'] = data.seed
@@ -124,34 +149,10 @@ class ScanningGateRemovalPass(BasePass):
         iterator = circuit.operations_with_cycles(reverse=reverse_iter)
         all_ops = [x for x in iterator]
 
-        # Things needed for saving data
-        if self.checkpoint_proj:
-            block_num: str = data.get("block_num", "0")
-            save_data_file = join(self.checkpoint_proj, f"block_{block_num}.data")
-            save_circuit_file = join(self.checkpoint_proj, f"block_{block_num}.pickle")
-            if exists(save_data_file):
-                _logger.debug(f"Reloading block {block_num}!")
-                # Reload ind from previous stop
-                with open(save_data_file, "rb") as df:
-                    new_data = pickle.load(df)
-                    data.update(new_data)
-                with open(save_circuit_file, "rb") as cf:
-                    circuit_copy = pickle.load(cf)
-                start_ind = data.get("ind", 0)
-                if start_ind >= len(all_ops):
-                    all_ops = []
-                    _logger.debug("Block is already finished!")
-                else:
-                    all_ops = all_ops[start_ind:]
-                    _logger.debug("starting at ", start_ind)
-            else:
-                # Initial checkpoint
-                with open(save_data_file, "wb") as df:
-                    data["ind"] = 0
-                    pickle.dump(data, df)
-                with open(save_circuit_file, "wb") as cf:
-                    pickle.dump(circuit_copy, cf)
-
+        if self.use_calculated_error:
+            success_threshold = self.success_threshold * data["error_percentage_allocated"]
+        else:
+            success_threshold = self.success_threshold
 
         for i, (cycle, op) in enumerate(all_ops):
 
@@ -174,27 +175,15 @@ class ScanningGateRemovalPass(BasePass):
             working_copy.instantiate(target, **instantiate_options)
 
             working_cost = self.cost(working_copy, target)
-            if working_cost < self.success_threshold:
+            if working_cost < success_threshold:
                 if self.store_all_solutions:
                     all_solutions.append((working_copy.copy(), working_cost))
                 _logger.debug('Successfully removed operation.')
-                circuit_copy = working_copy
-                # Create checkpoint
-                if self.checkpoint_proj:
-                    with open(save_circuit_file, "wb") as cf:
-                        pickle.dump(circuit_copy, cf)
-            
-            if self.checkpoint_proj:
-                with open(save_data_file, "wb") as df:
-                    data["ind"] = i + start_ind + 1
-                    pickle.dump(data, df)
-                
-
-
-        if self.store_all_solutions:
-            data["scan_sols"] = all_solutions
+                circuit_copy = working_copy        
 
         circuit.become(circuit_copy)
+        all_solutions = sorted(all_solutions, key=lambda x: x.count(CNOTGate()))
+        return all_solutions
 
 
 def default_collection_filter(op: Operation) -> bool:

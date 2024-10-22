@@ -44,7 +44,9 @@ if __name__ == '__main__':
 
     orig_count = get_cnot_count(orig_circ)
 
-    circs = load_compiled_circuits(circ_name, tol, timestep, ignore_timestep=True, extra_str=f"_{num_unique_circs}_circ_final_min_post_opt") 
+    # calc_bias = "_calc_bias"
+    calc_bias = ""
+    circs = load_compiled_circuits(circ_name, tol, timestep, ignore_timestep=True, extra_str=f"_{num_unique_circs}_circ_final_min_post_opt{calc_bias}") 
 
     with mp.Pool() as pool:
         # tols = pool.map(get_distance, circs)

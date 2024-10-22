@@ -83,7 +83,7 @@ def get_shortest_circuits(circ_name: str, tol: int, timestep: int,
         partitioner_passes = slow_partitioner_passes
         instantiation_options = good_instantiation_options
 
-    leap_workflow = [
+    leap_workflow = [  
         ToU3Pass(),
         TCountPass(t_gates_per_rz=30, count_ensemble=False),
         CheckpointRestartPass(checkpoint_dir, 
@@ -136,7 +136,7 @@ if __name__ == '__main__':
     num_unique_circs = int(argv[4])
     opt = bool(int(argv[5])) if len(argv) > 5 else False
     opt_str = "_opt" if opt else ""
-    print("OPT STR", opt_str, opt, argv[5])
+    print("OPT STR", opt_str, opt)
     circs, error_bound, count = get_shortest_circuits(circ_name, tol, timestep, num_unique_circs=num_unique_circs, extra_str=opt_str)
     sorted_circs = sorted(circs, key=lambda c: c.count(CNOTGate()))
     circ = load_circuit(circ_name, opt=opt)
@@ -144,4 +144,4 @@ if __name__ == '__main__':
     print("Error Bound", error_bound)
     # print("Actual Error", actual_error)
     print("Lowest Count", count)
-    save_circuits(circs, circ_name, tol, timestep, ignore_timestep=True, extra_str=f"_{num_unique_circs}_circ_cliff_t_final_noqp")
+    save_circuits(circs, circ_name, tol, timestep, ignore_timestep=True, extra_str=f"_{num_unique_circs}_circ_cliff_t_final")

@@ -12,7 +12,6 @@ from bqskit.passes import *
 from bqskit.runtime import get_runtime
 import pickle
 from bqskit.ir.opt.cost.functions import  HilbertSchmidtCostGenerator, FrobeniusNoPhaseCostGenerator
-from bqskit.ir.opt.minimizers.lbfgs import LBFGSMinimizer
 from bqskit.passes import ScanningGateRemovalPass
 
 
@@ -45,11 +44,6 @@ def get_shortest_circuits(circ_name: str, tol: int, timestep: int,
     big_block_size = 8
     small_block_size = 3
     checkpoint_dir = f"fixed_block_checkpoints_min{extra_str}/{circ_name}_{timestep}_{tol}_{big_block_size}_{small_block_size}/"
-    # proj_name = f"{circ_name}_{timestep}_{tol}_final"
-    # base_checkpoint_dir = None
-    # proj_name = None
-
-    # layer_gen = SimpleLayerGenerator(single_qudit_gate_1=VariableUnitaryGate(1))
 
     fast_instantiation_options = {
         'multistarts': 2,
@@ -96,7 +90,7 @@ def get_shortest_circuits(circ_name: str, tol: int, timestep: int,
         partial_success_threshold=err_thresh,
         # cost=phase_generator,
         instantiate_options=instantiation_options,
-        # use_calculated_error=True,
+        use_calculated_error=True,
         max_psols=5
     )
 
@@ -106,7 +100,7 @@ def get_shortest_circuits(circ_name: str, tol: int, timestep: int,
         partial_success_threshold=err_thresh,
         # cost=HS,
         instantiate_options=instantiation_options,
-        # use_calculated_error=True,
+        use_calculated_error=True,
         max_psols=3
     )
 
@@ -126,7 +120,6 @@ def get_shortest_circuits(circ_name: str, tol: int, timestep: int,
                     allocate_error_gate=CNOTGate(),
                     check_checkpoint=True
                 ),
-                # ScanningGateRemovalPass(),
                 CreateEnsemblePass(success_threshold=err_thresh, 
                                    use_calculated_error=True, 
                                    num_circs=num_unique_circs,
@@ -135,7 +128,7 @@ def get_shortest_circuits(circ_name: str, tol: int, timestep: int,
                                    solve_exact_dists=True),
                 JiggleEnsemblePass(success_threshold=err_thresh, num_circs=2000, use_ensemble=True),
                 SubselectEnsemblePass(success_threshold=err_thresh, num_circs=200),
-                GenerateProbabilityPass(size=50),
+                GenerateProbabilityPass(success_threshold=err_thresh, size=50),
                 # GetErrorsPass(),
                 UnfoldPass(),
             ],
@@ -145,14 +138,13 @@ def get_shortest_circuits(circ_name: str, tol: int, timestep: int,
             allocate_error_gate=CNOTGate(),
         ),
         SelectFinalEnsemblePass(size=5000),
-        # GetErrorsPass(),
-        # UnfoldPass()
     ]
-    num_workers = 256
+    num_workers = 128
     compiler = Compiler(num_workers=num_workers)
     # target = circ.get_unitary()
     out_circ, data = compiler.compile(circ, workflow=leap_workflow, request_data=True)
     approx_circuits: list[Circuit] = data["final_ensemble"]
+    # approx_circuits = []
     # print("Final Count: ", out_circ.count(CNOTGate()))
     # print("Num Circs", len(approx_circuits))
     # actual_error = target.get_frobenius_distance(out_circ.get_unitary())
@@ -170,21 +162,6 @@ if __name__ == '__main__':
     num_unique_circs = int(argv[4])
     opt = bool(int(argv[5])) if len(argv) > 5 else False
     opt_str = "_opt" if opt else ""
-    print("OPT STR", opt_str, opt, argv[5])
-    circs, error_bound, count = get_shortest_circuits(circ_name, tol, timestep, num_unique_circs=num_unique_circs, extra_str=opt_str)
-    sorted_circs = sorted(circs, key=lambda c: c.count(CNOTGate()))
-    circ = load_circuit(circ_name, opt=opt)
-    # target = circ.get_unitary()
-    print("Error Bound", error_bound)
-    # print("Actual Error", actual_error)
-    print("Lowest Count", count)
-    # print([c.count(CNOTGate()) for c in circs[:20]])
-    # # print([c.get_unitary().get_frobenius_distance(circ.get_unitary()) for c in])
-    # with mp.Pool() as pool:
-    #     dists = pool.map(get_distance, circs)
-    # dists = [get_distance(c) for c in circs]
-    # print("Max Distance", max(dists))
-    # print("Min Distance", min(dists))
-    # print("Mean Distance", np.mean(dists))
-    # print([c.get_unitary().get_distance_from(circ.get_unitary()) for c in circs[:20]])
-    save_circuits(circs, circ_name, tol, timestep, ignore_timestep=True, extra_str=f"_{num_unique_circs}_circ_final_min_post{opt_str}_noqp")
+    # print("OPT STR", opt_str, opt, argv[5])
+    circs, error_bound, count = get_shortest_circuits(circ_name, tol, timestep, num_unique_circs=num_unique_circs, extra_str=f"{opt_str}")
+    save_circuits(circs, circ_name, tol, timestep, ignore_timestep=True, extra_str=f"_{num_unique_circs}_circ_final_min_post{opt_str}_calc_bias")
