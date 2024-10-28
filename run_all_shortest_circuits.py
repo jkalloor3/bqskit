@@ -7,15 +7,15 @@ file_name = 'job.sh'
 
 header = """#!/bin/bash -l
 #SBATCH -q regular
-#SBATCH -A m4141
-#SBATCH -C cpu
+#SBATCH -A m4141_g
+#SBATCH -C gpu
 #SBATCH --time=11:55:00
 #SBATCH -N 1
 #SBATCH --signal=B:USR1@1
 #SBATCH --output=./slurm_logs/{file}{extra}_{unique_circs}/{circ}/{tol}_tol_block_size_8
 
 module load conda
-conda activate /pscratch/sd/j/jkalloor/ensemble_env
+conda activate /global/common/software/m4141/ensemble_env_2
 echo "python {file}.py {circ} {timestep} {tol} {unique_circs} 0"
 python {file}.py {circ} {timestep} {tol} {unique_circs} 0
 """
@@ -27,8 +27,8 @@ if __name__ == '__main__':
     # file = "get_counts"
     # file = "get_ensemble_expectations"
     # file = "get_shortest_circuits_new"
-    # file = "get_ensemble_final"
-    file = "get_ensemble_final_cliffordt"
+    file = "get_ensemble_final"
+    # file = "get_ensemble_final_cliffordt"
     # file = "run_simulations_new"
     # file = "get_shortest_circuits_qsearch"
     # file = "plot_ensemble_data"
@@ -36,37 +36,32 @@ if __name__ == '__main__':
     # file = "full_compile"
     # circs = ["Heisenberg_7"] #, 
     # circs = ["Heisenberg_7", "TFXY_8"]
+    circs = ["adder9"]
     # circs = ["tfxy_6", "qc_binary_5q"] #, "qc_gray_5q", "qc_optimized_5q"]
-    circs = ["heisenberg7", "vqe_12", "shor_12", "qml_19", "qml_25"]
-    circs.extend(["add17", "adder9", "mult16", "qae13", "qpe10", "tfim16", "mult64", "adder63"])
-    circs.extend([f"qft_{i}" for i in range(8, 32, 4)])
+    # circs = ["heisenberg7", "vqe_12", "shor_12", "qml_19", "qml_25"]
+    # circs.extend(["adder9", "qft_8", "qae13", "shor_12"])
+    # circs.extend([f"qft_{i}" for i in range(20, 25, 4)])
+    # circs.extend([f"JWCirc_{i}" for i in range(1, 4, 2)])
+    # circs = ["qae13"]
     # circs = ["hubbard_4"]
     # circs =  ["shor_12", "qft_10", "vqe_12"]
     # tols = range(1, 7)
-    # tols = [1,3]
-    tols = [0,1,3]
+    tols = [2,3]
+    # tols = [6]
     unique_circss = [100] #, 5, 20, 100, 1000, 10000]
     # extra = "cliffordt"
-    extra = "_noqp_clifft"
+    # extra = "_clifft"
+    extra = "_calc_bias"
     for circ in circs:
         for timestep in [0]:
             for tol in tols:
                 for unique_circs in unique_circss:
-                    # if circ == "TFXY_8":
-                    #     m = 7
-                    # param_file = f"ensemble_approx_circuits_qfactor/{method}/{circ}/{tol}/{m}/{timestep}/jiggled_circ.pickle"
-                    # param_file = f"/pscratch/sd/j/jkalloor/bqskit/ensemble_shortest_circuits{extra}/{circ}/{tol}/{timestep}/{circ}.pkl"
-                    utries_file = f"/pscratch/sd/j/jkalloor/bqskit/ensemble_shortest_circuits_{unique_circs}_circ_final_min_post_opt/{circ}/{tol}/{circ}.pkl"
-                    log_file = f"/pscratch/sd/j/jkalloor/bqskit/slurm_logs/run_simulations_new_post_opt_{unique_circs}/{circ}/{tol}_tol_block_size_8"
-                    # utries_file = f"/pscratch/sd/j/jkalloor/bqskit/ensemble_shortest_circuits_100_circ_final/qc_binary_5q/1/qc_binary_5q.pkl"
-                    # graph_file = f"/pscratch/sd/j/jkalloor/bqskit/{circ}_{tol}_errors_comp.png"
+                    utries_file = f"/pscratch/sd/j/jkalloor/bqskit/ensemble_shortest_circuits_{unique_circs}_circ_final_min_post_calc_bias/{circ}/{tol}/{circ}.pkl"
+                    # log_file = f"/pscratch/sd/j/jkalloor/bqskit/slurm_logs/run_simulations_new_post_opt_{unique_circs}/{circ}/{tol}_tol_block_size_8"
+                    # utries_file = f"/pscratch/sd/j/jkalloor/bqskit/ensemble_shortest_circuits_{unique_circs}_circ_cliff_t_final/{circ}/{tol}/{circ}.pkl"
 
-                    # if os.path.exists(graph_file):
-                    #     print(f"Skipping {graph_file}")
-                    #     continue
-
-                    # if not os.path.exists(utries_file):
-                    #     continue
+                    if os.path.exists(utries_file):
+                        continue
 
                     # if os.path.exists(log_file):
                     #     continue

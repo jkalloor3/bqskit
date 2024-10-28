@@ -5,9 +5,10 @@ from bqskit.compiler.compiler import Compiler, WorkflowLike
 from bqskit.ir.gates import CNOTGate #, GlobalPhaseGate, VariableUnitaryGate
 # Generate a super ensemble for some error bounds
 from bqskit.passes import *
-# from bqskit.runtime import get_runtime
+from bqskit import enable_logging
 from bqskit.ir.opt.cost.functions import  HilbertSchmidtCostGenerator
-from qfactorjax.qfactor_sample_jax import QFactorSampleJax
+# from qfactorjax.qfactor_sample_jax import QFactorSampleJax
+from qfactorjax.qfactor import QFactorJax
 from bqskit.passes import ScanningGateRemovalPass
 
 
@@ -16,6 +17,8 @@ from bqskit.passes import ScanningGateRemovalPass
 # from util import save_circuits, load_circuit, FixGlobalPhasePass, CalculateErrorBoundPass
 
 from util import load_circuit
+
+enable_logging(True)
 
 def get_distance(circ1: Circuit) -> float:
     global target
@@ -43,7 +46,7 @@ def get_shortest_circuits(circ_name: str, tol: int, timestep: int,
 
     # QFactor hyperparameters -
     # see instantiation example for more details on the parameters
-    num_multistarts = 12
+    num_multistarts = 2
     max_iters = 100000
     min_iters = 3
     diff_tol_r = 1e-5
@@ -51,7 +54,15 @@ def get_shortest_circuits(circ_name: str, tol: int, timestep: int,
 
     beta = 0
     # Prepare the instantiator
-    batched_instantiation = QFactorSampleJax(
+    # batched_instantiation = QFactorSampleJax(
+    #     diff_tol_r=diff_tol_r,
+    #     min_iters=min_iters,
+    #     max_iters=max_iters,
+    #     dist_tol=dist_tol,
+    #     beta=beta,
+    # )
+
+    batched_instantiation = QFactorJax(
         diff_tol_r=diff_tol_r,
         min_iters=min_iters,
         max_iters=max_iters,
@@ -106,7 +117,7 @@ def get_shortest_circuits(circ_name: str, tol: int, timestep: int,
                 #                    num_circs=num_unique_circs,
                 #                    num_random_ensembles=2,
                 #                    solve_exact_dists=True),
-                ToVariablePass(all_ensembles = True, convert_all_single_qudit_gates=True),
+                # ToVariablePass(all_ensembles = True, convert_all_single_qudit_gates=True),
                 scan_pass,
                 # JiggleEnsemblePass(success_threshold=err_thresh, num_circs=2000, use_ensemble=True),
                 # SubselectEnsemblePass(success_threshold=err_thresh, num_circs=200),
@@ -121,7 +132,7 @@ def get_shortest_circuits(circ_name: str, tol: int, timestep: int,
         ),
         # SelectFinalEnsemblePass(size=5000),
     ]
-    num_workers = 2
+    num_workers = 1
     compiler = Compiler(num_workers=num_workers)
     # target = circ.get_unitary()
     out_circ, data = compiler.compile(circ, workflow=leap_workflow, request_data=True)

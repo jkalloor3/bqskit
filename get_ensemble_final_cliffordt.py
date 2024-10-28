@@ -92,8 +92,9 @@ def get_shortest_circuits(circ_name: str, tol: int, timestep: int,
             [
                 ForEachBlockPass(
                     [
-                        ConvertToZXZXZ(success_threshold=extra_err_thresh, num_circs=50, instantiation_options=instantiation_options),
-                        FixGlobalPhasePass(),
+                        # ConvertToZXZXZ(success_threshold=extra_err_thresh, num_circs=50, instantiation_options=instantiation_options),
+                        # FixGlobalPhasePass(),
+                        NOOPPass(),
                     ],
                     calculate_error_bound=False,
                     allocate_error=True,
@@ -107,9 +108,9 @@ def get_shortest_circuits(circ_name: str, tol: int, timestep: int,
                                 #    cost=phase_generator, 
                                    solve_exact_dists=True,
                                    sort_by_t=True,),
-                JiggleEnsemblePass(success_threshold=err_thresh, num_circs=2000, use_ensemble=True),
-                SubselectEnsemblePass(success_threshold=err_thresh, num_circs=200),
-                GenerateProbabilityPass(size=50),
+                # JiggleEnsemblePass(success_threshold=err_thresh, num_circs=2000, use_ensemble=True),
+                # SubselectEnsemblePass(success_threshold=err_thresh, num_circs=200),
+                # GenerateProbabilityPass(size=50),
                 UnfoldPass(),
             ],
             calculate_error_bound=True,
@@ -120,7 +121,7 @@ def get_shortest_circuits(circ_name: str, tol: int, timestep: int,
         SelectFinalEnsemblePass(size=5000),
         TCountPass(t_gates_per_rz=30, count_ensemble=True),
     ]
-    num_workers = 256
+    num_workers = 128
     compiler = Compiler(num_workers=num_workers)
     # target = circ.get_unitary()
     out_circ, data = compiler.compile(circ, workflow=leap_workflow, request_data=True)

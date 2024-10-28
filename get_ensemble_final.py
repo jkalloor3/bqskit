@@ -91,7 +91,7 @@ def get_shortest_circuits(circ_name: str, tol: int, timestep: int,
         # cost=phase_generator,
         instantiate_options=instantiation_options,
         use_calculated_error=True,
-        max_psols=5
+        max_psols=4
     )
 
     second_synthesis_pass = SecondLEAPSynthesisPass(
@@ -101,7 +101,7 @@ def get_shortest_circuits(circ_name: str, tol: int, timestep: int,
         # cost=HS,
         instantiate_options=instantiation_options,
         use_calculated_error=True,
-        max_psols=3
+        max_psols=7
     )
 
     leap_workflow = [
@@ -126,25 +126,25 @@ def get_shortest_circuits(circ_name: str, tol: int, timestep: int,
                                    num_random_ensembles=2,
                                 #    cost=phase_generator, 
                                    solve_exact_dists=True),
+                # ToVariablePass(all_ensembles = True, convert_all_single_qudit_gates=True),
                 JiggleEnsemblePass(success_threshold=err_thresh, num_circs=2000, use_ensemble=True),
                 SubselectEnsemblePass(success_threshold=err_thresh, num_circs=200),
-                GenerateProbabilityPass(success_threshold=err_thresh, size=50),
-                # GetErrorsPass(),
-                UnfoldPass(),
+                # GenerateProbabilityPass(success_threshold=err_thresh, size=50),
+                # UnfoldPass(),
             ],
             calculate_error_bound=True,
             error_cost_gen=phase_generator,
             allocate_error=True,
             allocate_error_gate=CNOTGate(),
         ),
-        SelectFinalEnsemblePass(size=5000),
+        # SelectFinalEnsemblePass(size=5000),
     ]
     num_workers = 128
     compiler = Compiler(num_workers=num_workers)
     # target = circ.get_unitary()
     out_circ, data = compiler.compile(circ, workflow=leap_workflow, request_data=True)
-    approx_circuits: list[Circuit] = data["final_ensemble"]
-    # approx_circuits = []
+    # approx_circuits: list[Circuit] = data["final_ensemble"]
+    approx_circuits = []
     # print("Final Count: ", out_circ.count(CNOTGate()))
     # print("Num Circs", len(approx_circuits))
     # actual_error = target.get_frobenius_distance(out_circ.get_unitary())
@@ -164,4 +164,4 @@ if __name__ == '__main__':
     opt_str = "_opt" if opt else ""
     # print("OPT STR", opt_str, opt, argv[5])
     circs, error_bound, count = get_shortest_circuits(circ_name, tol, timestep, num_unique_circs=num_unique_circs, extra_str=f"{opt_str}")
-    save_circuits(circs, circ_name, tol, timestep, ignore_timestep=True, extra_str=f"_{num_unique_circs}_circ_final_min_post{opt_str}_calc_bias")
+    # save_circuits(circs, circ_name, tol, timestep, ignore_timestep=True, extra_str=f"_{num_unique_circs}_circ_final_min_post{opt_str}_calc_bias")

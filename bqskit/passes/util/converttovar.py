@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import pickle
 
 from bqskit.compiler.basepass import BasePass
 from bqskit.compiler.passdata import PassData
@@ -31,9 +32,17 @@ class ToVariablePass(BasePass):
 
     async def run(self, circuit: Circuit, data: PassData) -> None:
         if self.all_ensembles:
+            if "converted_to_var" in data:
+                return
+            
             for ensemble in data["ensemble"]:
                 for circ,_ in ensemble:
                     await self.run_circ(circ, data)
+
+            if "checkpoint_dir" in data:
+                checkpoint_data_file = data["checkpoint_data_file"]
+                data["converted_to_var"] = True
+                pickle.dump(data, open(checkpoint_data_file, "wb"))
         else:
             await self.run_circ(circuit, data)
 

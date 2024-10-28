@@ -12,7 +12,7 @@ import pickle
 from bqskit.compiler.passdata import PassData
 from bqskit.ir.circuit import Circuit
 from bqskit.ir.gates import CNOTGate
-from bqskit.ir.opt.cost.functions import HilbertSchmidtResidualsGenerator, HilbertSchmidtCostGenerator, HSCostGenerator
+from bqskit.ir.opt.cost.functions import HilbertSchmidtResidualsGenerator, HSCostGenerator
 from bqskit.ir.opt.cost.generator import CostFunctionGenerator
 from bqskit.passes.search.frontier import Frontier
 from bqskit.passes.search.generator import LayerGenerator
@@ -184,6 +184,7 @@ class LEAPSynthesisPass2(SynthesisPass):
         if self.use_calculated_error:
             # use sqrt
             factor = np.sqrt(data["error_percentage_allocated"])
+            # factor = data
             success_threshold = self.success_threshold * factor
             partial_success_threshold = self.partial_success_threshold * factor
             instantiate_options['ftol'] = success_threshold
@@ -242,7 +243,7 @@ class LEAPSynthesisPass2(SynthesisPass):
             psols = data['psols']
             scan_sols = data['scan_sols']
 
-        default_count = default_circuit.count(CNOTGate())
+        # default_count = default_circuit.count(CNOTGate())
 
         # Main loop
         step = 0
@@ -286,14 +287,15 @@ class LEAPSynthesisPass2(SynthesisPass):
                 circ_count = circuit.count(CNOTGate())
 
                 if self.store_partial_solutions:
-                    if dist < partial_success_threshold and circ_count <= default_count:
+                    if dist < partial_success_threshold: #and circ_count <= default_count:
                         scan_sols.append((circuit.copy(), dist))
                         data['psols'] = psols
                         data['scan_sols'] = scan_sols
                         if len(scan_sols) >= self.max_psols:
                             scan_sols.append((default_circuit.copy(), 0))
                             # Return circuit with least count
-                            min_count = default_count
+                            min_count = np.inf
+                            # min_count
                             max_circ = default_circuit
                             for scan_sol, dist in scan_sols:
                                 if scan_sol.count(CNOTGate()) < min_count:
@@ -316,7 +318,7 @@ class LEAPSynthesisPass2(SynthesisPass):
                         psols[layer].sort(key=lambda x: x[1])
                         del psols[layer][-1]
 
-                if dist < success_threshold:
+                if dist < success_threshold and len(scan_sols) >= self.max_psols:
                     _logger.debug(f'Successful synthesis with distance {dist:.6e}.')
                     if self.store_partial_solutions:
                         scan_sols.append((default_circuit.copy(), 0))

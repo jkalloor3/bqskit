@@ -83,18 +83,24 @@ class CreateEnsemblePass(BasePass):
 
     def get_all_inds(self, dists: list[list[float]]) -> list[list[int]]:
         '''
-        Get all possible solutions for the ensemble
+        Get all possible solutions for the ensemble up to 
         '''
         num_psols_per_block = [len(psol_dists) for psol_dists in dists]
 
         # Get all indice combos from all blocks, picking one psol from each block
         all_inds = []
         for i in range(len(num_psols_per_block)):
+            num_inds = num_psols_per_block[i]
+            # print("Num Inds", num_inds, flush=True)
+            inds = np.random.choice(num_psols_per_block[i], 
+                                    size=num_inds, 
+                                    replace=False)
+            # print("Inds", inds, flush=True)
             if i == 0:
-                all_inds.extend([[j] for j in range(num_psols_per_block[i])])
+                all_inds.extend([[j] for j in inds])
             else:
                 new_inds = []
-                for j in range(num_psols_per_block[i]):
+                for j in inds:
                     for ind in all_inds:
                         new_inds.append(ind + [j])
                 all_inds = new_inds
@@ -316,9 +322,11 @@ class CreateEnsemblePass(BasePass):
         
 
         # Randomly select 10000
-        selection = np.random.choice(possible_sols, size=min(10000, possible_sols), replace=False)
+        selection = np.random.choice(possible_sols, size=min(2000, possible_sols), replace=False)
+        print("Getting ALl Inds", flush=True)
         all_valid_inds = np.array(self.get_all_inds(dists))[selection]
 
+        print("Got All Inds", flush=True)
         all_inds = [all_valid_inds, greediest_inds, greedy_inds, valid_inds]
 
 
@@ -369,6 +377,8 @@ class CreateEnsemblePass(BasePass):
             all_ensembles.append((valid_circs_dists, np.mean(final_counts)))
 
         # Sort by average gate count
+        print("Ensemble Sizes", [len(x[0]) for x in all_ensembles], flush=True)
+        print("Ensemble Counts", [x[1] for x in all_ensembles], flush=True)
         all_ensembles = sorted(all_ensembles, key=lambda x: x[1])
         return [x[0] for x in all_ensembles]
 

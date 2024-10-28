@@ -39,6 +39,16 @@ def bias_cost(utry: UnitaryMatrix, target: UnitaryMatrix):
     # Quest Paper 
     return cost
 
+def frobenius_cost(utry: UnitaryMatrix, target: UnitaryMatrix):
+    '''
+    Calculates the Frobenius distance between two unitaries
+    '''
+    diff = utry- target
+    # This is Frob(u - v)
+    cost = np.sqrt(np.real(np.trace(diff @ diff.conj().T)))
+
+    return cost
+
 class  JiggleEnsemblePass(BasePass):
     """Converts single-qubit general unitary gates to U3 Gates."""
     num_jiggles = 0
@@ -96,26 +106,12 @@ class  JiggleEnsemblePass(BasePass):
                 # num_params_to_jiggle = len(params)
                 params_to_jiggle = np.random.choice(list(range(len(params))), num_params_to_jiggle, replace=False)
 
-                try:
-                    jiggle_amounts = np.random.uniform(-1 * extra_diff, extra_diff, num_params_to_jiggle)
-                except Exception as e:
-                    print("Extra Diff", extra_diff, flush=True)
-                    print("Num Params to Jiggle", num_params_to_jiggle, flush=True)
-                    print("Len Params", len(params), flush=True)
-                    print(self.success_threshold, flush=True)
-                    print("Dist", dist, flush=True)
-                    _logger.error(e)
+                jiggle_amounts = np.random.uniform(-1 * extra_diff, extra_diff, num_params_to_jiggle)
                 # print("jiggle_amounts", jiggle_amounts, flush=True)
                 next_params = best_params.copy()
                 next_params[params_to_jiggle] = next_params[params_to_jiggle] + jiggle_amounts
                 circ_cost = cost_fn.get_cost(next_params)
                 trial_costs.append(circ_cost)
-                try:
-                    a = circ_cost < self.success_threshold
-                except Exception as e:
-                    print("Circ Cost", circ_cost, flush=True)
-                    print("Success Threshold", self.success_threshold, flush=True)
-                    _logger.error(e)
                 if (circ_cost < self.success_threshold):
                     extra_diff = extra_diff * 1.5
                     best_params = next_params
@@ -161,7 +157,7 @@ class  JiggleEnsemblePass(BasePass):
         return all_circs
 
 
-    def subselect_circs_by_bias(self, circs_dists: list[tuple[Circuit, float]], target: UnitaryMatrix, target_bias: float) -> tuple[list[tuple[Circuit, float]], float]:
+    def subselect_circs_by_bias(self, unitaries: list[UnitaryMatrix], target: UnitaryMatrix) -> tuple[list[int], float]:
         '''
         Given a list of circuits and distances, subselect the circuits
         that minimize the bias between the target and the mean unitary
@@ -171,26 +167,21 @@ class  JiggleEnsemblePass(BasePass):
         The circuits are sorted by the gate reduction, so try to use
         the circuits that have the fewest gates to minimize the bias.
         '''
-        # How many unitaries to check per iteration of the loop
-        # num_neigbhors = [7, 6, 5, 4, 3, 2]
-        nn = 50
-        
-        # for nn in num_neigbhors:
-        #     # Keep track of the average unitary
-        #     avg_un = np.zeros_like(circs_dists[0][0].get_unitary())
-        #     bias = bias_cost(avg_un, target)
+        # Initially randomly sort circs
+        order = np.random.permutation(len(unitaries))
 
-        #     cur_ind = 0
-
-        inds = []
-        avg_un = np.zeros_like(circs_dists[0][0].get_unitary())
+        # Grab first 25 as initial set
+        inds = list(order[:25])
+        avg_un = np.mean([unitaries[i] for i in inds], axis=0)
         bias = bias_cost(avg_un, target)
-
-        cur_ind = 0
-        while cur_ind < len(circs_dists):
-            num_to_check = min(nn, len(circs_dists) - cur_ind)
+        
+        cur_ind = 25
+        nn = 1
+        while cur_ind < len(unitaries) and len(inds) < 1000:
+            num_to_check = min(nn, len(unitaries) - cur_ind)
             # Get next unitaries to try and add
-            next_uns = [circs_dists[cur_ind + i][0].get_unitary() for i in range(num_to_check)]
+            next_inds = [order[cur_ind + i] for i in range(num_to_check)]
+            next_uns = [unitaries[i] for i in next_inds]
 
             # Try to add all of them
             num_inds = len(inds)
@@ -198,36 +189,22 @@ class  JiggleEnsemblePass(BasePass):
             new_bias = bias_cost(new_avg_un, target)
 
             # If the bias is less, add the unitaries
-            if new_bias <= bias:
+            if new_bias < bias:
                 print("Taking all together")
+                print("Old Bias", bias)
+                print("New Bias", new_bias)
                 bias = new_bias
                 avg_un = new_avg_un
-                inds.extend([cur_ind + i for i in range(num_to_check)])
-                nn += 10
-            else:
-                # Otherwise, go one by one
-                nn = max(10, nn - 2)
-                for i in range(num_to_check):
-                    new_avg_un = (num_inds / (num_inds + 1)) * avg_un + (1 / (num_inds + 1)) * next_uns[i]
-                    new_bias = bias_cost(new_avg_un, target)
-                    if new_bias <= bias:
-                        inds.append(cur_ind + i)
-                        bias = new_bias
-                        avg_un = new_avg_un
-                        num_inds += 1
+                inds.extend(next_inds)
+                # nn += 5
+            # else:
+            #     nn -= 3
+            #     nn = max(5, nn)
 
-            cur_ind = max(inds) + 1
+            cur_ind = cur_ind + num_to_check
 
-        # If the bias is less than the threshold, return the inds
-        # if bias < target_bias:
-        #     return [circs_dists[i] for i in inds], bias
-        # elif bias < best_bias:
-        #     # Else, keep track if its the best bias so far
-        #     best_bias = bias
-        #     best_inds = inds
-            
         # Return the ensemble with the best bias
-        return [circs_dists[i] for i in inds], bias
+        return inds, bias
 
 
     async def run(self, circuit: Circuit, data: PassData) -> None:
@@ -240,9 +217,6 @@ class  JiggleEnsemblePass(BasePass):
         if "finished_jiggle" in data:
             print("Already Jiggled", flush=True)
             return
-
-
-        params = circuit.params
 
         print("Number of ensembles", len(data["ensemble"]), flush=True)
 
@@ -290,22 +264,35 @@ class  JiggleEnsemblePass(BasePass):
         csv_dict = []
         for i,ens in enumerate(ensemble):
             ensemble_data = {}
-            e1 = np.mean([dist for _, dist in ens])
-            orig_bias = bias_cost(np.mean([circ.get_unitary() for circ, _ in ens], axis=0), target)
+            unitaries: list[UnitaryMatrix] = [x[0].get_unitary() for x in ens]
+            e1s = [bias_cost(un, target) for un in unitaries]
+            e1s_actual = [frobenius_cost(un, target) for un in unitaries]
+            e1 = np.mean(e1s)
+            e1_actual = np.mean(e1s_actual)
+            mean_un = np.mean(unitaries, axis=0)
+            orig_bias = bias_cost(mean_un, target)
+            orig_bias_actual = frobenius_cost(mean_un, target)
             
             final_counts = [circ.count(CNOTGate()) for circ, _ in ens]
 
             ensemble_data["Ensemble Generation Method"] = ensemble_names[i]
             ensemble_data["Epsilon"] = e1
+            ensemble_data["Epsilon Actual"] = e1_actual
             ensemble_data["Avg CNOT Count before subselect"] = np.mean(final_counts)
             ensemble_data["Bias without subselect"] = orig_bias
+            ensemble_data["Bias without subselect Actual"] = orig_bias_actual
+            ensemble_data["Num Circs"] = len(ens)
+            subselected_inds, new_bias = self.subselect_circs_by_bias(unitaries, target)
+            new_mean_un = np.mean([unitaries[i] for i in subselected_inds], axis=0)
+            new_bias_actual = frobenius_cost(new_mean_un, target)
 
-            subselected_circs_dists, new_bias = self.subselect_circs_by_bias(ens, target, target_bias=e1 ** 2)
-
+            subselected_circs_dists = [ens[i]for i in subselected_inds]
             final_counts = [circ.count(CNOTGate()) for circ, _ in subselected_circs_dists]
 
             ensemble_data["Avg CNOT Count after subselect"] = np.mean(final_counts)
+            ensemble_data["Num Circs after subselect"] = len(subselected_circs_dists)
             ensemble_data["Bias after subselect"] = new_bias
+            ensemble_data["Bias after subselect Actual"] = new_bias_actual
 
             csv_dict.append(ensemble_data)
 
@@ -314,7 +301,7 @@ class  JiggleEnsemblePass(BasePass):
 
         if "checkpoint_dir" in data:
             checkpoint_data_file = data["checkpoint_data_file"]
-            csv_file = checkpoint_data_file.replace(".data", ".csv_subselect")
+            csv_file = checkpoint_data_file.replace(".data", ".csv_subselect2")
             writer = csv.DictWriter(open(csv_file, "w", newline=""), fieldnames=csv_dict[0].keys())
             writer.writeheader()
             for row in csv_dict:

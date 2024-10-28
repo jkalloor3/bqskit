@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import csv
 
 from sklearn.cluster import AgglomerativeClustering
 
@@ -28,6 +29,31 @@ import pickle
 
 
 _logger = logging.getLogger(__name__)
+
+def bias_cost(utry: UnitaryMatrix, target: UnitaryMatrix):
+    '''
+    Calculates the normalized Frobenius distance between two unitaries
+    '''
+    diff = utry- target
+    # This is Frob(u - v)
+    cost = np.sqrt(np.real(np.trace(diff @ diff.conj().T)))
+
+    N = utry.shape[0]
+    cost = cost / np.sqrt(2 * N)
+
+    # This quantity should be less than HS distance as defined by 
+    # Quest Paper 
+    return cost
+
+def frobenius_cost(utry: UnitaryMatrix, target: UnitaryMatrix):
+    '''
+    Calculates the Frobenius distance between two unitaries
+    '''
+    diff = utry- target
+    # This is Frob(u - v)
+    cost = np.sqrt(np.real(np.trace(diff @ diff.conj().T)))
+
+    return cost
 
 
 class SubselectEnsemblePass(BasePass):
@@ -62,7 +88,7 @@ class SubselectEnsemblePass(BasePass):
 
 
     async def get_new_ensemble(self, ensemble: list[Circuit]) -> list[Circuit]:
-        ensemble_vec = np.array([c.get_unitary().get_flat_vector() for c in ensemble])
+        ensemble_vec = np.array([c.get_unitary().get_flat_vector() for c, _ in ensemble])
         print("Running Subselect Ensemble Pass!", flush=True)
         print(ensemble_vec.shape, flush=True)
         # print(ensemble_vec[0], flush=True)
@@ -72,7 +98,7 @@ class SubselectEnsemblePass(BasePass):
         k_means = KMeans(n_clusters=self.num_circs, random_state=0, n_init="auto").fit(ensemble_vec)
         
         new_ensemble_inds = SubselectEnsemblePass.get_inds(k_means.labels_, self.num_circs)
-        new_ensemble = [ensemble[i] for i in new_ensemble_inds]
+        new_ensemble = [ensemble[i][0] for i in new_ensemble_inds]
 
         print("Subselected Ensemble Size: ", len(new_ensemble_inds), flush=True)
 
@@ -88,15 +114,45 @@ class SubselectEnsemblePass(BasePass):
 
         data["finished_subselect"] = False
 
-        all_ensembles = await get_runtime().map(self.get_new_ensemble, data["ensemble"])
+        all_ensembles: list[list[Circuit]] = await get_runtime().map(self.get_new_ensemble, data["ensemble"])
+
+        csv_dict = []
+        ensemble_names = ["Random Sub-Sample", "Least CNOTs", "Medium CNOTs", "Valid CNOTs"]
+        target = data.target
+        for i,ens in enumerate(all_ensembles):
+            ensemble_data = {}
+            unitaries: list[UnitaryMatrix] = [x.get_unitary() for x in ens]
+            e1s = [bias_cost(un, target) for un in unitaries]
+            e1s_actual = [frobenius_cost(un, target) for un in unitaries]
+            e1 = np.mean(e1s)
+            e1_actual = np.mean(e1s_actual)
+            mean_un = np.mean(unitaries, axis=0)
+            orig_bias = bias_cost(mean_un, target)
+            orig_bias_actual = frobenius_cost(mean_un, target)
+            
+            final_counts = [circ.count(CNOTGate()) for circ in ens]
+            ensemble_data["Ensemble Generation Method"] = ensemble_names[i]
+            ensemble_data["Epsilon"] = e1
+            ensemble_data["Epsilon Actual"] = e1_actual
+            ensemble_data["Avg CNOT Count after K Means"] = np.mean(final_counts)
+            ensemble_data["Bias after K Means"] = orig_bias
+            ensemble_data["Bias Actual after K Means"] = orig_bias_actual
+            ensemble_data["Num Circs"] = len(ens)
+
+            csv_dict.append(ensemble_data)
 
         data["sub_select_ensemble"] = all_ensembles
 
         if "checkpoint_dir" in data:
-            data["finished_subselect"] = True
-            data.pop("ensemble")
+            # data["finished_subselect"] = True
+            # data.pop("ensemble")
             checkpoint_data_file = data["checkpoint_data_file"]
-            pickle.dump(data, open(checkpoint_data_file, "wb"))
+            csv_file = checkpoint_data_file.replace(".data", ".csv_subselect3")
+            writer = csv.DictWriter(open(csv_file, "w", newline=""), fieldnames=csv_dict[0].keys())
+            writer.writeheader()
+            for row in csv_dict:
+                writer.writerow(row)
+            # pickle.dump(data, open(checkpoint_data_file, "wb"))
 
         return
 

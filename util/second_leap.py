@@ -154,7 +154,7 @@ class SecondLEAPSynthesisPass(BasePass):
         self.max_layer = max_layer
         self.min_prefix_size = min_prefix_size
         self.instantiate_options: dict[str, Any] = {
-            # 'cost_fn_gen': self.cost,
+            'cost_fn_gen': HilbertSchmidtResidualsGenerator(),
         }
         self.use_calculated_error = use_calculated_error
         self.instantiate_options.update(instantiate_options)
@@ -180,13 +180,13 @@ class SecondLEAPSynthesisPass(BasePass):
                 for c in circs:
                     assert(isinstance(c, Circuit))
 
-            max_cnot_gates = default_circuit.count(CNOTGate())
+            # max_cnot_gates = default_circuit.count(CNOTGate())
 
             for i, circs in enumerate(new_circs):
                 new_circs[i] = sorted(circs, key=lambda x: x.count(CNOTGate()))
-                for j, c in enumerate(new_circs[i]):
-                    if c.count(CNOTGate()) >= max_cnot_gates: # Only take shorter circuits
-                        new_circs[i][j] = None
+                # for j, c in enumerate(new_circs[i]):
+                    # if c.count(CNOTGate()) >= max_cnot_gates: # Only take shorter circuits
+                    #     new_circs[i][j] = None
             
             # Now interleave so you get a decent mix
             new_circs = list(chain(*zip_longest(*new_circs, fillvalue=None)))
@@ -194,6 +194,12 @@ class SecondLEAPSynthesisPass(BasePass):
             new_circs = sorted(new_circs, key=lambda x: x[0].count(CNOTGate()))
         else:
             new_circs = []
+
+        # Randomly choose up to 15 circuits
+        if len(new_circs) > 15:
+            inds = np.random.choice(len(new_circs), 15, replace=False)
+            print("Random inds", inds, flush=True)
+            new_circs = [new_circs[i] for i in inds]
 
         new_circs.append((default_circuit, 0))
 
@@ -219,7 +225,9 @@ class SecondLEAPSynthesisPass(BasePass):
         utry, data, save_data_file = utry_data
         if self.use_calculated_error:
             # use sqrt
-            factor = np.sqrt(data["error_percentage_allocated"])
+            factor = np.sqrt(data["error_percentage_allocated"]) * 2 
+            # factor = data["error_percentage_allocated"]
+            print("Percentage Allocated: ", factor, flush=True)
             success_threshold = self.success_threshold * factor
             partial_success_threshold = self.partial_success_threshold * factor
         else:
@@ -344,7 +352,7 @@ class SecondLEAPSynthesisPass(BasePass):
                             pickle.dump(data, open(save_data_file, "wb"))
                         return scan_sols
 
-                if dist < success_threshold:
+                if dist < success_threshold and len(scan_sols) >= self.max_psols:
                     _logger.debug(f'Successful synthesis with distance {dist:.6e}.')
                     if save_data_file:
                         data["second_leap_finished"] = True
