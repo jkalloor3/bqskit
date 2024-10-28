@@ -6,6 +6,7 @@ from bqskit.passes.processing.iterative import IterativeScanningGateRemovalPass
 from bqskit.passes.processing.scan import ScanningGateRemovalPass
 from bqskit.passes.processing.treescan import TreeScanningGateRemovalPass
 from bqskit.passes.processing.substitute import SubstitutePass
+from bqskit.passes.processing.treescan import TreeScanningGateRemovalPass
 
 __all__ = [
     'ExhaustiveGateRemovalPass',
@@ -13,4 +14,5 @@ __all__ = [
     'ScanningGateRemovalPass',
     'TreeScanningGateRemovalPass',
     'SubstitutePass',
+    'TreeScanningGateRemovalPass',
 ]

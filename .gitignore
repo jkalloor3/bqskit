@@ -15,7 +15,6 @@ dask-worker-space
 dist
 build
 scratch/
-
 QFT/
 *logs*/
 *.pdf

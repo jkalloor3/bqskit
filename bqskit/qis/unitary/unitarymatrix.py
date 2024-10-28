@@ -199,6 +199,22 @@ class UnitaryMatrix(Unitary, StateVectorMap, NDArrayOperatorsMixin):
 
         return UnitaryMatrix(utry_acm, radixes_acm)
 
+    def ipower(self, power: int) -> UnitaryMatrix:
+        """
+        Calculate the integer power of this unitary.
+
+        Args:
+            power (int): The integer power to raise the unitary to.
+
+        Returns:
+            UnitaryMatrix: The resulting unitary matrix.
+        """
+        if power < 0:
+            mat = np.linalg.matrix_power(self.dagger, -power)
+        else:
+            mat = np.linalg.matrix_power(self, power)
+        return UnitaryMatrix(mat, self.radixes)
+
     def get_unitary(self, params: RealVector = []) -> UnitaryMatrix:
         """Return the same object, satisfies the :class:`Unitary` API."""
         return self
@@ -253,6 +269,23 @@ class UnitaryMatrix(Unitary, StateVectorMap, NDArrayOperatorsMixin):
         # inner_product = np.real(np.trace(diff.conj().T @ diff))
         inner_product = np.abs(np.sum(np.einsum("ij,ij->", diff.conj(), diff)))
         return inner_product
+    
+    def isclose(self, other: UnitaryLike, tol: float = 1e-6) -> bool:
+        """
+        Check if `self` is approximately equal to `other` upto global phase.
+
+        Args:
+            other (UnitaryLike): The unitary to compare to.
+
+            tol (float): The numerical precision of the check.
+
+        Returns:
+            bool: True if `self` is close to `other`.
+
+        See Also:
+            - :func:`get_distance_from` for the error function used.
+        """
+        return self.get_distance_from(other) < tol
 
     def get_statevector(self, in_state: StateLike) -> StateVector:
         """
@@ -529,6 +562,11 @@ class UnitaryMatrix(Unitary, StateVectorMap, NDArrayOperatorsMixin):
 
 UnitaryLike = Union[
     UnitaryMatrix,
-    np.ndarray,
+    npt.NDArray[np.complex128],
+    npt.NDArray[np.complex64],
+    npt.NDArray[np.int64],
+    npt.NDArray[np.int32],
+    npt.NDArray[np.float64],
+    npt.NDArray[np.float32],
     Sequence[Sequence[Union[int, float, complex]]],
 ]
