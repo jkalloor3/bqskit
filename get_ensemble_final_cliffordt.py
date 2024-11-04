@@ -1,20 +1,14 @@
 from bqskit.ir.circuit import Circuit
 from sys import argv
-from bqskit.exec.runners.quest import QuestRunner
-from bqskit.exec.runners.sim import SimulationRunner
-from bqskit import compile
-import numpy as np
-from bqskit.compiler.compiler import Compiler, WorkflowLike
-from bqskit.ir.point import CircuitPoint
-from bqskit.ir.gates import CNOTGate, GlobalPhaseGate, VariableUnitaryGate, TGate
+from bqskit.compiler.compiler import Compiler
+from ntro import NumericalTReductionPass
+from bqskit.ir.gates import CNOTGate
 # Generate a super ensemble for some error bounds
 from bqskit.passes import *
-from bqskit.runtime import get_runtime
 import pickle
-from bqskit.ir.opt.cost.functions import  HilbertSchmidtCostGenerator, FrobeniusNoPhaseCostGenerator
-from bqskit.ir.opt.minimizers.lbfgs import LBFGSMinimizer
+from bqskit.ir.opt.cost.functions import  HilbertSchmidtCostGenerator
 
-from util import GenerateProbabilityPass, SubselectEnsemblePass, SelectFinalEnsemblePass, FixGlobalPhasePass
+from util import GenerateProbabilityPass, SelectFinalEnsemblePass, ConvertToZXZXZSimple, LEAPSynthesisPass2, FixGlobalPhasePass
 
 from bqskit import enable_logging
 
@@ -24,7 +18,7 @@ import multiprocessing as mp
 
 from os.path import join
 
-from util import save_circuits, load_circuit, TCountPass, ConvertToZXZXZ
+from util import save_circuits, load_circuit, TCountPass
 
 # enable_logging(True)
 
@@ -48,22 +42,6 @@ def get_shortest_circuits(circ_name: str, tol: int, timestep: int,
     small_block_size = 3
     checkpoint_dir = f"cliff_t_checkpoints/{circ_name}_{timestep}_{tol}_{big_block_size}_{small_block_size}/"
     
-    fast_instantiation_options = {
-        'multistarts': 2,
-        'ftol': extra_err_thresh,
-        'diff_tol_r': 1e-4,
-        'max_iters': 10000,
-        'min_iters': 100,
-    }
-
-    good_instantiation_options = {
-        'multistarts': 16,
-        'ftol': 5e-16,
-        'gtol': 1e-15,
-        'diff_tol_r': 1e-6,
-        'max_iters': 100000,
-        'min_iters': 1000,
-    }
     slow_partitioner_passes = [
         ScanPartitioner(block_size=small_block_size),
         ExtendBlockSizePass(),
@@ -76,6 +54,25 @@ def get_shortest_circuits(circ_name: str, tol: int, timestep: int,
         QuickPartitioner(block_size=big_block_size),
     ]
 
+    fast_instantiation_options = {
+        'multistarts': 2,
+        'ftol': extra_err_thresh,
+        'diff_tol_r': 1e-4,
+        'max_iters': 10000,
+        'min_iters': 100,
+        'method': 'minimization',
+        # 'method': 'qfactor',
+    }
+
+    good_instantiation_options = {
+        'multistarts': 16,
+        'ftol': 5e-16,
+        'gtol': 1e-15,
+        'diff_tol_r': 1e-6,
+        'max_iters': 100000,
+        'min_iters': 1000,
+    }
+
     if circ.num_qudits > 20:
         partitioner_passes = fast_partitioner_passes
         instantiation_options = fast_instantiation_options
@@ -83,24 +80,52 @@ def get_shortest_circuits(circ_name: str, tol: int, timestep: int,
         partitioner_passes = slow_partitioner_passes
         instantiation_options = good_instantiation_options
 
-    leap_workflow = [  
-        ToU3Pass(),
-        TCountPass(t_gates_per_rz=30, count_ensemble=False),
+    synthesis_pass = LEAPSynthesisPass2(
+        store_partial_solutions=True,
+        # layer_generator=layer_gen,
+        success_threshold = extra_err_thresh,
+        partial_success_threshold=err_thresh,
+        # cost=phase_generator,
+        instantiate_options=instantiation_options,
+        use_calculated_error=True,
+        max_psols=3
+    )
+
+
+    convert_to_zxzxz_workflow = [
+        GroupSingleQuditGatePass(),
+        ForEachBlockPass(
+            [
+                ZXZXZDecomposition(),
+            ],
+            collection_filter=lambda x: x.num_qudits == 1,
+        ),
+        UnfoldPass(),
+    ]
+    
+    num_workers = 128
+    compiler = Compiler(num_workers=num_workers)
+    cliff_circ = compiler.compile(circ, workflow=convert_to_zxzxz_workflow)
+    print(cliff_circ.gate_counts)
+    leap_workflow = [
         CheckpointRestartPass(checkpoint_dir, 
                                 default_passes=partitioner_passes),
         ForEachBlockPass(
             [
                 ForEachBlockPass(
                     [
-                        # ConvertToZXZXZ(success_threshold=extra_err_thresh, num_circs=50, instantiation_options=instantiation_options),
-                        # FixGlobalPhasePass(),
-                        NOOPPass(),
+                        synthesis_pass,
+                        ConvertToZXZXZSimple(),
+                        NumericalTReductionPass(
+                            full_loops=5,
+                            success_threshold=err_thresh,
+                            use_calculated_error=True),
+                        FixGlobalPhasePass(),
                     ],
                     calculate_error_bound=False,
                     allocate_error=True,
                     allocate_error_gate=CNOTGate(),
                 ),
-                # ConvertToCliffordTPass(),
                 CreateEnsemblePass(success_threshold=err_thresh, 
                                    use_calculated_error=True, 
                                    num_circs=num_unique_circs,
@@ -108,7 +133,7 @@ def get_shortest_circuits(circ_name: str, tol: int, timestep: int,
                                 #    cost=phase_generator, 
                                    solve_exact_dists=True,
                                    sort_by_t=True,),
-                # JiggleEnsemblePass(success_threshold=err_thresh, num_circs=2000, use_ensemble=True),
+                JiggleEnsemblePass(success_threshold=err_thresh, num_circs=2000, use_ensemble=True, count_t=True),
                 # SubselectEnsemblePass(success_threshold=err_thresh, num_circs=200),
                 # GenerateProbabilityPass(size=50),
                 UnfoldPass(),
@@ -118,15 +143,15 @@ def get_shortest_circuits(circ_name: str, tol: int, timestep: int,
             allocate_error=True,
             allocate_error_gate=CNOTGate(),
         ),
-        SelectFinalEnsemblePass(size=5000),
-        TCountPass(t_gates_per_rz=30, count_ensemble=True),
+        UnfoldPass()
+        # SelectFinalEnsemblePass(size=5000),
     ]
-    num_workers = 128
-    compiler = Compiler(num_workers=num_workers)
-    # target = circ.get_unitary()
-    out_circ, data = compiler.compile(circ, workflow=leap_workflow, request_data=True)
-    approx_circuits: list[Circuit] = data["final_ensemble"]
-    print("Num Circs", len(approx_circuits))
+    out_circ, data = compiler.compile(circ, 
+                                      workflow=leap_workflow, 
+                                      request_data=True)
+    print(out_circ.gate_counts)
+    approx_circuits: list[Circuit] = None #data["final_ensemble"]
+    # print("Num Circs", len(approx_circuits))
     return approx_circuits, data.error, out_circ.count(CNOTGate())
 
 if __name__ == '__main__':
@@ -139,10 +164,10 @@ if __name__ == '__main__':
     opt_str = "_opt" if opt else ""
     print("OPT STR", opt_str, opt)
     circs, error_bound, count = get_shortest_circuits(circ_name, tol, timestep, num_unique_circs=num_unique_circs, extra_str=opt_str)
-    sorted_circs = sorted(circs, key=lambda c: c.count(CNOTGate()))
-    circ = load_circuit(circ_name, opt=opt)
-    # target = circ.get_unitary()
-    print("Error Bound", error_bound)
-    # print("Actual Error", actual_error)
-    print("Lowest Count", count)
-    save_circuits(circs, circ_name, tol, timestep, ignore_timestep=True, extra_str=f"_{num_unique_circs}_circ_cliff_t_final")
+    # sorted_circs = sorted(circs, key=lambda c: c.count(CNOTGate()))
+    # circ = load_circuit(circ_name, opt=opt)
+    # # target = circ.get_unitary()
+    # print("Error Bound", error_bound)
+    # # print("Actual Error", actual_error)
+    # print("Lowest Count", count)
+    # save_circuits(circs, circ_name, tol, timestep, ignore_timestep=True, extra_str=f"_{num_unique_circs}_circ_cliff_t_final")

@@ -15,8 +15,8 @@ from bqskit.ir.opt.cost.functions import  HilbertSchmidtCostGenerator, Frobenius
 from bqskit.passes import ScanningGateRemovalPass
 
 
-from util import SecondLEAPSynthesisPass, SubselectEnsemblePass, GenerateProbabilityPass, SelectFinalEnsemblePass, LEAPSynthesisPass2, QSearchSynthesisPass2
-from util import GetErrorsPass
+from util import SecondLEAPSynthesisPass, GenerateProbabilityPass, SelectFinalEnsemblePass, LEAPSynthesisPass2
+from util import WriteQasmPass
 
 from bqskit import enable_logging
 
@@ -39,8 +39,8 @@ def get_shortest_circuits(circ_name: str, tol: int, timestep: int,
         err_thresh = 0.2
     else:
         err_thresh = 10 ** (-1 * tol)
+        
     extra_err_thresh = 1e-2 * err_thresh
-    phase_generator = HilbertSchmidtCostGenerator()
     big_block_size = 8
     small_block_size = 3
     checkpoint_dir = f"fixed_block_checkpoints_min{extra_str}/{circ_name}_{timestep}_{tol}_{big_block_size}_{small_block_size}/"
@@ -51,6 +51,7 @@ def get_shortest_circuits(circ_name: str, tol: int, timestep: int,
         'diff_tol_r': 1e-4,
         'max_iters': 10000,
         'min_iters': 100,
+        'method': 'minimization',
         # 'method': 'qfactor',
     }
 
@@ -91,7 +92,7 @@ def get_shortest_circuits(circ_name: str, tol: int, timestep: int,
         # cost=phase_generator,
         instantiate_options=instantiation_options,
         use_calculated_error=True,
-        max_psols=4
+        max_psols=6
     )
 
     second_synthesis_pass = SecondLEAPSynthesisPass(
@@ -101,7 +102,7 @@ def get_shortest_circuits(circ_name: str, tol: int, timestep: int,
         # cost=HS,
         instantiate_options=instantiation_options,
         use_calculated_error=True,
-        max_psols=7
+        max_psols=10
     )
 
     leap_workflow = [
@@ -109,6 +110,7 @@ def get_shortest_circuits(circ_name: str, tol: int, timestep: int,
                                 default_passes=partitioner_passes),
         ForEachBlockPass(
             [
+                WriteQasmPass(),
                 ForEachBlockPass(
                     [
                         synthesis_pass,
@@ -126,14 +128,18 @@ def get_shortest_circuits(circ_name: str, tol: int, timestep: int,
                                    num_random_ensembles=2,
                                 #    cost=phase_generator, 
                                    solve_exact_dists=True),
-                # ToVariablePass(all_ensembles = True, convert_all_single_qudit_gates=True),
+                # ScanningGateRemovalPass(
+                #     success_threshold=err_thresh,
+                #     run_on_ensemble=True,
+                #     instantiate_options=fast_instantiation_options,
+                #     use_calculated_error=True,
+                # ),
                 JiggleEnsemblePass(success_threshold=err_thresh, num_circs=2000, use_ensemble=True),
-                SubselectEnsemblePass(success_threshold=err_thresh, num_circs=200),
+                # SubselectEnsemblePass(success_threshold=err_thresh, num_circs=200),
                 # GenerateProbabilityPass(success_threshold=err_thresh, size=50),
                 # UnfoldPass(),
             ],
             calculate_error_bound=True,
-            error_cost_gen=phase_generator,
             allocate_error=True,
             allocate_error_gate=CNOTGate(),
         ),

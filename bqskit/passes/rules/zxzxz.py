@@ -12,8 +12,6 @@ from bqskit.ir.gates.constant.sx import SqrtXGate
 from bqskit.ir.gates.parameterized.rx import RXGate
 from bqskit.ir.gates.parameterized.rz import RZGate
 from bqskit.ir.gates.parameterized.u1 import U1Gate
-from bqskit.qis.unitary import UnitaryMatrix
-from bqskit.ir.gates import GlobalPhaseGate
 
 
 class ZXZXZDecomposition(BasePass):
@@ -50,8 +48,22 @@ class ZXZXZDecomposition(BasePass):
         self.always_use_rx = always_use_rx
         self.always_use_u1 = always_use_u1
 
+    @staticmethod
+    def run_zxzxz_decomp(circuit: Circuit, 
+                         use_u1: bool = False,
+                         use_rx: bool = False) -> Circuit:
+        """
+        Convert a single-qubit circuit to ZXZXZ sequence.
 
-    def get_zxzxz_circuit(utry: UnitaryMatrix, use_rx: bool = False, use_u1: bool = False, fix_global_phase: bool = False) -> Circuit:
+        Args:
+            circuit (Circuit): The circuit to convert.
+
+        Returns:
+            Circuit: The ZXZXZ sequence.
+        """
+
+        utry = circuit.get_unitary()
+
         # Calculate params
         utry = np.linalg.det(utry) ** (-0.5) * utry
         i1 = cmath.phase(utry[1, 1])
@@ -92,10 +104,6 @@ class ZXZXZDecomposition(BasePass):
         else:
             new_circuit.append_gate(RZGate(), 0, [p])
 
-        if fix_global_phase:
-            global_phase_correction = utry.get_target_correction_factor(new_circuit.get_unitary())
-            new_circuit.append_gate(GlobalPhaseGate(1, global_phase=global_phase_correction), 0)
-
         return new_circuit
 
     async def run(self, circuit: Circuit, data: PassData) -> None:
@@ -110,7 +118,7 @@ class ZXZXZDecomposition(BasePass):
             raise ValueError(
                 'Cannot convert non-qubit circuit into ZXZXZ sequence.',
             )
-        
+
         # Decide on RX or SX
         no_sx = RXGate() in data.gate_set and SqrtXGate() not in data.gate_set
         use_rx = self.always_use_rx or no_sx
@@ -119,6 +127,6 @@ class ZXZXZDecomposition(BasePass):
         no_rz = U1Gate() in data.gate_set and RZGate() not in data.gate_set
         use_u1 = self.always_use_u1 or no_rz
 
-        new_circuit = ZXZXZDecomposition.get_zxzxz_circuit(circuit.get_unitary(), use_rx=use_rx, use_u1=use_u1)
+        new_circuit = ZXZXZDecomposition.run_zxzxz_decomp(circuit, use_u1, use_rx)
 
         circuit.become(new_circuit)

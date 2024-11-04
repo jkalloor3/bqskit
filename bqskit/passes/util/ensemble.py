@@ -10,7 +10,7 @@ from bqskit.ir.circuit import Circuit, CircuitPoint, Operation, CircuitLocationL
 from bqskit.runtime import get_runtime
 from typing import Any
 from collections import deque
-from bqskit.ir.opt.cost.functions import HSCostGenerator
+from bqskit.ir.opt.cost.functions import FrobeniusCostGenerator
 from bqskit.ir.opt.minimizers.lbfgs import LBFGSMinimizer
 from bqskit.ir.opt.cost.generator import CostFunctionGenerator
 from bqskit.ir.gates import CircuitGate
@@ -22,12 +22,14 @@ import pickle
 
 _logger = logging.getLogger(__name__)
 
+frob_cost = FrobeniusCostGenerator()
+
 class CreateEnsemblePass(BasePass):
     """Converts single-qubit general unitary gates to U3 Gates."""
 
     def __init__(self, success_threshold = 1e-4, 
                  num_circs = 1000,
-                 cost: CostFunctionGenerator = HSCostGenerator(),
+                 cost: CostFunctionGenerator = FrobeniusCostGenerator(),
                  use_calculated_error: bool = False,
                  num_random_ensembles: int = 3,
                  solve_exact_dists: bool = False,
@@ -61,8 +63,6 @@ class CreateEnsemblePass(BasePass):
             circuit: Circuit, 
             pts: list[CircuitPoint], 
             locations: list[CircuitLocationLike], 
-            solve_exact_dists: bool = False, 
-            cost: CostFunctionGenerator = HSCostGenerator(),
             target: UnitaryMatrix = None) -> tuple[Circuit, float]:
         
         config, dist = config_dist
@@ -75,11 +75,9 @@ class CreateEnsemblePass(BasePass):
         copied_circuit.batch_replace(pts, operations)
         copied_circuit.unfold_all()
 
-        if solve_exact_dists:
-            dist = cost.calc_cost(copied_circuit, target)
+        dist = frob_cost.calc_cost(copied_circuit, target)
 
         return copied_circuit, dist
-
 
     def get_all_inds(self, dists: list[list[float]]) -> list[list[int]]:
         '''
@@ -89,8 +87,9 @@ class CreateEnsemblePass(BasePass):
 
         # Get all indice combos from all blocks, picking one psol from each block
         all_inds = []
+        max_inds_per_block = 7
         for i in range(len(num_psols_per_block)):
-            num_inds = num_psols_per_block[i]
+            num_inds = min(num_psols_per_block[i], max_inds_per_block)
             # print("Num Inds", num_inds, flush=True)
             inds = np.random.choice(num_psols_per_block[i], 
                                     size=num_inds, 
@@ -104,6 +103,11 @@ class CreateEnsemblePass(BasePass):
                     for ind in all_inds:
                         new_inds.append(ind + [j])
                 all_inds = new_inds
+            
+            if len(all_inds) > 1000:
+                max_inds_per_block = 3
+            if len(all_inds) > 20000:
+                max_inds_per_block = 1
 
         return all_inds
 
@@ -288,8 +292,6 @@ class CreateEnsemblePass(BasePass):
                 circuit=circuit,
                 pts=pts,
                 locations=locations,
-                solve_exact_dists=self.solve_exact_dists,
-                cost=self.cost,
                 target=target
             )
             return [[all_circs_dists]]
@@ -320,14 +322,14 @@ class CreateEnsemblePass(BasePass):
             self.success_threshold, 
             self.num_circs * 10)
         
-
-        # Randomly select 10000
-        selection = np.random.choice(possible_sols, size=min(2000, possible_sols), replace=False)
+        # Randomly select a group of solutions
         print("Getting ALl Inds", flush=True)
-        all_valid_inds = np.array(self.get_all_inds(dists))[selection]
+        all_inds = self.get_all_inds(dists)
+        selection = np.random.choice(len(all_inds), size=min(self.num_circs, possible_sols, len(all_inds)), replace=False)
+        random_inds = np.array(all_inds)[selection]
 
         print("Got All Inds", flush=True)
-        all_inds = [all_valid_inds, greediest_inds, greedy_inds, valid_inds]
+        all_inds = [random_inds, greediest_inds, greedy_inds, valid_inds]
 
 
         all_ensembles = []
@@ -336,11 +338,10 @@ class CreateEnsemblePass(BasePass):
             ### Get all corresponding circuits
             all_combos = []
 
-            for random_inds in inds:
-                circ_list = [psols[i][ind] for i, ind in enumerate(random_inds)]
+            for psol_inds in inds:
+                circ_list = [psols[i][ind] for i, ind in enumerate(psol_inds)]
                 new_config = [CircuitGate(circ) for circ in circ_list]
                 all_combos.append((new_config, self.success_threshold))
-                # uppers.append(total_dist)
             
             # Add default config so at least one solution works
             circ_list = [psols[i][-1] for i in range(len(psols))]
@@ -353,8 +354,6 @@ class CreateEnsemblePass(BasePass):
                 circuit=circuit,
                 pts=pts,
                 locations=locations,
-                solve_exact_dists=self.solve_exact_dists,
-                cost=self.cost,
                 target=target
             )
 
@@ -364,15 +363,18 @@ class CreateEnsemblePass(BasePass):
 
             print("Number of Valid Circuits", len(valid_circs_dists), flush=True)
 
+            # Trim down to self.num_circs randomly
+            if len(valid_circs_dists) > self.num_circs:
+                final_random_inds = np.random.choice(len(valid_circs_dists), 
+                                                     size=self.num_circs, 
+                                                     replace=False)
+                
+                valid_circs_dists = [valid_circs_dists[i] for i in final_random_inds]
+
             if self.sort_by_t:
                 final_counts = [circ.num_params for circ, _ in valid_circs_dists]
             else:
                 final_counts = [circ.count(CNOTGate()) for circ, _ in valid_circs_dists]
-            #### Now subselect the valid circs dists to maximize the bias reduction
-
-            if len(valid_circs_dists) > 1:
-                # Get rid of the default case if there are other options
-                valid_circs_dists.pop()
 
             all_ensembles.append((valid_circs_dists, np.mean(final_counts)))
 
@@ -381,7 +383,6 @@ class CreateEnsemblePass(BasePass):
         print("Ensemble Counts", [x[1] for x in all_ensembles], flush=True)
         all_ensembles = sorted(all_ensembles, key=lambda x: x[1])
         return [x[0] for x in all_ensembles]
-
 
     def parse_data(self,
         blocked_circuit: Circuit,
@@ -467,7 +468,7 @@ class CreateEnsemblePass(BasePass):
             checkpoint_data_file = data["checkpoint_data_file"]
             data["finished_create_ensemble"] = True
             # No longer need block data
-            data.pop(ForEachBlockPass.key, None)
+            # data.pop(ForEachBlockPass.key, None)
             # print("Saving keys", list(data.keys()), flush=True)
             pickle.dump(data, open(checkpoint_data_file, "wb"))
         

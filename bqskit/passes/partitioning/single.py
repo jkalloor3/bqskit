@@ -17,9 +17,8 @@ class GroupSingleQuditGatePass(BasePass):
     This pass groups together consecutive single-qudit gates.
     """
 
-    async def run(self, circuit: Circuit, data: PassData) -> None:
-        """Perform the pass's operation, see :class:`BasePass` for more."""
-
+    @staticmethod
+    def group(circuit: Circuit) -> None:
         # Go through each qudit individually
         for q in range(circuit.num_qudits):
 
@@ -58,3 +57,9 @@ class GroupSingleQuditGatePass(BasePass):
 
             for region in reversed(single_qubit_regions):
                 circuit.fold(region)
+
+
+    async def run(self, circuit: Circuit, data: PassData) -> None:
+        """Perform the pass's operation, see :class:`BasePass` for more."""
+
+        GroupSingleQuditGatePass.group(circuit)

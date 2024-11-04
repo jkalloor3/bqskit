@@ -37,7 +37,6 @@ class ScanningGateRemovalPass(BasePass):
         instantiate_options: dict[str, Any] = {},
         collection_filter: Callable[[Operation], bool] | None = None,
         store_all_solutions: bool = True,
-        checkpoint_proj: str = None,
         run_on_ensemble: bool = False,
         use_calculated_error: bool = False,
     ) -> None:
@@ -106,30 +105,35 @@ class ScanningGateRemovalPass(BasePass):
         }
         self.store_all_solutions = store_all_solutions
         self.instantiate_options.update(instantiate_options)
-        self.checkpoint_proj = checkpoint_proj
-        if (self.checkpoint_proj and not exists(self.checkpoint_proj)):
-            mkdir(self.checkpoint_proj)
         self.run_on_ensemble = run_on_ensemble
         self.use_calculated_error = use_calculated_error
 
     async def run(self, circuit: Circuit, data: PassData) -> None:
         """Perform the pass's operation on the given circuit."""
+        if "finished_scanning_gate_removal" in data:
+            return
         if self.run_on_ensemble:
             new_ensembles = []
             ensembles = data["ensemble"]
-            save_data_file = data.get("checkpoint_data_file", None)
             for ens in ensembles:
-                all_sols: list[list[Circuit]] = await get_runtime().map(self.run_circ, ens, data=data)
-                all_sols: list[Circuit] = list(chain(all_sols))
-                all_sols = sorted(all_sols, key=lambda x: x.count(CNOTGate()))
+                print("Launching Scanning Gate Removal on Ensemble", flush=True)
+                all_sols: list[list[tuple[Circuit, float]]] = await get_runtime().map(self.run_circ, ens, data=data)
+                all_sols: list[tuple[Circuit, float]] = list(chain.from_iterable(all_sols))
+                all_sols = sorted(all_sols, key=lambda x: x[0].count(CNOTGate()))
+                print(f"After Scanning, we have {len(all_sols)} solutions", flush=True)
                 new_ensembles.append(all_sols)
             data["ensemble"] = new_ensembles
+
+            if "checkpoint_dir" in data:
+                checkpoint_data_file = data["checkpoint_data_file"]
+                data[ "finished_scanning_gate_removal"] = True
+                pickle.dump(data, open(checkpoint_data_file, "wb"))
             return
         else:
-            return await self.run_circ(circuit, data)
+            return await self.run_circ((circuit, 0.0), data)
 
 
-    async def run_circ(self, circ_float: tuple[Circuit, float], data: PassData) -> list[Circuit]:
+    async def run_circ(self, circ_float: tuple[Circuit, float], data: PassData) -> list[tuple[Circuit, float]]:
         """Perform the pass's operation, see :class:`BasePass` for more."""
         circuit, dist = circ_float
         instantiate_options = self.instantiate_options.copy()
@@ -140,7 +144,9 @@ class ScanningGateRemovalPass(BasePass):
         _logger.debug(f'Starting scanning gate removal on the {start}.')
 
         target = self.get_target(circuit, data)
-        all_solutions = []
+        # calc_dist = self.cost(circuit, target)
+        # print("Original Distance: ", dist, " Calclated Dist: ", calc_dist, flush=True)
+        all_solutions: list[tuple[Circuit, float]] = [(circuit.copy(), dist)]
 
         circuit_copy = circuit.copy()
         reverse_iter = not self.start_from_left
@@ -175,6 +181,7 @@ class ScanningGateRemovalPass(BasePass):
             working_copy.instantiate(target, **instantiate_options)
 
             working_cost = self.cost(working_copy, target)
+            # print(f"Cost after removing {op} is {working_cost}", flush=True)
             if working_cost < success_threshold:
                 if self.store_all_solutions:
                     all_solutions.append((working_copy.copy(), working_cost))
@@ -182,7 +189,7 @@ class ScanningGateRemovalPass(BasePass):
                 circuit_copy = working_copy        
 
         circuit.become(circuit_copy)
-        all_solutions = sorted(all_solutions, key=lambda x: x.count(CNOTGate()))
+        all_solutions = sorted(all_solutions, key=lambda x: x[0].count(CNOTGate()))
         return all_solutions
 
 

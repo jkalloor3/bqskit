@@ -13,7 +13,7 @@ from pathlib import Path
 from bqskit.compiler.passdata import PassData
 from bqskit.ir.circuit import Circuit
 from bqskit.ir.gates import CNOTGate
-from bqskit.ir.opt.cost.functions import HilbertSchmidtResidualsGenerator, HSCostGenerator
+from bqskit.ir.opt.cost.functions import HilbertSchmidtResidualsGenerator
 from bqskit.ir.opt.cost.generator import CostFunctionGenerator
 from bqskit.passes.search.frontier import Frontier
 from bqskit.passes.control import ForEachBlockPass
@@ -50,7 +50,7 @@ class SecondLEAPSynthesisPass(BasePass):
         heuristic_function: HeuristicFunction = DijkstraHeuristic(),
         layer_generator: LayerGenerator | None = None,
         success_threshold: float = 1e-8,
-        cost: CostFunctionGenerator = HSCostGenerator(),
+        cost: CostFunctionGenerator = HilbertSchmidtResidualsGenerator(),
         max_layer: int | None = None,
         min_prefix_size: int = 3,
         instantiate_options: dict[str, Any] = {},

@@ -8,10 +8,10 @@ from bqskit.compiler.passdata import PassData
 from bqskit.ir.circuit import Circuit
 from bqskit.runtime import get_runtime
 from typing import Any
-from bqskit.ir.opt.cost.functions import HSCostGenerator, FrobeniusCostGenerator
+from bqskit.ir.opt.cost.functions import FrobeniusCostGenerator
 from bqskit.ir.opt.minimizers.lbfgs import LBFGSMinimizer
 from bqskit.ir.opt.cost.generator import CostFunctionGenerator
-from bqskit.ir.gates import U3Gate, CNOTGate
+from bqskit.ir.gates import U3Gate, CNOTGate, TGate, TdgGate
 from bqskit.qis import UnitaryMatrix
 import numpy as np
 from math import ceil
@@ -21,16 +21,23 @@ import csv
 
 _logger = logging.getLogger(__name__)
 
+def frobenius_cost(utry: UnitaryMatrix, target: UnitaryMatrix):
+    '''
+    Calculates the Frobenius distance between two unitaries
+    '''
+    diff = utry - target
+    # This is Frob(u - v)
+    inner = np.real(np.einsum("ij,ij->", diff, diff.conj()))
+    cost = np.sqrt(inner)
 
-frob_cost = FrobeniusCostGenerator()
+    return cost
 
-def bias_cost(utry: UnitaryMatrix, target: UnitaryMatrix):
+def normalized_frob_cost(utry: UnitaryMatrix, target: UnitaryMatrix):
     '''
     Calculates the normalized Frobenius distance between two unitaries
     '''
-    diff = utry- target
     # This is Frob(u - v)
-    cost = np.sqrt(np.real(np.trace(diff @ diff.conj().T)))
+    cost = frobenius_cost(utry, target)
 
     N = utry.shape[0]
     cost = cost / np.sqrt(2 * N)
@@ -39,15 +46,6 @@ def bias_cost(utry: UnitaryMatrix, target: UnitaryMatrix):
     # Quest Paper 
     return cost
 
-def frobenius_cost(utry: UnitaryMatrix, target: UnitaryMatrix):
-    '''
-    Calculates the Frobenius distance between two unitaries
-    '''
-    diff = utry- target
-    # This is Frob(u - v)
-    cost = np.sqrt(np.real(np.trace(diff @ diff.conj().T)))
-
-    return cost
 
 class  JiggleEnsemblePass(BasePass):
     """Converts single-qubit general unitary gates to U3 Gates."""
@@ -55,9 +53,10 @@ class  JiggleEnsemblePass(BasePass):
 
     def __init__(self, success_threshold = 1e-4, 
                  num_circs = 1000,
-                 cost: CostFunctionGenerator = HSCostGenerator(),
+                 cost: CostFunctionGenerator = FrobeniusCostGenerator(),
                  use_ensemble: bool = True,
-                 use_calculated_error: bool = True) -> None:
+                 use_calculated_error: bool = True,
+                 count_t: bool = False) -> None:
         """
         Construct a ToU3Pass.
 
@@ -78,6 +77,7 @@ class  JiggleEnsemblePass(BasePass):
             'minimizer': LBFGSMinimizer(),
         }
         self.use_calculated_error = use_calculated_error
+        self.count_t = count_t
 
     async def get_circ(params: list[float], circuit: Circuit):
         circ_copy = circuit.copy()
@@ -90,13 +90,9 @@ class  JiggleEnsemblePass(BasePass):
         circs = []
         for _ in range(num):
             cost_fn = self.cost.gen_cost(circ.copy(), target)
-
             trials = 0
-
             best_params = np.array(params.copy(), dtype=np.float64)
-
             extra_diff = max(self.success_threshold - dist, self.success_threshold / len(params))
-
             while trials < 20:
                 trial_costs = []
                 if len(params) < 10:
@@ -105,12 +101,12 @@ class  JiggleEnsemblePass(BasePass):
                     num_params_to_jiggle = int(np.random.uniform() * len(params) / 2) + ceil(len(params) / 10)
                 # num_params_to_jiggle = len(params)
                 params_to_jiggle = np.random.choice(list(range(len(params))), num_params_to_jiggle, replace=False)
-
                 jiggle_amounts = np.random.uniform(-1 * extra_diff, extra_diff, num_params_to_jiggle)
                 # print("jiggle_amounts", jiggle_amounts, flush=True)
                 next_params = best_params.copy()
                 next_params[params_to_jiggle] = next_params[params_to_jiggle] + jiggle_amounts
                 circ_cost = cost_fn.get_cost(next_params)
+                # circ_cost = normalized_frob_cost(circ.get_unitary(), target)
                 trial_costs.append(circ_cost)
                 if (circ_cost < self.success_threshold):
                     extra_diff = extra_diff * 1.5
@@ -124,8 +120,9 @@ class  JiggleEnsemblePass(BasePass):
             
             circ_copy = circ.copy()
             circ_copy.set_params(best_params)
-            # circ_cost = cost_fn.get_cost(best_params)
-            circ_cost = frob_cost.calc_cost(circ_copy, target)
+            circ_cost = cost_fn.get_cost(best_params)
+            # circ_cost = frob_cost.calc_cost(circ_copy, target)
+            # circ_cost = normalized_frob_cost(circ_copy.get_unitary(), target)
             circs.append((circ_copy, circ_cost))
         JiggleEnsemblePass.num_jiggles += 1
         return circs
@@ -136,20 +133,19 @@ class  JiggleEnsemblePass(BasePass):
         
         params = circ.params
 
-        if len(params) < 10:
-            # print(circ.gate_counts)
-            # print("WTF NO PARAMS")
-            for i in range(circ.num_qudits):
-                # Add a layer of U3 gates
-                circ.append_gate(U3Gate(), (i,), [0, 0, 0])
+        while len(params) < 30:
+            # Insert random U3 Identities
+            random_cycle = np.random.randint(0, circ.num_cycles)
+            random_loc = np.random.randint(0, circ.num_qudits)
+            circ.insert_gate(random_cycle, U3Gate(), random_loc, [0, 0, 0])
             params = circ.params
         all_circs = []
 
         if num_circs > 60:
             # print(f"Awaiting All {num_circs // 50} Jiggles")
-            print(f"Launching {ceil(num_circs / 20)} Tasks", flush=True)
+            # print(f"Launching {ceil(num_circs / 20)} Tasks", flush=True)
             all_circs: list[list[tuple[Circuit, float]]] = await get_runtime().map(self.single_jiggle, [params] * ceil(num_circs / 20), circ=circ, dist=dist, target=target, num=20)
-            print(f"Finished {ceil(num_circs / 20)} Tasks", flush=True)
+            # print(f"Finished {ceil(num_circs / 20)} Tasks", flush=True)
             all_circs: list[tuple[Circuit, float]] = list(chain.from_iterable(all_circs))
         else:
             all_circs: list[tuple[Circuit, float]] = await self.single_jiggle(params, circ, dist, target, num_circs)
@@ -173,7 +169,7 @@ class  JiggleEnsemblePass(BasePass):
         # Grab first 25 as initial set
         inds = list(order[:25])
         avg_un = np.mean([unitaries[i] for i in inds], axis=0)
-        bias = bias_cost(avg_un, target)
+        bias = normalized_frob_cost(avg_un, target)
         
         cur_ind = 25
         nn = 1
@@ -186,7 +182,7 @@ class  JiggleEnsemblePass(BasePass):
             # Try to add all of them
             num_inds = len(inds)
             new_avg_un = (num_inds / (num_inds + num_to_check)) * avg_un + (num_to_check / (num_inds + num_to_check)) * np.mean(next_uns, axis=0)
-            new_bias = bias_cost(new_avg_un, target)
+            new_bias = normalized_frob_cost(new_avg_un, target)
 
             # If the bias is less, add the unitaries
             if new_bias < bias:
@@ -196,10 +192,6 @@ class  JiggleEnsemblePass(BasePass):
                 bias = new_bias
                 avg_un = new_avg_un
                 inds.extend(next_inds)
-                # nn += 5
-            # else:
-            #     nn -= 3
-            #     nn = max(5, nn)
 
             cur_ind = cur_ind + num_to_check
 
@@ -232,8 +224,7 @@ class  JiggleEnsemblePass(BasePass):
 
         for scan_sols in data["ensemble"]:
             all_circs = []
-            # print("Number of SCAN SOLS", len(scan_sols))
-
+            print("Number of SCAN SOLS", len(scan_sols))
             # For each params come up with nth root of num_circs number of extra params
             if self.use_ensemble:
                 circuits = [psol[0] for psol in scan_sols]
@@ -243,8 +234,8 @@ class  JiggleEnsemblePass(BasePass):
                 dists = [self.cost.calc_cost(circuit, data.target)]
 
             circ_dists = list(zip(circuits, dists))
-            
-            print(f"Launching {len(circ_dists)} Tasks", flush=True)
+
+            # print("Initial Distances before jiggle", dists, flush=True)
             all_circs_future = get_runtime().map(self.jiggle_circ,
                                                 circ_dists,
                                                 target=data.target,
@@ -262,37 +253,53 @@ class  JiggleEnsemblePass(BasePass):
         ensemble_names = ["Random Sub-Sample", "Least CNOTs", "Medium CNOTs", "Valid CNOTs"]
         target = data.target
         csv_dict = []
+
+        if self.count_t:
+            gate_title = "Avg. T Count"
+            gate_func = lambda x: x.count(TGate()) + x.count(TdgGate()) + x.num_params * 60
+        else:
+            gate_title = "Avg. CNOT Count"
+            gate_func = lambda x: x.count(CNOTGate())
+
         for i,ens in enumerate(ensemble):
             ensemble_data = {}
             unitaries: list[UnitaryMatrix] = [x[0].get_unitary() for x in ens]
-            e1s = [bias_cost(un, target) for un in unitaries]
+            e1s = [normalized_frob_cost(un, target) for un in unitaries]
             e1s_actual = [frobenius_cost(un, target) for un in unitaries]
             e1 = np.mean(e1s)
             e1_actual = np.mean(e1s_actual)
             mean_un = np.mean(unitaries, axis=0)
-            orig_bias = bias_cost(mean_un, target)
+            orig_bias = normalized_frob_cost(mean_un, target)
             orig_bias_actual = frobenius_cost(mean_un, target)
             
-            final_counts = [circ.count(CNOTGate()) for circ, _ in ens]
+            final_counts = [gate_func(circ) for circ, _ in ens]
 
             ensemble_data["Ensemble Generation Method"] = ensemble_names[i]
-            ensemble_data["Epsilon"] = e1
-            ensemble_data["Epsilon Actual"] = e1_actual
-            ensemble_data["Avg CNOT Count before subselect"] = np.mean(final_counts)
-            ensemble_data["Bias without subselect"] = orig_bias
-            ensemble_data["Bias without subselect Actual"] = orig_bias_actual
             ensemble_data["Num Circs"] = len(ens)
-            subselected_inds, new_bias = self.subselect_circs_by_bias(unitaries, target)
-            new_mean_un = np.mean([unitaries[i] for i in subselected_inds], axis=0)
-            new_bias_actual = frobenius_cost(new_mean_un, target)
+            ensemble_data[f"{gate_title} before subselect"] = np.mean(final_counts)
+            ensemble_data["Norm. Epsilon"] = e1
+            ensemble_data["Epsilon"] = e1_actual
+            ensemble_data["Norm. Bias before subselect"] = orig_bias
+            ensemble_data["Bias before subselect"] = orig_bias_actual
+            ensemble_data["Norm. Ratio Before"] = orig_bias / (e1 * e1)
+            ensemble_data["Ratio Before"] = orig_bias_actual / (e1_actual * e1_actual)
 
-            subselected_circs_dists = [ens[i]for i in subselected_inds]
-            final_counts = [circ.count(CNOTGate()) for circ, _ in subselected_circs_dists]
-
-            ensemble_data["Avg CNOT Count after subselect"] = np.mean(final_counts)
-            ensemble_data["Num Circs after subselect"] = len(subselected_circs_dists)
-            ensemble_data["Bias after subselect"] = new_bias
-            ensemble_data["Bias after subselect Actual"] = new_bias_actual
+            # SUBELECT
+            # subselected_inds, new_bias = self.subselect_circs_by_bias(unitaries, target)
+            # new_mean_un = np.mean([unitaries[i] for i in subselected_inds], axis=0)
+            # new_bias_actual = frobenius_cost(new_mean_un, target)
+            # subselected_circs_dists = [ens[i]for i in subselected_inds]
+            # final_counts = [circ.count(CNOTGate()) for circ, _ in subselected_circs_dists]
+            # ensemble_data[f"{gate_title} after subselect"] = np.mean(final_counts)
+            # e1_after = np.mean([normalized_frob_cost(circ.get_unitary(), target) for circ, _ in subselected_circs_dists])
+            # e1_actual_after = np.mean([frobenius_cost(circ.get_unitary(), target) for circ, _ in subselected_circs_dists])
+            # ensemble_data["Norm. Epsilon After"] = e1_after
+            # ensemble_data["Epsilon After"] = e1_actual_after
+            # ensemble_data["Num Circs after subselect"] = len(ens)
+            # ensemble_data["Norm. Bias after subselect"] = orig_bias
+            # ensemble_data["Bias after subselect"] = orig_bias_actual
+            # ensemble_data["Norm. Ratio After"] = new_bias / (e1_after * e1_after)
+            # ensemble_data["Ratio After"] = new_bias_actual / (e1_actual_after * e1_actual_after)
 
             csv_dict.append(ensemble_data)
 

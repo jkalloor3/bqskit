@@ -9,10 +9,10 @@ header = """#!/bin/bash -l
 #SBATCH -q regular
 #SBATCH -A m4141_g
 #SBATCH -C gpu
-#SBATCH --time=11:55:00
+#SBATCH --time=05:55:00
 #SBATCH -N 1
 #SBATCH --signal=B:USR1@1
-#SBATCH --output=./slurm_logs/{file}{extra}_{unique_circs}/{circ}/{tol}_tol_block_size_8
+#SBATCH --output=./slurm_logs/{file}{extra}_{unique_circs}/{circ}/{tol}_tol_block_size_6
 
 module load conda
 conda activate /global/common/software/m4141/ensemble_env_2
@@ -36,17 +36,17 @@ if __name__ == '__main__':
     # file = "full_compile"
     # circs = ["Heisenberg_7"] #, 
     # circs = ["Heisenberg_7", "TFXY_8"]
-    circs = ["adder9"]
+    # circs = ["qft_8", "heisenberg7"]
     # circs = ["tfxy_6", "qc_binary_5q"] #, "qc_gray_5q", "qc_optimized_5q"]
-    # circs = ["heisenberg7", "vqe_12", "shor_12", "qml_19", "qml_25"]
-    # circs.extend(["adder9", "qft_8", "qae13", "shor_12"])
-    # circs.extend([f"qft_{i}" for i in range(20, 25, 4)])
+    circs = ["vqe_12", "shor_12", "qml_19", "qml_25"]
+    circs.extend(["qae13"])
+    circs.extend([f"qft_{i}" for i in range(12, 25, 4)])
     # circs.extend([f"JWCirc_{i}" for i in range(1, 4, 2)])
     # circs = ["qae13"]
     # circs = ["hubbard_4"]
     # circs =  ["shor_12", "qft_10", "vqe_12"]
     # tols = range(1, 7)
-    tols = [2,3]
+    tols = [1, 2, 3]
     # tols = [6]
     unique_circss = [100] #, 5, 20, 100, 1000, 10000]
     # extra = "cliffordt"

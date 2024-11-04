@@ -24,7 +24,7 @@ class FrobeniusCost(
     DifferentiableCostFunction,
 ):
     """
-    The HilbertSchmidtCost CostFunction implementation.
+    The Normalized FrobeniusCost CostFunction implementation.
 
     The Hilbert-Schmidt CostFuction is a differentiable map from circuit
     parameters to a cost value that is based on the Hilbert-Schmidt inner

@@ -6,14 +6,15 @@ from typing import Any
 
 import logging
 
-from bqskit.ir import Circuit, Operation, CircuitLocation
+from bqskit.ir import Circuit, Operation, CircuitPoint
 from bqskit.qis import UnitaryMatrix
 from bqskit.passes import PassAlias
 from bqskit.passes.rules import ZXZXZDecomposition
+from bqskit.passes.partitioning import GroupSingleQuditGatePass
 from bqskit.compiler.basepass import BasePass
 from bqskit.compiler.passdata import PassData
-from bqskit.ext.supermarq import supermarq_parallelism
-from bqskit.ir.gates import U3Gate, RZGate, HGate, SGate, TGate, TdgGate, SdgGate, XGate, SqrtXGate, CircuitGate, RXGate, FixedRZGate
+from bqskit.ir.gates import U3Gate, RZGate, HGate, SqrtXGate, CircuitGate, RXGate, FixedRZGate, GlobalPhaseGate
+from bqskit.utils.math import global_phase, correction_factor, canonical_unitary
 from bqskit.runtime import get_runtime
 from itertools import product
 import numpy as np
@@ -23,9 +24,8 @@ import subprocess
 from bqskit.ir.gates.constantgate import ConstantGate
 from bqskit.ir.gates.qubitgate import QubitGate
 
-from bqskit.ir.opt.cost.functions import  HSCostGenerator
-cost = HSCostGenerator()
-
+from bqskit.ir.opt.cost.functions import  HilbertSchmidtResidualsGenerator
+cost = HilbertSchmidtResidualsGenerator()
 
 _logger = logging.getLogger(__name__)
 
@@ -175,46 +175,36 @@ class ConvertToZXZXZ(BasePass):
             data["finished_zxzxz"] = True
             checkpoint_data_file = data["checkpoint_data_file"]
             pickle.dump(data, open(checkpoint_data_file, "wb"))
+class ConvertToZXZXZSimple(BasePass):
+    def run_circuit(self, circuit: Circuit) -> None:
+        # Group Single Qudit Gates
+        GroupSingleQuditGatePass.group(circuit)
+        # For each CircuitGate, replace with correspond ZXZXZ
+        cg_ops = []
+        pts = []
+        for cycle, op in circuit.operations_with_cycles(reverse=True):
+            if isinstance(op.gate, CircuitGate):
+                circ = op.gate._circuit
+                circ = ZXZXZDecomposition.run_zxzxz_decomp(circ)
+                cg_ops.append(Operation(CircuitGate(circ), op.location, circ.params))
+                pts.append(CircuitPoint(cycle, op.location[0]))
 
-
-    
-class ConvertRZtoCliffordT(BasePass):
-    def __init__(self, epsilon: float = 1e-9):
-        self.epsilon = epsilon
-        pass
-
-    def get_circ(self, clif_string: str, rz_theta: float) -> Circuit:
-        gate_str_dict = {"H": HGate(), "S": SGate(), "X": XGate(), "T": TGate(), "TDG": TdgGate(), "S": SGate(), "SDG": SdgGate()}
-        circuit = Circuit(1)
-        for gate_str in clif_string:
-            gate = gate_str_dict[gate_str]
-            circuit.append_gate(gate, (0,))
-
-        assert np.allclose(circuit.get_unitary(), RZGate().get_unitary([rz_theta]), atol=self.epsilon)
-
-        return circuit
-
+        circuit.batch_replace(pts, cg_ops)
+        # Unfold the circuit
+        circuit.unfold_all()
 
     async def run(
             self, 
             circuit : Circuit, 
             data: PassData
     ) -> None:
-        # Convert RZ gates to Clifford using gridsynth
-        for cycle, op in circuit.operations_with_cycles(reverse=True):
-            if isinstance(op.gate, RZGate):
-                command = f"gridsynth -e {self.epsilon} {op.params[0]}"
-                proc = subprocess.Popen(command, stdout=subprocess.PIPE, shell=True)
-                (out, err) = proc.communicate()
-                print(f"Gridsynth input: {op.params[0]}, output: {out}")
-                cliff_circ = self.get_circ()
-                circuit.replace_with_circuit((cycle, op.location[0]), cliff_circ, as_circuit_gate=True)
-
-
-
-class ConvertToCliffordTPass(PassAlias):
-    def __init__(self):
-        pass
-
-    def get_passes(self) -> list[BasePass]:
-        return [ConvertToZXZXZ(), ConvertRZtoCliffordT()]
+        # For every circuit in data["scan_sols"], run the circuit
+        scan_sols: list[tuple[Circuit, float]] = data["scan_sols"]
+        for circ, _ in scan_sols:
+            self.run_circuit(circ)
+            # global_phase_correction = target.get_target_correction_factor(circ.get_unitary())
+            # final_dist = cost.calc_cost(circ, data.target)
+            # circ_copy = circ.copy()
+            # circ_copy.append_gate(GlobalPhaseGate(1, global_phase=global_phase_correction), (0,))
+            # corrected_dist = cost.calc_cost(circ_copy, data.target)
+            # print("Global Phases Diff: ", global_phase_before - global_phase_after, "Dists: ", dist, final_dist, corrected_dist)

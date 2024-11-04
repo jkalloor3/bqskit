@@ -12,13 +12,13 @@ import pickle
 from bqskit.compiler.passdata import PassData
 from bqskit.ir.circuit import Circuit
 from bqskit.ir.gates import CNOTGate
-from bqskit.ir.opt.cost.functions import HilbertSchmidtResidualsGenerator, HSCostGenerator
+from bqskit.ir.opt.cost.functions import HilbertSchmidtResidualsGenerator
 from bqskit.ir.opt.cost.generator import CostFunctionGenerator
 from bqskit.passes.search.frontier import Frontier
 from bqskit.passes.search.generator import LayerGenerator
 from bqskit.passes.search.generators.seed import SeedLayerGenerator
 from bqskit.passes.search.heuristic import HeuristicFunction
-from bqskit.passes.search.heuristics import AStarHeuristic, DijkstraHeuristic
+from bqskit.passes.search.heuristics import DijkstraHeuristic
 from bqskit.passes.synthesis.synthesis import SynthesisPass
 from bqskit.qis.state.state import StateVector
 from bqskit.qis.state.system import StateSystem
@@ -47,7 +47,7 @@ class LEAPSynthesisPass2(SynthesisPass):
         heuristic_function: HeuristicFunction = DijkstraHeuristic(),
         layer_generator: LayerGenerator | None = None,
         success_threshold: float = 1e-8,
-        cost: CostFunctionGenerator = HSCostGenerator(),
+        cost: CostFunctionGenerator = HilbertSchmidtResidualsGenerator(),
         max_layer: int | None = None,
         store_partial_solutions: bool = False,
         partials_per_depth: int = 25,
@@ -216,7 +216,6 @@ class LEAPSynthesisPass2(SynthesisPass):
             last_prefix_layer = 0
 
             # Track partial solutions
-            psols: dict[int, list[tuple[Circuit, float]]] = {}
             scan_sols: list[tuple[Circuit, float]] = []
 
             _logger.debug(f'Search started, initial layer has cost: {best_dist}.')
@@ -240,7 +239,6 @@ class LEAPSynthesisPass2(SynthesisPass):
             best_dists = data['best_dists']
             best_layers = data['best_layers']
             last_prefix_layer = data['last_prefix_layer']
-            psols = data['psols']
             scan_sols = data['scan_sols']
 
         # default_count = default_circuit.count(CNOTGate())
@@ -257,7 +255,6 @@ class LEAPSynthesisPass2(SynthesisPass):
             data["best_layer"] = best_layer
             data["best_layers"] = best_layers
             data["last_prefix_layer"] = last_prefix_layer
-            data["psols"] = psols
             data["scan_sols"] = scan_sols
             step += 1
             if save_data_file is not None and step % 10 == 0:
@@ -289,7 +286,6 @@ class LEAPSynthesisPass2(SynthesisPass):
                 if self.store_partial_solutions:
                     if dist < partial_success_threshold: #and circ_count <= default_count:
                         scan_sols.append((circuit.copy(), dist))
-                        data['psols'] = psols
                         data['scan_sols'] = scan_sols
                         if len(scan_sols) >= self.max_psols:
                             scan_sols.append((default_circuit.copy(), 0))
@@ -309,20 +305,11 @@ class LEAPSynthesisPass2(SynthesisPass):
 
                             return max_circ
                         
-                    if layer not in psols:
-                        psols[layer] = []
-
-                    psols[layer].append((circuit.copy(), dist))
-
-                    if len(psols[layer]) > self.partials_per_depth:
-                        psols[layer].sort(key=lambda x: x[1])
-                        del psols[layer][-1]
 
                 if dist < success_threshold and len(scan_sols) >= self.max_psols:
                     _logger.debug(f'Successful synthesis with distance {dist:.6e}.')
                     if self.store_partial_solutions:
                         scan_sols.append((default_circuit.copy(), 0))
-                        data['psols'] = psols
                         data['scan_sols'] = scan_sols
 
 
@@ -375,7 +362,6 @@ class LEAPSynthesisPass2(SynthesisPass):
 
         if self.store_partial_solutions:
             scan_sols.append((default_circuit.copy(), 0))
-            data['psols'] = psols
             data['scan_sols'] = scan_sols
 
         # Return circuit with least count

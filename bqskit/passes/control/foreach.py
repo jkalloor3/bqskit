@@ -75,7 +75,6 @@ class ForEachBlockPass(BasePass):
         collection_filter: Callable[[Operation], bool] | None = None,
         replace_filter: ReplaceFilterFn | str = 'always',
         batch_size: int | None = None,
-        blocks_to_run: List[int] = [],
         allocate_error: bool = False,
         allocate_error_gate: Gate = CNOTGate(),
         allocate_skew_factor: int = 3,
@@ -144,11 +143,6 @@ class ForEachBlockPass(BasePass):
                 Defaults to 'always'.  #TODO: address importability
 
             batch_size (int): (Deprecated).
-
-            blocks_to_run (List[int]):
-                A list of blocks to run the ForEachBlockPass body on. By default
-                you run on all blocks. This is mainly used with checkpointing, 
-                where some blocks have already finished while others have not.
         """
         if batch_size is not None:
             import warnings
@@ -162,7 +156,6 @@ class ForEachBlockPass(BasePass):
         self.collection_filter = collection_filter or default_collection_filter
         self.replace_filter = replace_filter or default_replace_filter
         self.workflow = Workflow(loop_body)
-        self.blocks_to_run = sorted(blocks_to_run)
         self.allocate_error = allocate_error
         self.allocate_error_gate = allocate_error_gate
         self.allocate_skew_factor = allocate_skew_factor
@@ -201,27 +194,16 @@ class ForEachBlockPass(BasePass):
 
         # Collect blocks
         blocks: list[tuple[int, Operation]] = []
-        if (len(self.blocks_to_run) == 0):
-            # TODO: This is buggy, need to fix to work with collection filter
-            self.blocks_to_run = list(range(circuit.num_operations))
-
-        block_ids = self.blocks_to_run.copy()
-        next_id = block_ids.pop(0)
         for i, (cycle, op) in enumerate(circuit.operations_with_cycles()):
-            if self.collection_filter(op) and i == next_id:
+            if self.collection_filter(op):
                 blocks.append((cycle, op))
-                try:
-                    next_id = block_ids.pop(0)
-                except IndexError:
-                    # No more blocks to run on
-                    break
 
         # No blocks, no work
         if len(blocks) == 0:
             data[self.key].append([])
             return
         
-        # print("NUMBER OF BLOCKS", len(blocks))
+        # print("NUMBER OF BLOCKS", len(blocks), flush=True)
         # Get the machine model
         model = data.model
         coupling_graph = data.connectivity
@@ -234,15 +216,15 @@ class ForEachBlockPass(BasePass):
         if self.check_checkpoint:
             if data.get("inner_foreach_finished", False):
                 print("Skipping inner foreach", flush=True)
-                self.cleanup_checkpoint_files(checkpoint_dir)
+                self.cleanup_checkpoint_files(checkpoint_dir, len(blocks))
                 # If the inner foreach pass has finished, we can skip this pass
                 return
 
         for i, (cycle, op) in enumerate(blocks):
             # Check if checkpoint exists:
             # Need to zero pad block ids for consistency
-            num_digits = len(str(max(self.blocks_to_run)))
-            block_num = str(self.blocks_to_run[i]).zfill(num_digits)
+            num_digits = len(str(len(blocks)))
+            block_num = str(i).zfill(num_digits)
             save_data_file = join(checkpoint_dir, f'block_{block_num}.data')
             save_circuit_file = join(checkpoint_dir, f'block_{block_num}.pickle')
             checkpoint_found = False
@@ -336,7 +318,7 @@ class ForEachBlockPass(BasePass):
             scan_sols = [data['scan_sols'] for data in completed_block_datas]
             completed_subcircuits = await knapsack_solve(scan_sols)
 
-        print("Final len of completed subcircuits", len(completed_subcircuits), flush=True)
+        # print("Final len of completed subcircuits", len(completed_subcircuits), flush=True)
 
         # Postprocess blocks
         points: list[CircuitPoint] = []
@@ -367,7 +349,7 @@ class ForEachBlockPass(BasePass):
         # Replace blocks
         circuit.batch_replace(points, ops)
 
-        print("CNOT Count", circuit.count(CNOTGate()), flush=True)
+        # print("CNOT Count", circuit.count(CNOTGate()), flush=True)
         # Record block data into pass data
         data[self.key].append(completed_block_datas)
 
@@ -379,24 +361,24 @@ class ForEachBlockPass(BasePass):
         if self.check_checkpoint:
             data["inner_foreach_finished"] = True
             pickle.dump(data, open(data["checkpoint_data_file"], 'wb'))
-            self.cleanup_checkpoint_files(checkpoint_dir)
+            self.cleanup_checkpoint_files(checkpoint_dir, len(blocks))
 
         return
 
 
-    def cleanup_checkpoint_files(self, checkpoint_dir: str):
+    def cleanup_checkpoint_files(self, checkpoint_dir: str, num_blocks: int):
         # Remove checkpoint files
         print("Removing checkpoint files", flush=True)
-        for i in self.blocks_to_run:
-            num_digits = len(str(max(self.blocks_to_run)))
-            block_num = str(self.blocks_to_run[i]).zfill(num_digits)
+        num_digits = len(str(num_blocks))
+        for i in range(num_blocks):
+            block_num = str(i).zfill(num_digits)
             save_data_file = join(checkpoint_dir, f'block_{block_num}.data')
             save_circuit_file = join(checkpoint_dir, f'block_{block_num}.pickle')
             print("Removing", save_data_file, flush=True)
             print("Removing", save_circuit_file, flush=True)
             Path(save_data_file).unlink(missing_ok=True)
             Path(save_circuit_file).unlink(missing_ok=True)
-        time.sleep(0.3 * len(self.blocks_to_run))
+            time.sleep(0.3 * num_blocks)
         if exists(checkpoint_dir) and len(listdir(checkpoint_dir)) == 0:
             Path(checkpoint_dir).rmdir()
 
@@ -466,7 +448,7 @@ async def knapsack_solve(scan_sols: list[list[tuple[Circuit, float]]]) -> list:
 
     # print("GREEDIEST INDS", greediest_inds)
     # print("NUM GREEDIEST INDS", len(greediest_inds))
-    print("CNOTS SAVED", cnots_saved, flush=True)
+    # print("CNOTS SAVED", cnots_saved, flush=True)
 
     return [psols[i][greediest_inds[i]] for i in range(len(psol_diffs))]
 
