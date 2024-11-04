@@ -33,6 +33,7 @@ synthesis pass to convert the circuit to native gates.
     QFASTDecompositionPass
     QPredictDecompositionPass
     SynthesisPass
+    WalshDiagonalSynthesisPass
 
 .. rubric:: Processing Passes
 
@@ -43,6 +44,7 @@ synthesis pass to convert the circuit to native gates.
     ExhaustiveGateRemovalPass
     IterativeScanningGateRemovalPass
     ScanningGateRemovalPass
+    TreeScanningGateRemovalPass
     SubstitutePass
 
 .. rubric:: Retargeting Passes
@@ -129,12 +131,16 @@ are involved the qubit mapping process.
     PAMRoutingPass
     EmbedAllPermutationsPass
     ExtractModelConnectivityPass
-    RestoreModelConnevtivityPass
+    RestoreModelConnectivityPass
 
 
 .. rubric:: PAM Verification Passes
 
 These passes either perform upper-bound error analysis of the PAM process.
+
+.. autosummary::
+    :toctree: autogen
+    :recursive:
 
     TagPAMBlockDataPass
     CalculatePAMErrorsPass
@@ -193,6 +199,7 @@ algorithms extend circuit templates.
     :toctree: autogen
     :recursive:
 
+    DiscreteLayerGenerator
     FourParamGenerator
     MiddleOutLayerGenerator
     SeedLayerGenerator
@@ -234,11 +241,12 @@ from bqskit.passes.mapping.embed import EmbedAllPermutationsPass
 from bqskit.passes.mapping.layout.pam import PAMLayoutPass
 from bqskit.passes.mapping.layout.sabre import GeneralizedSabreLayoutPass
 from bqskit.passes.mapping.placement.greedy import GreedyPlacementPass
+from bqskit.passes.mapping.placement.static import StaticPlacementPass
 from bqskit.passes.mapping.placement.trivial import TrivialPlacementPass
 from bqskit.passes.mapping.routing.pam import PAMRoutingPass
 from bqskit.passes.mapping.routing.sabre import GeneralizedSabreRoutingPass
 from bqskit.passes.mapping.setmodel import ExtractModelConnectivityPass
-from bqskit.passes.mapping.setmodel import RestoreModelConnevtivityPass
+from bqskit.passes.mapping.setmodel import RestoreModelConnectivityPass
 from bqskit.passes.mapping.setmodel import SetModelPass
 from bqskit.passes.mapping.topology import SubtopologySelectionPass
 from bqskit.passes.mapping.verify import CalculatePAMErrorsPass
@@ -257,6 +265,7 @@ from bqskit.passes.processing.exhaustive import ExhaustiveGateRemovalPass
 from bqskit.passes.processing.iterative import IterativeScanningGateRemovalPass
 from bqskit.passes.processing.scan import ScanningGateRemovalPass
 from bqskit.passes.processing.substitute import SubstitutePass
+from bqskit.passes.processing.treescan import TreeScanningGateRemovalPass
 from bqskit.passes.retarget.auto import AutoRebase2QuditGatePass
 from bqskit.passes.retarget.general import GeneralSQDecomposition
 from bqskit.passes.retarget.two import Rebase2QuditGatePass
@@ -270,6 +279,7 @@ from bqskit.passes.rules.u3 import U3Decomposition
 from bqskit.passes.rules.zxzxz import ZXZXZDecomposition
 from bqskit.passes.search.frontier import Frontier
 from bqskit.passes.search.generator import LayerGenerator
+from bqskit.passes.search.generators.discrete import DiscreteLayerGenerator
 from bqskit.passes.search.generators.fourparam import FourParamGenerator
 from bqskit.passes.search.generators.middleout import MiddleOutLayerGenerator
 from bqskit.passes.search.generators.seed import SeedLayerGenerator
@@ -281,10 +291,16 @@ from bqskit.passes.search.heuristic import HeuristicFunction
 from bqskit.passes.search.heuristics.astar import AStarHeuristic
 from bqskit.passes.search.heuristics.dijkstra import DijkstraHeuristic
 from bqskit.passes.search.heuristics.greedy import GreedyHeuristic
+from bqskit.passes.synthesis.bzxz import BlockZXZPass
+from bqskit.passes.synthesis.bzxz import FullBlockZXZPass
+from bqskit.passes.synthesis.diagonal import WalshDiagonalSynthesisPass
 from bqskit.passes.synthesis.leap import LEAPSynthesisPass
 from bqskit.passes.synthesis.pas import PermutationAwareSynthesisPass
 from bqskit.passes.synthesis.qfast import QFASTDecompositionPass
 from bqskit.passes.synthesis.qpredict import QPredictDecompositionPass
+from bqskit.passes.synthesis.qsd import FullQSDPass
+from bqskit.passes.synthesis.qsd import MGDPass
+from bqskit.passes.synthesis.qsd import QSDPass
 from bqskit.passes.synthesis.qsearch import QSearchSynthesisPass
 from bqskit.passes.synthesis.synthesis import SynthesisPass
 from bqskit.passes.synthesis.target import SetTargetPass
@@ -318,8 +334,14 @@ __all__ = [
     'ScanPartitioner',
     'QuickPartitioner',
     'SynthesisPass',
+    'WalshDiagonalSynthesisPass',
     'LEAPSynthesisPass',
     'QSearchSynthesisPass',
+    'FullQSDPass',
+    'QSDPass',
+    'MGDPass',
+    'BlockZXZPass',
+    'FullBlockZXZPass',
     'QFASTDecompositionPass',
     'QPredictDecompositionPass',
     'CompressPass',
@@ -329,6 +351,8 @@ __all__ = [
     'UpdateDataPass',
     'ToU3Pass',
     'ScanningGateRemovalPass',
+    'TreeScanningGateRemovalPass',
+    'DiscreteLayerGenerator',
     'SimpleLayerGenerator',
     'AStarHeuristic',
     'GreedyHeuristic',
@@ -364,6 +388,7 @@ __all__ = [
     'GeneralizedSabreLayoutPass',
     'GreedyPlacementPass',
     'TrivialPlacementPass',
+    'StaticPlacementPass',
     'GeneralizedSabreRoutingPass',
     'SetModelPass',
     'U3Decomposition',
@@ -398,7 +423,7 @@ __all__ = [
     'GeneralSQDecomposition',
     'StructureAnalysisPass',
     'ExtractModelConnectivityPass',
-    'RestoreModelConnevtivityPass',
+    'RestoreModelConnectivityPass',
     'TagPAMBlockDataPass',
     'CalculatePAMErrorsPass',
     'UnTagPAMBlockDataPass',
