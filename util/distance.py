@@ -3,6 +3,7 @@ Library to calculate the trace distance between two density matrices.
 '''
 import numpy as np
 from bqskit.qis import UnitaryMatrix
+from bqskit.utils.math import canonical_unitary
 
 '''
 Calculate the trace distance between two density matrices
@@ -33,17 +34,42 @@ Calculate the TVD between two probability distributions.
 def tvd(p: np.ndarray[np.complex128], q: np.ndarray[np.complex128]) -> np.float64:
     return 0.5 * np.sum(np.abs(p - q))
 
-''' Calculate the Frobenius distance between two matrices. '''
+def frobenius_cost(utry: UnitaryMatrix, target: UnitaryMatrix):
+    '''
+    Calculates the Frobenius distance between two unitaries
+    '''
+    diff = utry - target
+    # This is Frob(u - v)
+    inner = np.real(np.einsum("ij,ij->", diff, diff.conj()))
+    cost = np.sqrt(inner)
 
-def normalized_frob_dist(target: UnitaryMatrix, mat: np.ndarray) -> np.float64:
-    diff = target - mat
-    cost = np.real(np.trace(diff @ diff.conj().T))
-    # Factor Frob distance by 4N^2
-    N = target.shape[0] 
-    cost = cost / (N * N)
-    return np.sqrt(cost)
+    return cost
+
+def normalized_frob_cost(utry: UnitaryMatrix, target: UnitaryMatrix):
+    '''
+    Calculates the normalized Frobenius distance between two unitaries
+    '''
+    # This is Frob(u - v)
+    cost = frobenius_cost(utry, target)
+
+    N = utry.shape[0]
+    cost = cost / np.sqrt(2 * N)
+
+    # This quantity should be less than HS distance as defined by 
+    # Quest Paper 
+    return cost
+
+def normalized_gp_frob_cost(utry: UnitaryMatrix, target: UnitaryMatrix):
+    '''
+    Calculates the normalized Frobenius distance between two unitaries
+    '''
+    gp_correction = target.get_target_correction_factor(utry)
+    utry = utry * gp_correction
+
+    return normalized_frob_cost(utry, target)
+
 
 def normalized_frob_dist_func(target: UnitaryMatrix) -> callable:
     def calc_frob_dist(mat: np.ndarray) -> np.float64:
-        return normalized_frob_dist(target, mat)
+        return normalized_frob_cost(target, mat)
     return calc_frob_dist

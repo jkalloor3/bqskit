@@ -18,6 +18,7 @@ from bqskit.ir.gates import CNOTGate, FixedRZGate
 from bqskit.qis import UnitaryMatrix
 import numpy as np
 import pickle
+import os
 
 
 _logger = logging.getLogger(__name__)
@@ -27,13 +28,16 @@ frob_cost = FrobeniusCostGenerator()
 class CreateEnsemblePass(BasePass):
     """Converts single-qubit general unitary gates to U3 Gates."""
 
+    finished_pass_str = "finished_create_ensemble"
+
     def __init__(self, success_threshold = 1e-4, 
                  num_circs = 1000,
                  cost: CostFunctionGenerator = FrobeniusCostGenerator(),
                  use_calculated_error: bool = False,
                  num_random_ensembles: int = 3,
                  solve_exact_dists: bool = False,
-                 sort_by_t: bool = False) -> None:
+                 sort_by_t: bool = False,
+                 checkpoint_extra_str: str = "") -> None:
         """
         Construct a ToU3Pass.
 
@@ -57,6 +61,7 @@ class CreateEnsemblePass(BasePass):
             'method': 'qfactor'
         }
         self.sort_by_t = sort_by_t
+        self.checkpoint_extra_str = checkpoint_extra_str
 
     async def unfold_circ(
             config_dist: tuple[list[CircuitGate], float], 
@@ -79,36 +84,19 @@ class CreateEnsemblePass(BasePass):
 
         return copied_circuit, dist
 
-    def get_all_inds(self, dists: list[list[float]]) -> list[list[int]]:
+    def get_random_inds(self, dists: list[list[float]], num_circs: int) -> list[list[int]]:
         '''
         Get all possible solutions for the ensemble up to 
         '''
         num_psols_per_block = [len(psol_dists) for psol_dists in dists]
 
         # Get all indice combos from all blocks, picking one psol from each block
-        all_inds = []
-        max_inds_per_block = 7
-        for i in range(len(num_psols_per_block)):
-            num_inds = min(num_psols_per_block[i], max_inds_per_block)
-            # print("Num Inds", num_inds, flush=True)
-            inds = np.random.choice(num_psols_per_block[i], 
-                                    size=num_inds, 
-                                    replace=False)
-            # print("Inds", inds, flush=True)
-            if i == 0:
-                all_inds.extend([[j] for j in inds])
-            else:
-                new_inds = []
-                for j in inds:
-                    for ind in all_inds:
-                        new_inds.append(ind + [j])
-                all_inds = new_inds
-            
-            if len(all_inds) > 1000:
-                max_inds_per_block = 3
-            if len(all_inds) > 20000:
-                max_inds_per_block = 1
-
+        all_inds = np.zeros((num_circs, len(num_psols_per_block)), dtype=int)
+        for i, num_psols in enumerate(num_psols_per_block):
+            # Get num_circs random inds
+            all_inds[:, i] = np.random.choice(num_psols, 
+                                              size=num_circs, 
+                                              replace=True)
         return all_inds
 
     async def knapsack_solve(self, psol_diffs: list[list[int]], psol_dists: list[list[float]], total_dist: float, num_circs: int) -> list:
@@ -153,29 +141,32 @@ class CreateEnsemblePass(BasePass):
                                      p=weight,
                                      replace=False)
         
-        print("Inds we are looking at: ", orig_inds)
-        print("Number of psols per block: ", [len(psol_diffs[i]) for i in orig_inds], flush=True)
-        print("Avg CNOT diffs per block: ", [np.mean(psol_diffs[i]) for i in orig_inds], flush=True)
-        print("Avg Dists per block: ", [np.mean(psol_dists[i]) for i in orig_inds], flush=True)
-        print("Avg Total Dist: ", sum([np.mean(psol_dists[i]) for i in orig_inds]), flush=True)
-        print("Max Total Dist: ", sum([np.max(psol_dists[i]) for i in orig_inds]), flush=True)
-        print("Distance Threshold: ", total_dist, flush=True)
-        
+        # print("Inds we are looking at: ", orig_inds)
+        # print("Number of psols per block: ", [len(psol_diffs[i]) for i in orig_inds], flush=True)
+        # print("Avg CNOT diffs per block: ", [np.mean(psol_diffs[i]) for i in orig_inds], flush=True)
+        # print("Avg Dists per block: ", [np.mean(psol_dists[i]) for i in orig_inds], flush=True)
+        # print("Avg Total Dist: ", sum([np.mean(psol_dists[i]) for i in orig_inds]), flush=True)
+        # print("Max Total Dist: ", sum([np.max(psol_dists[i]) for i in orig_inds]), flush=True)
+        # print("Distance Threshold: ", total_dist, flush=True)
 
         # Get all possible solutions along with their CNOT count differences
         all_valid_inds = self.BFS(orig_inds, psol_diffs, dists, total_dist)
 
-        print("NUM VALID INDS", len(all_valid_inds), flush=True)
+        # print("INDS: ", flush=True)
+        # print(["-".join([str(y) for y in x[0]]) for x in all_valid_inds], flush=True)
+
+        # print("NUM VALID INDS", len(all_valid_inds), flush=True)
 
         # Sort the solutions by the number of CNOTs saved
         sorted_inds = sorted(all_valid_inds, key=lambda x: x[1])
-
-        weights = np.array([(x[1] - 0.001) for x in sorted_inds])
+        weights = np.array([x[1] for x in sorted_inds])
         # Remove all positive weights
         weights = weights - np.max(weights)
+        # Remove all zeros
+        weights = weights - 0.0001
         weights = weights / np.sum(weights)
         # Add uniform distribution to encourage exploration
-        weights += 1/len(weights)
+        weights += 3 / len(weights)
         weights = weights / np.sum(weights)
         try:
             random_inds = np.random.choice(len(sorted_inds), size=min(num_circs, len(sorted_inds)), p=weights, replace=False)
@@ -254,7 +245,7 @@ class CreateEnsemblePass(BasePass):
                         # print("New Dist: ", new_dist, flush=True)
                         pos_sols -= 1
                         new_psol_inds = psol_inds.copy()
-                        new_psol_inds[ind] = j
+                        new_psol_inds[ind] = int(j)
                         new_cnots_saved = cnots_saved + gate_count_diffs[ind][j]
                         queue.append((inds[1:], new_dist, new_psol_inds, new_cnots_saved))
                     if pos_sols == 0:
@@ -307,29 +298,30 @@ class CreateEnsemblePass(BasePass):
         greediest_inds = await self.knapsack_solve(
             psols_diffs, 
             dists, 
-            self.success_threshold * 15, 
-            self.num_circs * 10)
+            self.success_threshold * 5, 
+            self.num_circs * 3)
 
         greedy_inds = await self.knapsack_solve(
             psols_diffs, 
             dists, 
-            self.success_threshold * 2, 
-            self.num_circs * 10)
+            self.success_threshold * 1.5, 
+            self.num_circs * 2)
 
         valid_inds = await self.knapsack_solve(
             psols_diffs, 
             dists, 
             self.success_threshold, 
-            self.num_circs * 10)
+            self.num_circs * 2)
         
         # Randomly select a group of solutions
         print("Getting ALl Inds", flush=True)
-        all_inds = self.get_all_inds(dists)
-        selection = np.random.choice(len(all_inds), size=min(self.num_circs, possible_sols, len(all_inds)), replace=False)
-        random_inds = np.array(all_inds)[selection]
-
-        print("Got All Inds", flush=True)
-        all_inds = [random_inds, greediest_inds, greedy_inds, valid_inds]
+        # all_inds = self.get_all_inds(dists)
+        # selection = np.random.choice(len(all_inds), size=min(self.num_circs, possible_sols, len(all_inds)), replace=False)
+        # random_inds = np.array(all_inds)[selection]
+        all_inds = [greediest_inds, greedy_inds, valid_inds]
+        for _ in range(self.num_random_ensembles):
+            random_inds = self.get_random_inds(dists, num_circs=self.num_circs*2)
+            all_inds.append(random_inds)
 
 
         all_ensembles = []
@@ -435,9 +427,12 @@ class CreateEnsemblePass(BasePass):
 
     async def run(self, circuit: Circuit, data: PassData) -> None:
         """Perform the pass's operation, see :class:`BasePass` for more."""
-        print("Running Ensemble Pass", flush=True)
+        print("Running Ensemble Pass on block", data.get("block_num", -1), flush=True)
 
-        if "finished_create_ensemble" in data:
+        checkpoint_str = CreateEnsemblePass.finished_pass_str + self.checkpoint_extra_str
+
+        if checkpoint_str in data:
+            print("Finished Create Ensemble", flush=True)
             return
 
         # Get scan_sols for each circuit_gate
@@ -446,12 +441,24 @@ class CreateEnsemblePass(BasePass):
         if self.use_calculated_error:
             self.success_threshold = self.success_threshold * data["error_percentage_allocated"]
 
-        approx_circs, pts, dists, targets, thresholds = self.parse_data(circuit, block_data)
-        
-        all_ensembles = await self.assemble_circuits(circuit, approx_circs, pts, dists=dists, target=data.target)
 
+        # See if ensemble pickle exists
+        # save_data_file = data["checkpoint_data_file"]
+        # ensemble_file = save_data_file.replace(".data", "_scan_ensemble.pkl")
+        # print("ENSEMBLE FILE", ensemble_file, flush=True)
+        # if os.path.exists(ensemble_file):
+        #     print("Using SCANNING GATE ENSEMBLE!", flush=True)
+        #     scan_sols = pickle.load(open(ensemble_file, "rb"))
+        #     all_circ_dists = [(circ, frob_cost.calc_cost(circ, data.target)) for circ, _ in scan_sols]
+        #     all_circ_dists = sorted(all_circ_dists, key=lambda x: x[0].count(CNOTGate()))
+        #     data["ensemble"] = [all_circ_dists]
+        #     data["scan_sols"] = [all_circ_dists]
+        # else:
         data["scan_sols"] = []
         data["ensemble"] = []
+            
+        approx_circs, pts, dists, targets, thresholds = self.parse_data(circuit, block_data)        
+        all_ensembles = await self.assemble_circuits(circuit, approx_circs, pts, dists=dists, target=data.target)
 
         for all_circs in all_ensembles:
             all_circs = sorted(all_circs, key=lambda x: x[0].count(CNOTGate()))
@@ -466,7 +473,7 @@ class CreateEnsemblePass(BasePass):
 
         if "checkpoint_dir" in data:
             checkpoint_data_file = data["checkpoint_data_file"]
-            data["finished_create_ensemble"] = True
+            data[checkpoint_str] = True
             # No longer need block data
             # data.pop(ForEachBlockPass.key, None)
             # print("Saving keys", list(data.keys()), flush=True)

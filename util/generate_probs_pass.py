@@ -4,27 +4,16 @@ from __future__ import annotations
 from typing import Any
 
 from bqskit.ir import Circuit
+from bqskit.qis import UnitaryMatrix
 from bqskit.ir.gates import CNOTGate
 from bqskit.compiler.basepass import BasePass
-from bqskit.runtime import get_runtime
 from bqskit.compiler.passdata import PassData
 import numpy as np
-from util import get_chi_1_chi_2
+from .distance import frobenius_cost, normalized_frob_cost
 from qpsolvers import solve_ls
+import pickle
 
-def cost(utry1: np.ndarray, utry2: np.ndarray, N: int) -> float:
-    '''
-    Calculates the normalized Frobenius distance between two unitaries
-    '''
-    diff = utry1- utry2
-    # This is Frob(u - v)
-    cost = np.real(np.trace(diff @ diff.conj().T))
 
-    cost = cost / (N * N)
-
-    # This quantity should be less than HS distance as defined by 
-    # Quest Paper 
-    return np.sqrt(cost)
 class GenerateProbabilityPass(BasePass):
     
     def __init__(
@@ -74,12 +63,16 @@ class GenerateProbabilityPass(BasePass):
 
         return (chi_1 / num_reps, chi_2 / num_reps)
     
-    async def calculate_bias(self, ensemble: np.ndarray):
+    def calculate_bias(self, ensemble: list[UnitaryMatrix], target: UnitaryMatrix):
         mean_un = np.mean(ensemble, axis=0)
-        return cost(mean_un, self.target, self.target.num_qudits)
+        return normalized_frob_cost(mean_un, target)
+    
+    def calculate_e1(self, ensemble: list[UnitaryMatrix], target: UnitaryMatrix):
+        e1s = [normalized_frob_cost(un, target) for un in ensemble]
+        return np.mean(e1s)
 
-
-    async def calculate_probs(self, ensemble: np.ndarray, target: np.ndarray):
+    @staticmethod
+    async def calculate_probs(ensemble: np.ndarray, target: np.ndarray):
         M = len(ensemble)
 
         tr_V_Us = np.zeros(M, dtype=np.complex128)
@@ -134,15 +127,14 @@ class GenerateProbabilityPass(BasePass):
 
         print("Running Generate Probability Pass", flush=True)
 
-        # if "finished_probs_generation" in data:
-        #     print("Already Generated Probs", flush=True)
-        #     final_ensemble = data["final_ensemble"]
-        #     data["final_ensemble_probs"] = [1 / len(final_ensemble) for _ in final_ensemble]
-        #     return
+        if "finished_probs_generation" in data:
+            print("Already Generated Probs", flush=True)
+            # final_ensemble = data["final_ensemble"]
+            # data["final_ensemble_probs"] = [1 / len(final_ensemble) for _ in final_ensemble]
+            return
 
         all_ensembles: list[list[Circuit]] = data["sub_select_ensemble"]
-        all_ensemble_unitaries: list[np.ndarray] = [np.array([circ.get_unitary().numpy for circ in ensemble]) for ensemble in all_ensembles]
-
+        all_ensemble_unitaries: list[list[UnitaryMatrix]] = [[circ.get_unitary() for circ in ens] for ens in all_ensembles]
         data["ensemble_unitaries"] = all_ensemble_unitaries
 
 
@@ -150,52 +142,59 @@ class GenerateProbabilityPass(BasePass):
             print("No ensembles to choose from")
             print(circuit)
             print(data.target)
-            all_ensembles: list[list[Circuit]] = data["ensemble"]
-            all_ensemble_unitaries: list[np.ndarray] = [np.array([circ.get_unitary().numpy for circ in ensemble]) for ensemble in all_ensembles]
+            all_ensembles: list[list[Circuit]] = [[circuit.copy()]]
+            all_ensemble_unitaries: list[list[UnitaryMatrix]] = [[circuit.get_unitary()]]
 
-
-        success_threshold = self.success_threshold * data["error_percentage_allocated"]
-        self.target = data.target
         # For each ensemble, calculate the bias term
-        biases = await get_runtime().map(self.calculate_bias, all_ensemble_unitaries)
+        biases: list[float] = [self.calculate_bias(ens, target=data.target) for ens in all_ensemble_unitaries]
+        e1s: list[float] = [self.calculate_e1(ens, target=data.target) for ens in all_ensemble_unitaries]
+
+        ratios = [bias / (e1 * e1) for bias, e1 in zip(biases, e1s)]
 
         print("BIASES, ", biases)
 
         ensemble_ind = 0
-        best_bias = biases[0]
+        best_ratio = ratios[0]
 
-        if best_bias > success_threshold ** 2:
-            # Select the best ensemble
-            for i, bias in enumerate(biases):
-                if bias < best_bias:
-                    best_bias = bias
-                    ensemble_ind = i
-                
-                if bias < success_threshold ** 2:
-                    break
+        # Want ratio to be below 5
+        for i, ratio in enumerate(ratios):
+            if ratio < best_ratio:
+                best_ratio = ratio
+                ensemble_ind = i
+            
+            if best_ratio < 5:
+                break
 
-        best_ensemble = all_ensembles[ensemble_ind]
-        best_ensemble_unitaries = all_ensemble_unitaries[ensemble_ind]
+        if best_ratio > 100:
+            # REALLY BAD ENSEMBLES ONLY
+            print("No good ensemble found, defaulting to single circuit")
+            best_ensemble = [circuit.copy()]
+            best_ensemble_unitaries = [circuit.get_unitary()]
+        else:
+            best_ensemble = all_ensembles[ensemble_ind]
+            best_ensemble_unitaries = np.array([u.numpy for u in all_ensemble_unitaries[ensemble_ind]])
 
         avg_cnots = np.mean([circ.count(CNOTGate()) for circ in best_ensemble])
 
-        print("Orig CNOTS", circuit.count(CNOTGate()))
-        print("Average CNOTS", avg_cnots)
-        print("Bias", best_bias, "Threshold", success_threshold)
+        print("Orig CNOTS", circuit.count(CNOTGate()), flush=True)
+        print("Average CNOTS", avg_cnots, flush=True)
+        print("Ratio: ", best_ratio, flush=True)
 
         data["final_ensemble"] = best_ensemble
 
-        # Now calculate the probability for this ensemble
+        if len(best_ensemble) < 5:
+            data["final_ensemble_probs"] = [1 / len(best_ensemble) for _ in best_ensemble]
+        else:
+            # Now calculate the probability for this ensemble
+            data["final_ensemble_probs"] = await GenerateProbabilityPass.calculate_probs(best_ensemble_unitaries, data.target)
 
-        data["final_ensemble_probs"] = await self.calculate_probs(best_ensemble_unitaries, data.target)
+        print("Calculated Probabilities", flush=True)
 
-        print("Calculated Probabilities")
-
-        # if "checkpoint_dir" in data:
-        #     data["finished_probs_generation"] = True
-        #     data.pop("sub_select_ensemble")
-        #     checkpoint_data_file = data["checkpoint_data_file"]
-        #     pickle.dump(data, open(checkpoint_data_file, "wb"))
+        if "checkpoint_dir" in data:
+            data["finished_probs_generation"] = True
+            data.pop("sub_select_ensemble")
+            checkpoint_data_file = data["checkpoint_data_file"]
+            pickle.dump(data, open(checkpoint_data_file, "wb"))
         return
 
 

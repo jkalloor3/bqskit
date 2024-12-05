@@ -245,10 +245,10 @@ class CheckpointRestartPass(BasePass):
         # block_id = data.get("block_num", "0")
         data["checkpoint_dir"] = self.checkpoint_dir
         # Update checkpointing files
-        save_data_file = join(self.checkpoint_dir, "data.pickle")
+        save_data_file = join(self.checkpoint_dir, "data.data")
         save_circuit_file = join(self.checkpoint_dir, "circuit.pickle")
-        data["save_data_file"] = save_data_file
-        data["save_circuit_file"] = save_circuit_file
+        data["checkpoint_data_file"] = save_data_file
+        data["checkpoint_circuit_file"] = save_circuit_file
         if not exists(join(self.checkpoint_dir, "circuit.pickle")):
             print("Checkpoint does not exist!", flush=True)
             await Workflow(self.default_passes).run(circuit, data)

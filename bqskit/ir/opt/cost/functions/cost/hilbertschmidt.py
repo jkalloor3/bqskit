@@ -42,15 +42,13 @@ class FrobeniusCost(
         utry = self.circuit.get_unitary(params)
         diff = self.target - utry
         # This is Frob(u - v)
-        cost = np.sqrt(np.real(np.trace(diff @ diff.conj().T)))
+        inner = np.real(np.einsum("ij,ij->", diff, diff.conj()))
+        cost = np.sqrt(inner)
 
         # Factor Frob distance by 4N^2
         N = self.target.shape[0] 
-
         cost = cost / np.sqrt(2 * N)
 
-        # This quantity should be less than HS distance as defined by 
-        # Quest Paper 
         return cost
 
     def get_grad(self, params: RealVector) -> npt.NDArray[np.float64]:

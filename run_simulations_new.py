@@ -11,7 +11,7 @@ from qiskit import QuantumCircuit, transpile
 from qiskit.quantum_info import Statevector
 
 from util import load_circuit, load_compiled_circuits
-from util.distance import normalized_frob_dist, tvd, trace_distance, get_density_matrix, get_average_density_matrix
+from util.distance import normalized_frob_cost, tvd, trace_distance, get_density_matrix, get_average_density_matrix
 
 from bqskit.ext import bqskit_to_qiskit
 
@@ -109,10 +109,12 @@ if __name__ == '__main__':
     if initial_circ.num_qudits <= 10:
         target = initial_circ.get_unitary()
 
+    opt_str = ""
+
     if cliff:
         bqskit_circs = load_compiled_circuits(circ_name, tol, timestep, ignore_timestep=True, extra_str=f"_{num_unique_circs}_circ_cliff_t_final")
     else:
-        bqskit_circs = load_compiled_circuits(circ_name, tol, timestep, ignore_timestep=True, extra_str=f"_{num_unique_circs}_circ_final_min")
+        bqskit_circs = load_compiled_circuits(circ_name, tol, timestep, ignore_timestep=True, extra_str=f"_{num_unique_circs}_circ_final_min_post{opt_str}_calc_bias")
 
     print("LOADED CIRCUITS", flush=True)
 
@@ -161,10 +163,14 @@ if __name__ == '__main__':
 
         tds = [trace_distance(final_rho, rhos[i]) for i,final_rho in enumerate(final_rhos)]
         tvds = [tvd(prob, true_probs[i]) for i,prob in enumerate(final_probs)]
+        td = np.mean(tds)
+        mean_tvd = np.mean(tvds)
         if mean_un is not None:
-            frob_dist = normalized_frob_dist(target, mean_un)
-            print(f"Ensemble Size: {ens_size},  Trace Distance: {tds}, TVDS: {tvds}, Frobenius Distance Normalized: {frob_dist}")
+            frob_cost = normalized_frob_cost(target, mean_un)
+            print(f"Ensemble Size: {ens_size},  Trace Distance: {tds}, TVDS: {tvds}")
+            print(f"Mean Trace Distance: {td}, Mean TVD: {mean_tvd}, Frobenius Distance: {frob_cost}")
         else:
             print(f"Ensemble Size: {ens_size},  Trace Distance: {tds}, TVDS: {tvds}")
+            print(f"Mean Trace Distance: {td}, Mean TVD: {mean_tvd}")
 
 

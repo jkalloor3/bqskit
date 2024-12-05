@@ -4,57 +4,23 @@ from __future__ import annotations
 import logging
 import csv
 
-from sklearn.cluster import AgglomerativeClustering
-
 from bqskit.compiler.basepass import BasePass
-from bqskit.passes import ForEachBlockPass
 from bqskit.compiler.passdata import PassData
-from bqskit.ir.circuit import Circuit, CircuitPoint, Operation
+from bqskit.ir.circuit import Circuit
+from bqskit.ir.gates import CNOTGate, TGate, TdgGate
 from bqskit.runtime import get_runtime
 from typing import Any
-from bqskit.ir.opt.cost.functions import HilbertSchmidtResidualsGenerator, HilbertSchmidtCostGenerator
-from bqskit.ir.opt.minimizers.lbfgs import LBFGSMinimizer
+from bqskit.ir.opt.cost.functions import HilbertSchmidtResidualsGenerator
 from bqskit.ir.opt.cost.generator import CostFunctionGenerator
-from bqskit.ir.gates import CircuitGate
 from bqskit.ir.gates import CNOTGate
 from bqskit.qis import UnitaryMatrix
 import numpy as np
 from math import ceil
 from itertools import chain
 
-from sklearn.cluster import KMeans
-from sklearn.decomposition import PCA
-from sklearn.manifold import TSNE
+from .distance import normalized_frob_cost
+
 import pickle
-
-
-_logger = logging.getLogger(__name__)
-
-def bias_cost(utry: UnitaryMatrix, target: UnitaryMatrix):
-    '''
-    Calculates the normalized Frobenius distance between two unitaries
-    '''
-    diff = utry- target
-    # This is Frob(u - v)
-    cost = np.sqrt(np.real(np.trace(diff @ diff.conj().T)))
-
-    N = utry.shape[0]
-    cost = cost / np.sqrt(2 * N)
-
-    # This quantity should be less than HS distance as defined by 
-    # Quest Paper 
-    return cost
-
-def frobenius_cost(utry: UnitaryMatrix, target: UnitaryMatrix):
-    '''
-    Calculates the Frobenius distance between two unitaries
-    '''
-    diff = utry- target
-    # This is Frob(u - v)
-    cost = np.sqrt(np.real(np.trace(diff @ diff.conj().T)))
-
-    return cost
-
 
 class SubselectEnsemblePass(BasePass):
     """ Subselects a subset of the ensemble to use for further analysis. Uses K-means with PCA and TSNE.
@@ -62,7 +28,8 @@ class SubselectEnsemblePass(BasePass):
 
     def __init__(self, success_threshold = 1e-4, 
                  num_circs = 1000,
-                 cost: CostFunctionGenerator = HilbertSchmidtCostGenerator()) -> None:
+                 count_t: bool = False
+                 ) -> None:
         """
 
         Args:
@@ -73,6 +40,7 @@ class SubselectEnsemblePass(BasePass):
         self.pca_components = 24
         self.tsne_components = 20
         self.get_all_data = True
+        self.count_t = count_t
 
     def get_inds(cluster_ids, k: int):
         inds = []
@@ -86,23 +54,51 @@ class SubselectEnsemblePass(BasePass):
 
         return np.array(inds)
 
+    def subselect_circs_by_bias(self, circuits: list[tuple[Circuit, float]], target: UnitaryMatrix) -> list[Circuit]:
+        '''
+        Given a list of circuits and distances, subselect the circuits
+        that minimize the bias between the target and the mean unitary
+        of the ensemble.
 
-    async def get_new_ensemble(self, ensemble: list[Circuit]) -> list[Circuit]:
-        ensemble_vec = np.array([c.get_unitary().get_flat_vector() for c, _ in ensemble])
-        print("Running Subselect Ensemble Pass!", flush=True)
-        print(ensemble_vec.shape, flush=True)
-        # print(ensemble_vec[0], flush=True)
-        # print(ensemble_vec[1], flush=True)
-        # pca = PCA(n_components=self.pca_components).fit_transform(ensemble_vec)
-        # tsne = TSNE(n_components=self.tsne_components, method='exact').fit_transform(pca)
-        k_means = KMeans(n_clusters=self.num_circs, random_state=0, n_init="auto").fit(ensemble_vec)
+
+        The circuits are sorted by the gate reduction, so try to use
+        the circuits that have the fewest gates to minimize the bias.
+        '''
+
+        unitaries: list[UnitaryMatrix] = [x[0].get_unitary() for x in circuits]
+
+        # Initially randomly sort circs
+        order = np.random.permutation(len(unitaries))
+
+        # Grab first 25 as initial set
+        inds = list(order[:25])
+        avg_un = np.mean([unitaries[i] for i in inds], axis=0)
+        bias = normalized_frob_cost(avg_un, target)
         
-        new_ensemble_inds = SubselectEnsemblePass.get_inds(k_means.labels_, self.num_circs)
-        new_ensemble = [ensemble[i][0] for i in new_ensemble_inds]
+        cur_ind = 25
+        nn = 1
+        while cur_ind < len(unitaries) and len(inds) < 1000:
+            num_to_check = min(nn, len(unitaries) - cur_ind)
+            # Get next unitaries to try and add
+            next_inds = [order[cur_ind + i] for i in range(num_to_check)]
+            next_uns = [unitaries[i] for i in next_inds]
 
-        print("Subselected Ensemble Size: ", len(new_ensemble_inds), flush=True)
+            # Try to add all of them
+            num_inds = len(inds)
+            new_avg_un = (num_inds / (num_inds + num_to_check)) * avg_un + (num_to_check / (num_inds + num_to_check)) * np.mean(next_uns, axis=0)
+            new_bias = normalized_frob_cost(new_avg_un, target)
 
-        return new_ensemble
+            # If the bias is less, add the unitaries
+            if new_bias < bias:
+                bias = new_bias
+                avg_un = new_avg_un
+                inds.extend(next_inds)
+
+            cur_ind = cur_ind + num_to_check
+
+        # Return the ensemble with the best bias
+        new_circs = [circuits[i][0] for i in inds]
+        return new_circs
 
 
     async def run(self, circuit: Circuit, data: PassData) -> None:
@@ -114,45 +110,23 @@ class SubselectEnsemblePass(BasePass):
 
         data["finished_subselect"] = False
 
-        all_ensembles: list[list[Circuit]] = await get_runtime().map(self.get_new_ensemble, data["ensemble"])
+        
+        all_ensembles: list[list[Circuit]] = await get_runtime().map(self.subselect_circs_by_bias, data["ensemble"], target=data.target)
 
-        csv_dict = []
-        ensemble_names = ["Random Sub-Sample", "Least CNOTs", "Medium CNOTs", "Valid CNOTs"]
-        target = data.target
-        for i,ens in enumerate(all_ensembles):
-            ensemble_data = {}
-            unitaries: list[UnitaryMatrix] = [x.get_unitary() for x in ens]
-            e1s = [bias_cost(un, target) for un in unitaries]
-            e1s_actual = [frobenius_cost(un, target) for un in unitaries]
-            e1 = np.mean(e1s)
-            e1_actual = np.mean(e1s_actual)
-            mean_un = np.mean(unitaries, axis=0)
-            orig_bias = bias_cost(mean_un, target)
-            orig_bias_actual = frobenius_cost(mean_un, target)
-            
-            final_counts = [circ.count(CNOTGate()) for circ in ens]
-            ensemble_data["Ensemble Generation Method"] = ensemble_names[i]
-            ensemble_data["Epsilon"] = e1
-            ensemble_data["Epsilon Actual"] = e1_actual
-            ensemble_data["Avg CNOT Count after K Means"] = np.mean(final_counts)
-            ensemble_data["Bias after K Means"] = orig_bias
-            ensemble_data["Bias Actual after K Means"] = orig_bias_actual
-            ensemble_data["Num Circs"] = len(ens)
 
-            csv_dict.append(ensemble_data)
+        print("FINISHED SUBSELECTING", flush=True)
+        # Sort all ensembles by average CNOT count
+        all_ensembles = sorted(all_ensembles, key=lambda x: np.mean([circ.count(CNOTGate()) for circ in x]))
+        avg_cnot_counts = [np.mean([circ.count(CNOTGate()) for circ in ens]) for ens in all_ensembles]
+        print("Average CNOT Counts of Subselected Ensembles", avg_cnot_counts)
 
         data["sub_select_ensemble"] = all_ensembles
 
         if "checkpoint_dir" in data:
-            # data["finished_subselect"] = True
-            # data.pop("ensemble")
+            data["finished_subselect"] = True
+            data.pop("ensemble")
             checkpoint_data_file = data["checkpoint_data_file"]
-            csv_file = checkpoint_data_file.replace(".data", ".csv_subselect3")
-            writer = csv.DictWriter(open(csv_file, "w", newline=""), fieldnames=csv_dict[0].keys())
-            writer.writeheader()
-            for row in csv_dict:
-                writer.writerow(row)
-            # pickle.dump(data, open(checkpoint_data_file, "wb"))
+            pickle.dump(data, open(checkpoint_data_file, "wb"))
 
         return
 

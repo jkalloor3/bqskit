@@ -2,20 +2,27 @@
 from __future__ import annotations
 
 import logging
+from os.path import exists, join
+from os import mkdir
+import pickle
 from typing import Any
 from typing import Callable
+from itertools import chain
 
+from bqskit.runtime import get_runtime
 from bqskit.compiler.basepass import BasePass
 from bqskit.compiler.passdata import PassData
 from bqskit.ir.circuit import Circuit
+from bqskit.ir.gates import CNOTGate
 from bqskit.ir.operation import Operation
 from bqskit.ir.opt.cost.functions import HilbertSchmidtResidualsGenerator
 from bqskit.ir.opt.cost.generator import CostFunctionGenerator
 from bqskit.utils.typing import is_real_number
+
 _logger = logging.getLogger(__name__)
 
 
-class ScanningGateRemovalPass(BasePass):
+class EnsembleScanningGateRemovalPass(BasePass):
     """
     The ScanningGateRemovalPass class.
 
@@ -29,6 +36,7 @@ class ScanningGateRemovalPass(BasePass):
         cost: CostFunctionGenerator = HilbertSchmidtResidualsGenerator(),
         instantiate_options: dict[str, Any] = {},
         collection_filter: Callable[[Operation], bool] | None = None,
+        use_calculated_error: bool = False,
     ) -> None:
         """
         Construct a ScanningGateRemovalPass.
@@ -94,9 +102,30 @@ class ScanningGateRemovalPass(BasePass):
             'cost_fn_gen': self.cost,
         }
         self.instantiate_options.update(instantiate_options)
+        self.use_calculated_error = use_calculated_error
 
     async def run(self, circuit: Circuit, data: PassData) -> None:
+        """Perform the pass's operation on the given circuit."""
+        ens = data["scan_sols"]
+        # for ens in ensembles:
+        print("Launching Scanning Gate Removal on Ensemble", flush=True)
+        all_sols: list[list[tuple[Circuit, float]]] = await get_runtime().map(self.run_circ, ens, data=data)
+        all_sols: list[tuple[Circuit, float]] = list(chain.from_iterable(all_sols))
+        all_sols = sorted(all_sols, key=lambda x: x[0].count(CNOTGate()))
+        print(f"After Scanning, we have {len(all_sols)} solutions", flush=True)
+        data["scan_sols"] = all_sols
+
+        if "checkpoint_dir" in data:
+            checkpoint_data_file = data["checkpoint_data_file"]
+            data[ "finished_scanning_gate_removal"] = True
+            pickle.dump(data, open(checkpoint_data_file, "wb"))
+        
+        return
+
+
+    async def run_circ(self, circ_float: tuple[Circuit, float], data: PassData) -> list[tuple[Circuit, float]]:
         """Perform the pass's operation, see :class:`BasePass` for more."""
+        circuit, dist = circ_float
         instantiate_options = self.instantiate_options.copy()
         if 'seed' not in instantiate_options:
             instantiate_options['seed'] = data.seed
@@ -105,17 +134,31 @@ class ScanningGateRemovalPass(BasePass):
         _logger.debug(f'Starting scanning gate removal on the {start}.')
 
         target = self.get_target(circuit, data)
+        all_solutions: list[tuple[Circuit, float]] = [(circuit.copy(), dist)]
 
         circuit_copy = circuit.copy()
         reverse_iter = not self.start_from_left
-        for cycle, op in circuit.operations_with_cycles(reverse=reverse_iter):
+
+        iterator = circuit.operations_with_cycles(reverse=reverse_iter)
+        all_ops = [x for x in iterator]
+
+        if self.use_calculated_error:
+            success_threshold = self.success_threshold * data["error_percentage_allocated"]
+        else:
+            success_threshold = self.success_threshold
+
+        # print(f"Initial Gate Counts: {circuit.gate_counts}")
+        # print(f"Initial Width: {circuit.num_qudits}", flush=True)
+        ops_removed = 0
+
+        for i, (cycle, op) in enumerate(all_ops):
 
             if not self.collection_filter(op):
                 _logger.debug(f'Skipping operation {op} at cycle {cycle}.')
                 continue
 
-            _logger.debug(f'Attempting removal of operation at cycle {cycle}.')
-            _logger.debug(f'Operation: {op}')
+            # print(f'Attempting removal of operation at cycle {cycle}.')
+            # print(f'Operation: {op}')
 
             working_copy = circuit_copy.copy()
 
@@ -128,11 +171,18 @@ class ScanningGateRemovalPass(BasePass):
             working_copy.pop((cycle, op.location[0]))
             working_copy.instantiate(target, **instantiate_options)
 
-            if self.cost(working_copy, target) < self.success_threshold:
+            working_cost = self.cost(working_copy, target)
+            # print(f"Cost after removing {op} is {working_cost}", flush=True)
+            if working_cost < success_threshold:
+                ops_removed += 1
+                all_solutions.append((working_copy.copy(), working_cost))
                 _logger.debug('Successfully removed operation.')
-                circuit_copy = working_copy
+                circuit_copy = working_copy        
 
+        print("Ops Removed: ", ops_removed, flush=True)
         circuit.become(circuit_copy)
+        all_solutions = sorted(all_solutions, key=lambda x: x[0].count(CNOTGate()))
+        return all_solutions
 
 
 def default_collection_filter(op: Operation) -> bool:

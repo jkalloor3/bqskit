@@ -1,0 +1,35 @@
+Checkpoint does not exist!
+Updating Checkpoint Data File fixed_block_checkpoints_min/tfxy_6_0_3_8_3/block_0.data
+Error Percentage for Block:  0  is:  1.0
+Updating Checkpoint Data File fixed_block_checkpoints_min/tfxy_6_0_3_8_3/block_0/block_0.data
+Updating Checkpoint Data File fixed_block_checkpoints_min/tfxy_6_0_3_8_3/block_0/block_1.data
+Updating Checkpoint Data File fixed_block_checkpoints_min/tfxy_6_0_3_8_3/block_0/block_2.data
+Updating Checkpoint Data File fixed_block_checkpoints_min/tfxy_6_0_3_8_3/block_0/block_3.data
+Updating Checkpoint Data File fixed_block_checkpoints_min/tfxy_6_0_3_8_3/block_0/block_4.data
+Updating Checkpoint Data File fixed_block_checkpoints_min/tfxy_6_0_3_8_3/block_0/block_5.data
+Updating Checkpoint Data File fixed_block_checkpoints_min/tfxy_6_0_3_8_3/block_0/block_6.data
+Error Percentage for Block:  0  is:  0.09880489682745441
+Error Percentage for Block:  1  is:  0.171135101341752
+Error Percentage for Block:  2  is:  0.171135101341752
+Error Percentage for Block:  3  is:  0.1397312251222604
+Error Percentage for Block:  4  is:  0.1397312251222604
+Error Percentage for Block:  5  is:  0.1397312251222604
+Error Percentage for Block:  6  is:  0.1397312251222604
+Starting LEAP for block 0 : 5
+Starting LEAP for block 0 : 2
+Starting LEAP for block 0 : 6
+Starting LEAP for block 0 : 0
+Starting LEAP for block 0 : 1
+Starting LEAP for block 0 : 3
+Starting LEAP for block 0 : 4
+Starting Second LEAP for block 0 : 0
+Deleting fixed_block_checkpoints_min/tfxy_6_0_3_8_3/block_0/block_0_0.data
+Deleting fixed_block_checkpoints_min/tfxy_6_0_3_8_3/block_0/block_0_1.data
+Deleting fixed_block_checkpoints_min/tfxy_6_0_3_8_3/block_0/block_0_2.data
+Deleting fixed_block_checkpoints_min/tfxy_6_0_3_8_3/block_0/block_0_3.data
+Deleting fixed_block_checkpoints_min/tfxy_6_0_3_8_3/block_0/block_0_4.data
+Deleting fixed_block_checkpoints_min/tfxy_6_0_3_8_3/block_0/block_0_5.data
+Deleting fixed_block_checkpoints_min/tfxy_6_0_3_8_3/block_0/block_0_6.data
+Deleting fixed_block_checkpoints_min/tfxy_6_0_3_8_3/block_0/block_0_7.data
+Starting Second LEAP for block 0 : 3
+Starting Second LEAP for block 0 : 4

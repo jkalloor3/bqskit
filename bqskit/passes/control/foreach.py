@@ -77,7 +77,7 @@ class ForEachBlockPass(BasePass):
         batch_size: int | None = None,
         allocate_error: bool = False,
         allocate_error_gate: Gate = CNOTGate(),
-        allocate_skew_factor: int = 3,
+        allocate_skew_factor: int = -1,
         check_checkpoint: bool = False,
     ) -> None:
         """
@@ -266,6 +266,7 @@ class ForEachBlockPass(BasePass):
                 block_data['point'] = CircuitPoint(cycle, op.location[0])
                 block_data['calculate_error_bound'] = self.calculate_error_bound
                 block_data['block_num'] = block_num
+                block_data['super_block_num'] = data.get('block_num', -2)
                 for key in data:
                     if key.startswith(self.pass_down_key_prefix):
                         block_data[key] = data[key]
@@ -285,6 +286,7 @@ class ForEachBlockPass(BasePass):
             # Change next subdirectory
             if should_checkpoint:
                 # Update checkpoint dir, circ file, and data file
+                print("Updating Checkpoint Data File", save_data_file, flush=True)
                 block_data["checkpoint_dir"] = join(checkpoint_dir, f'block_{block_num}')
                 block_data["checkpoint_circ_file"] = save_circuit_file
                 block_data["checkpoint_data_file"] = save_data_file
@@ -293,6 +295,7 @@ class ForEachBlockPass(BasePass):
             # TODO: This is expensive, need to find a better way to do this
             unfolded_circ = subcircuit.copy()
             unfolded_circ.unfold_all()
+            # If skew factor is negative, then we are giving more error budget to blocks with fewer CNOT gates
             skewed_gates = unfolded_circ.count(self.allocate_error_gate) ** self.allocate_skew_factor
             block_gates.append(skewed_gates)
 
@@ -300,6 +303,8 @@ class ForEachBlockPass(BasePass):
         total_gates = sum(block_gates)
         if self.allocate_error:
             for i in range(len(block_datas)):
+                # Percentage is proportional to skew function
+                print("Error Percentage for Block: ", i, " is: ", block_gates[i] / total_gates * data.get("error_percentage_allocated", 1), flush=True)
                 block_datas[i]["error_percentage_allocated"] = block_gates[i] * data.get("error_percentage_allocated", 1) / total_gates 
 
         # Do the work

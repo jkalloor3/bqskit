@@ -72,7 +72,7 @@ class SelectFinalEnsemblePass(BasePass):
         all_combos = []
         i = 0
 
-        inds = [[] for _ in range(len(self.ensemble))]
+        inds: list[list[int]] = [[] for _ in range(len(self.ensemble))]
 
         for i in range(len(self.ensemble)):
             probs = self.probs[i]
@@ -81,13 +81,16 @@ class SelectFinalEnsemblePass(BasePass):
             inds[i] = np.random.choice(np.arange(len(probs)), p=probs, size=(self.num_circs))
 
         print("Sampled Indices", flush=True)
+        print("Number of Ensembles: ", len(inds), flush=True)
 
-        inds = np.array(inds)
-        inds = inds.transpose().tolist()
+        inds: np.ndarray = np.array(inds).transpose()
+        print(inds.shape)
+        arr_split = np.array_split(inds, 100)
+        print("Split into ", len(arr_split), flush=True)
+        print("First Split Shape: ", arr_split[0].shape, flush=True)
 
-        grouped_inds = zip_longest(*(iter(inds),) * 50)
         # Combine blocks
-        grouped_combos = await get_runtime().map(self.create_configs, grouped_inds)
+        grouped_combos: list[list[list[CircuitGate]]] = await get_runtime().map(self.create_configs, arr_split)
 
         # print(f"Created {len(all_combos)} Configs", flush=True)
 
@@ -120,12 +123,14 @@ class SelectFinalEnsemblePass(BasePass):
         probs: list[list[float]] = [[] for _ in block_data]
         pts: list[CircuitPoint] = []
 
-        print("PARSING DATA", flush=True)
-
+        total_solutions = 1
         for i, block in enumerate(block_data):
             pts.append(block['point'])
             psols[i] = block["final_ensemble"]
             probs[i] = block["final_ensemble_probs"]
+            total_solutions *= len(psols[i])
+
+        print("Total FINAL Solutions", total_solutions, flush=True)
 
         return psols, pts, probs
 

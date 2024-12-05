@@ -6,35 +6,41 @@ from typing import Any
 
 import numpy as np
 from scipy.stats import linregress
-from os.path import join, exists
+import csv
+from pathlib import Path
 import pickle
-import time
+
+import itertools
 
 from bqskit.compiler.passdata import PassData
+from bqskit.compiler.basepass import BasePass
 from bqskit.ir.circuit import Circuit
-from bqskit.ir.gates import CNOTGate, VariableUnitaryGate
+from bqskit.ir.gates import CNOTGate
 from bqskit.ir.opt.cost.functions import HilbertSchmidtResidualsGenerator
 from bqskit.ir.opt.cost.generator import CostFunctionGenerator
 from bqskit.passes.search.frontier import Frontier
 from bqskit.passes.search.generator import LayerGenerator
 from bqskit.passes.search.generators.seed import SeedLayerGenerator
-from bqskit.passes.search.generators.simple import SimpleLayerGenerator
 from bqskit.passes.search.heuristic import HeuristicFunction
 from bqskit.passes.search.heuristics import DijkstraHeuristic
-from bqskit.passes.synthesis.synthesis import SynthesisPass
 from bqskit.qis.state.state import StateVector
 from bqskit.qis.state.system import StateSystem
 from bqskit.qis.unitary import UnitaryMatrix
 from bqskit.runtime import get_runtime
 from bqskit.utils.typing import is_integer
 from bqskit.utils.typing import is_real_number
+from bqskit.utils.math import dot_product
+
+from util import normalized_frob_cost, normalized_gp_frob_cost
+from util import GenerateProbabilityPass
 
 _logger = logging.getLogger(__name__)
 
 
-class LEAPSynthesisPass2(SynthesisPass):
+class EnsembleLeap(BasePass):
     """
-    A pass implementing the LEAP search synthesis algorithm.
+    A pass implementing the LEAP search synthesis algorithm, but for
+    an ensemble of targets.
 
     References:
         Ethan Smith, Marc G. Davis, Jeffrey M. Larson, Ed Younis,
@@ -50,14 +56,15 @@ class LEAPSynthesisPass2(SynthesisPass):
         layer_generator: LayerGenerator | None = None,
         success_threshold: float = 1e-8,
         cost: CostFunctionGenerator = HilbertSchmidtResidualsGenerator(),
-        max_layer: int | None = 40,
+        max_layer: int | None = None,
         store_partial_solutions: bool = False,
         partials_per_depth: int = 25,
         min_prefix_size: int = 3,
         instantiate_options: dict[str, Any] = {},
         partial_success_threshold: float = 1e-3,
         use_calculated_error: bool = False,
-        max_psols: int = 10,
+        max_psols: int = 4,
+        synthesize_perturbations_only: bool = False,
     ) -> None:
         """
         Construct a search-based synthesis pass.
@@ -169,90 +176,53 @@ class LEAPSynthesisPass2(SynthesisPass):
         self.store_partial_solutions = store_partial_solutions
         self.partials_per_depth = partials_per_depth
         self.max_psols = max_psols
+        self.synthesize_perturbations_only = synthesize_perturbations_only
 
-
-    async def synthesize_circ(
+    async def synthesize_single_circ(
         self,
+        success_threshold: float,
         utry: UnitaryMatrix | StateVector | StateSystem,
         data: PassData,
-        default_circuit: Circuit | None = None,
-        frontier: Frontier | None = None,
-        save_data_file: str | None = None
     ) -> Circuit:
         """Synthesize `utry`, see :class:`SynthesisPass` for more."""
         # Initialize run-dependent options
         instantiate_options = self.instantiate_options.copy()
-
-        if self.use_calculated_error:
-            # use sqrt
-            factor = data["error_percentage_allocated"]
-            # factor = data
-            success_threshold = self.success_threshold * factor
-            partial_success_threshold = self.partial_success_threshold * factor
-            # print("New Success Threshold", success_threshold, "New Partial Success Threshold", partial_success_threshold)
-        else:
-            success_threshold = self.success_threshold
-            partial_success_threshold = self.partial_success_threshold
-       
-       # Seed the PRNG
-        instantiate_options['ftol'] = partial_success_threshold
+        instantiate_options['ftol'] = success_threshold
+        
+        # Seed the PRNG
         if 'seed' not in instantiate_options:
             instantiate_options['seed'] = data.seed
 
-        block_id = f"Block {data.get('super_block_num', -1)}_{data.get('block_num', -1)}:"
-        print(f"{block_id} Partial Success Threshold: ", partial_success_threshold, flush=True)
-        print(f"{block_id} Gate Counts: ", default_circuit.gate_counts, flush=True)
         # Get layer generator for search
         layer_gen = self._get_layer_gen(data)
 
-        if frontier is None:
-            # Begin the search with an initial layer
-            frontier = Frontier(utry, self.heuristic_function)
-            initial_layer = layer_gen.gen_initial_layer(utry, data)
-            initial_layer.instantiate(utry, **instantiate_options)
+        # Begin the search with an initial layer
+        frontier = Frontier(utry, self.heuristic_function)
+        initial_layer = layer_gen.gen_initial_layer(utry, data)
+        initial_layer.instantiate(utry, **instantiate_options)
 
-            frontier.add(initial_layer, 0)
+        frontier.add(initial_layer, 0)
 
-            # Track best circuit, initially the initial layer
-            best_dist = self.cost.calc_cost(initial_layer, utry)
-            best_circ = initial_layer
-            best_layer = 0
-            best_dists = [best_dist]
-            best_layers = [0]
-            last_prefix_layer = 0
+        # Track best circuit, initially the initial layer
+        best_dist = self.cost.calc_cost(initial_layer, utry)
+        best_circ = initial_layer
+        best_layer = 0
+        best_dists = [best_dist]
+        best_layers = [0]
+        last_prefix_layer = 0
 
-            # Track partial solutions
-            scan_sols: list[tuple[Circuit, float]] = []
+        # Track partial solutions
+        scan_sols: list[tuple[Circuit, float]] = []
 
-            _logger.debug(f'Search started, initial layer has cost: {best_dist}.')
+        _logger.debug(f'Search started, initial layer has cost: {best_dist}.')
 
-            # Evalute initial layer
-            if best_dist < success_threshold:
-                _logger.debug('Successful synthesis.')
-                scan_sols.append((initial_layer.copy(), best_dist))
-                scan_sols.append((default_circuit.copy(), 0))
-                data['scan_sols'] = scan_sols
-                if save_data_file is not None:
-                    # Dump data and circuit with empty Frontier
-                    data["leap_finished"] = True
-                    pickle.dump(data, open(save_data_file, "wb"))
-                return initial_layer
-            
-        else:
-            best_dist = data['best_dist']
-            best_circ = data['best_circ']
-            best_layer = data['best_layer']
-            best_dists = data['best_dists']
-            best_layers = data['best_layers']
-            last_prefix_layer = data['last_prefix_layer']
-            scan_sols = data['scan_sols']
-
-        default_count = default_circuit.count(CNOTGate())
-        max_layer = min(self.max_layer, default_count + 2)
+        # Evalute initial layer
+        if best_dist < success_threshold:
+            _logger.debug('Successful synthesis.')
+            return initial_layer
 
         # Main loop
         step = 0
-
         while not frontier.empty():
             # print("CHECKPOINTING!", best_layer, data["block_num"])
             # Save all data
@@ -264,22 +234,15 @@ class LEAPSynthesisPass2(SynthesisPass):
             data["best_layers"] = best_layers
             data["last_prefix_layer"] = last_prefix_layer
             data["scan_sols"] = scan_sols
-            step += 1
-            if save_data_file is not None and step % 20 == 0:
-                # Dump data and circuit
-                pickle.dump(data, open(save_data_file, "wb"))
             
             top_circuit, layer = frontier.pop()
-
-            # if block_num == 0:
-            #     print(f"Block {block_id}: Layer {layer} with gate count: {top_circuit.count(CNOTGate())}", flush=True)
 
             # Generate successors
             successors = layer_gen.gen_successors(top_circuit, data)
 
             if len(successors) == 0:
                 continue
-        
+
             # Instantiate successors
             circuits: list[Circuit] = await get_runtime().map(
                 Circuit.instantiate,
@@ -291,24 +254,16 @@ class LEAPSynthesisPass2(SynthesisPass):
             # Evaluate successors
             for circuit in circuits:
                 dist = self.cost.calc_cost(circuit, utry)
-                if dist < partial_success_threshold:
-                    # print(f"{block_id} Partial Success at layer {layer + 1} with cost: {dist:.12e}", flush=True)
-                    scan_sols.append((circuit.copy(), dist))
-                    data['scan_sols'] = scan_sols
-                    if len(scan_sols) >= self.max_psols:
-                        scan_sols.append((default_circuit.copy(), 0))
-                        data['scan_sols'] = scan_sols
-                        # Save data and circuit
-                        if save_data_file is not None:
-                            data["leap_finished"] = True
-                            pickle.dump(data, open(save_data_file, "wb"))
-                        return
 
-                if self.check_new_best(layer + 1, dist, best_layer, best_dist, partial_success_threshold):
+                if self.store_partial_solutions:
+                    if dist < success_threshold:
+                        return circuit
+                        
+                if self.check_new_best(layer + 1, dist, best_layer, best_dist, success_threshold):
                     plural = '' if layer == 0 else 's'
                     _logger.debug(
-                        f'{block_id} New best circuit found with {layer + 1} layer{plural}'
-                        f' and cost: {dist:.12e}.', flush=True
+                        f'New best circuit found with {layer + 1} layer{plural}'
+                        f' and cost: {dist:.12e}.',
                     )
                     best_dist = dist
                     best_circ = circuit
@@ -324,20 +279,138 @@ class LEAPSynthesisPass2(SynthesisPass):
                         _logger.debug(f'Prefix formed at {layer + 1} layers.')
                         last_prefix_layer = layer + 1
                         frontier.clear()
-                        if layer + 1 < max_layer:
+                        if self.max_layer is None or layer + 1 < self.max_layer:
                             frontier.add(circuit, layer + 1)
 
-                if layer + 1 < max_layer:
+                if self.max_layer is None or layer + 1 < self.max_layer:
                     frontier.add(circuit, layer + 1)
 
-        if self.store_partial_solutions:
-            scan_sols.append((default_circuit.copy(), 0))
-            data['scan_sols'] = scan_sols
+        print(f"Reached Maximum Layers and found {len(scan_sols)} partial solutions", flush=True)
 
-        # Save data and circuit
-        if save_data_file is not None:
-            data["leap_finished"] = True
-            pickle.dump(data, open(save_data_file, "wb"))
+        return None
+
+    async def synthesize_circ(
+        self,
+        utry: UnitaryMatrix | StateVector | StateSystem,
+        data: PassData,
+    ) -> list[tuple[Circuit, float]]:
+        """Synthesize `utry`, see :class:`SynthesisPass` for more."""
+        # Initialize run-dependent options
+        instantiate_options = self.instantiate_options.copy()
+        if self.use_calculated_error:
+            # use sqrt
+            factor = np.sqrt(data["error_percentage_allocated"])
+            success_threshold = self.success_threshold * factor
+        else:
+            success_threshold = self.success_threshold
+        
+        instantiate_options['ftol'] = success_threshold
+
+        # Seed the PRNG
+        if 'seed' not in instantiate_options:
+            instantiate_options['seed'] = data.seed
+
+        # Get layer generator for search
+        layer_gen = self._get_layer_gen(data)
+
+        # Begin the search with an initial layer
+        frontier = Frontier(utry, self.heuristic_function)
+        initial_layer = layer_gen.gen_initial_layer(utry, data)
+        initial_layer.instantiate(utry, **instantiate_options)
+
+        frontier.add(initial_layer, 0)
+
+        # Track best circuit, initially the initial layer
+        best_dist = self.cost.calc_cost(initial_layer, utry)
+        best_circ = initial_layer
+        best_layer = 0
+        best_dists = [best_dist]
+        best_layers = [0]
+        last_prefix_layer = 0
+
+        # Track partial solutions
+        scan_sols: list[tuple[Circuit, float]] = []
+
+        _logger.debug(f'Search started, initial layer has cost: {best_dist}.')
+
+        # Evalute initial layer
+        if best_dist < success_threshold:
+            _logger.debug('Successful synthesis.')
+            scan_sols.append((initial_layer.copy(), best_dist))
+        # Main loop
+        step = 0
+        while not frontier.empty():
+            # print("CHECKPOINTING!", best_layer, data["block_num"])
+            # Save all data
+            data['frontier'] = frontier
+            data["best_dist"] = best_dist
+            data["best_dists"] = best_dists
+            data["best_circ"] = best_circ
+            data["best_layer"] = best_layer
+            data["best_layers"] = best_layers
+            data["last_prefix_layer"] = last_prefix_layer
+            data["scan_sols"] = scan_sols
+            step += 1
+            # if save_data_file is not None and step % 10 == 0:
+                # Dump data and circuit
+                # pickle.dump(data, open(save_data_file, "wb"))
+            
+            top_circuit, layer = frontier.pop()
+
+            # Generate successors
+            successors = layer_gen.gen_successors(top_circuit, data)
+
+            if len(successors) == 0:
+                continue
+
+            # Instantiate successors
+            circuits: list[Circuit] = await get_runtime().map(
+                Circuit.instantiate,
+                successors,
+                target=utry,
+                **instantiate_options,
+            )
+
+            # circuits = [c.instantiate(utry, **instantiate_options) for c in successors]
+
+            # Evaluate successors
+            for circuit in circuits:
+                dist = self.cost.calc_cost(circuit, utry)
+
+                if self.store_partial_solutions:
+                    if dist < success_threshold:
+                        scan_sols.append((circuit.copy(), dist))
+                        if len(scan_sols) >= self.max_psols:
+                            return scan_sols
+                        
+                if self.check_new_best(layer + 1, dist, best_layer, best_dist, success_threshold):
+                    plural = '' if layer == 0 else 's'
+                    _logger.debug(
+                        f'New best circuit found with {layer + 1} layer{plural}'
+                        f' and cost: {dist:.12e}.',
+                    )
+                    best_dist = dist
+                    best_circ = circuit
+                    best_layer = layer + 1
+
+                    if self.check_leap_condition(
+                        layer + 1,
+                        best_dist,
+                        best_layers,
+                        best_dists,
+                        last_prefix_layer,
+                    ):
+                        _logger.debug(f'Prefix formed at {layer + 1} layers.')
+                        last_prefix_layer = layer + 1
+                        frontier.clear()
+                        if self.max_layer is None or layer + 1 < self.max_layer:
+                            frontier.add(circuit, layer + 1)
+
+                if self.max_layer is None or layer + 1 < self.max_layer:
+                    frontier.add(circuit, layer + 1)
+
+        print(f"Reached Maximum Layers and found {len(scan_sols)} partial solutions", flush=True)
+        return scan_sols
 
     def check_new_best(
         self,
@@ -432,7 +505,6 @@ class LEAPSynthesisPass2(SynthesisPass):
         wrap the previously selected layer generator.
         """
         # TODO: Deduplicate this code with qsearch synthesis
-        # layer_gen = SimpleLayerGenerator(CNOTGate(), single_qudit_gate_1=VariableUnitaryGate(1))
         layer_gen = self.layer_gen or data.gate_set.build_mq_layer_generator()
 
         # Priority given to seeded synthesis
@@ -441,26 +513,108 @@ class LEAPSynthesisPass2(SynthesisPass):
 
         return layer_gen
 
+    def save_csvs(self, all_circ_dists: list[list[tuple[Circuit, float]]], csv_names: list[str], data: PassData, initial_count: int):
+        """Save the data to a CSV file."""
+        for i, circ_dists in enumerate(all_circ_dists):
+            bias = np.mean([sol[0].get_unitary() for sol in circ_dists], axis=0)
+            print("Bias Shape: ", bias.shape, flush=True)
+            initial_mean = np.mean([c for c in data["ensemble_targets"]], axis=0)
+            initial_bias = normalized_frob_cost(initial_mean, data.target)
+            target_dists = [normalized_frob_cost(t, data.target) for t in data["ensemble_targets"]]
+            avg_target_dist = np.mean(target_dists)
+            actual_dists = [normalized_frob_cost(c.get_unitary(), data.target) for c, _ in circ_dists]
+            avg_actual_dist = np.mean(actual_dists)
+            bias_dist = normalized_frob_cost(bias, data.target)
+            ratio = bias_dist / (avg_actual_dist ** 2)
+            actual_counts = [c.count(CNOTGate()) for c, _ in circ_dists]
+
+            save_data_file = data["checkpoint_data_file"]
+            if save_data_file:
+                Path(save_data_file).parent.mkdir(parents=True, exist_ok=True)
+                csv_name = csv_names[i]
+                save_csv_file = save_data_file.replace(".data", f"_{csv_name}.csv")
+                with open(save_csv_file, "w") as f:
+                    writer = csv.writer(f)
+                    writer.writerow(["Ensemble Size", "Hamiltonian Noise Epsilon", 
+                                    "Synthesis Epsilon", "Bias of Delta Vs", "Avg. Actual Distance", 
+                                    "Initial CNOT Count", "Avg. CNOT Count", "Bias", "Ratio"])
+                    writer.writerow([len(circ_dists), avg_target_dist, 
+                                    self.partial_success_threshold, initial_bias,
+                                    avg_actual_dist, initial_count, np.mean(actual_counts), 
+                                    bias_dist, ratio])
+
     async def run(self, circuit: Circuit, data: PassData) -> None:
         """Perform the pass's operation, see :class:`BasePass` for more."""
-        print(f"Starting LEAP for block {data.get('super_block_num', -1)} : {data.get('block_num', -1)}", flush=True)
-        if "leap_finished" in data and data["leap_finished"]:
-            print("LEAP is already finished!", flush=True)
+        if data.get("ensemble_leap_finished", False):
             return
+        
+        futs = []
+        organized_circ_dists: list[tuple[Circuit, float]] = []
+        circ_dists: list[tuple[Circuit, float]] = []
+        # circ_uns: list[list[UnitaryMatrix]] = []
 
-        frontier = None
-        save_data_file = None
-        save_data_file = data.get("checkpoint_data_file", None)
+        block_num = data["block_num"]
+        # out_file = f"ensemble_leap_test_block_{block_num}.txt"
+        # fobj = open(out_file, "w")
+
+        # print ensemble target adjacency matrix
+        adj_matrix = np.zeros((len(data["ensemble_targets"]), len(data["ensemble_targets"])))
+        for i, target in enumerate(data["ensemble_targets"]):
+            for j, target2 in enumerate(data["ensemble_targets"]):
+                adj_matrix[i, j] = normalized_frob_cost(target, target2)
+
+
+        # print("Ensemble Target Adjacency Matrix: ", file=fobj)
+        # np.set_printoptions(precision=3, threshold=np.inf, linewidth=240)
+        # print(adj_matrix, file=fobj)
+
+        all_circ_dists = []
+        if self.synthesize_perturbations_only:
+            csv_names = ["orig", "eps", "eps^2", "eps^2 * 10e-2"]
+            base_circs = [circuit.copy()]
+            epsilons = [self.partial_success_threshold, self.partial_success_threshold ** 2, self.partial_success_threshold ** 2 * 10e-2]
+            other_base_circs = await get_runtime().map(self.synthesize_single_circ, epsilons, utry=data.target, data=data)
+            base_circs.extend(other_base_circs)
+
+            print("Base Counts: ", [c.count(CNOTGate()) for c in base_circs], flush=True)
+            print("Gate Set:", base_circs[-1].gate_counts, )
+
+            if "perturbation_circuits" in data:
+                noise_sols: list[Circuit] = data["perturbation_circuits"]
+            else:
+                noise_sols: list[Circuit] = []
+                all_sols = await get_runtime().map(self.synthesize_circ, data["ensemble_perturbations"], data=data)
+                
+                all_sols: list[tuple[Circuit, float]] = list(itertools.chain(*all_sols))
+                noise_sols = [c for c, _ in all_sols]
+                inverse_sols = [c.get_inverse() for c, _ in all_sols]
+                noise_sols.extend(inverse_sols)
+                data["perturbation_circuits"] = noise_sols
+
+            for base_circ in base_circs:
+                circs = [base_circ + c for c in noise_sols]
+                new_circ_dists = [(c, normalized_frob_cost(c.get_unitary(), data.target)) for c in circs]
+                organized_circ_dists.append(new_circ_dists)
+                all_circ_dists.append(new_circ_dists)
+        else:
+            csv_names = [""]
+            solutions = await get_runtime().map(self.synthesize_circ, data["ensemble_targets"], data=data)
+            circ_dists = list(itertools.chain(*solutions))
+            organized_circ_dists = solutions
+            all_circ_dists.append(circ_dists)
+
+        data["scan_sols"] = all_circ_dists[0]
+        data["organized_scan_sols"] = organized_circ_dists
+
+        # print("Total Number of Circuits: ", len(circ_dists), " for Block: ", data["block_num"], flush=True)
+
+        initial_count = circuit.count(CNOTGate())
+        self.save_csvs(all_circ_dists, csv_names, data, initial_count)
+
+        save_data_file = data["checkpoint_data_file"]
         if save_data_file:
-            assert(exists(save_data_file))
-            frontier: Frontier | None = data.get('frontier', None)
-            leap_finished = data.get('leap_finished', False)
-            _logger.debug(f'Loading data from {save_data_file}')
-            if frontier is not None:
-                _logger.debug(f'Frontier is empty: {frontier.empty()}')
-            if leap_finished:
-                _logger.debug('Block is already finished!')
-                return
-            data['leap_finished'] = False
-    
-        await self.synthesize_circ(data.target, data, default_circuit=circuit, frontier=frontier, save_data_file=save_data_file)
+            Path(save_data_file).parent.mkdir(parents=True, exist_ok=True)
+            data["ensemble_leap_finished"] = True
+            pickle.dump(data, open(save_data_file, "wb"))
+
+                

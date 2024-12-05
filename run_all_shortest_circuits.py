@@ -9,7 +9,7 @@ header = """#!/bin/bash -l
 #SBATCH -q regular
 #SBATCH -A m4141_g
 #SBATCH -C gpu
-#SBATCH --time=05:55:00
+#SBATCH --time=7:55:00
 #SBATCH -N 1
 #SBATCH --signal=B:USR1@1
 #SBATCH --output=./slurm_logs/{file}{extra}_{unique_circs}/{circ}/{tol}_tol_block_size_6
@@ -28,6 +28,7 @@ if __name__ == '__main__':
     # file = "get_ensemble_expectations"
     # file = "get_shortest_circuits_new"
     file = "get_ensemble_final"
+    # file = "test_hamiltonian_perturbation"
     # file = "get_ensemble_final_cliffordt"
     # file = "run_simulations_new"
     # file = "get_shortest_circuits_qsearch"
@@ -36,22 +37,24 @@ if __name__ == '__main__':
     # file = "full_compile"
     # circs = ["Heisenberg_7"] #, 
     # circs = ["Heisenberg_7", "TFXY_8"]
-    # circs = ["qft_8", "heisenberg7"]
-    # circs = ["tfxy_6", "qc_binary_5q"] #, "qc_gray_5q", "qc_optimized_5q"]
-    circs = ["vqe_12", "shor_12", "qml_19", "qml_25"]
+    # circs = ["qft_8", "adder9"]
+    # circs = [5, 6]
+    circs = ["tfxy_6", "qc_binary_5q"] #, "qc_gray_5q", "qc_optimized_5q"]
+    # circs = ["vqe_12", "shor_12", "qml_19", "qml_25"]
     circs.extend(["qae13"])
-    circs.extend([f"qft_{i}" for i in range(12, 25, 4)])
+    circs.extend(["mult8", "qpe8"])
+    # circs.extend([f"qft_{i}" for i in range(12, 25, 4)])
     # circs.extend([f"JWCirc_{i}" for i in range(1, 4, 2)])
     # circs = ["qae13"]
     # circs = ["hubbard_4"]
     # circs =  ["shor_12", "qft_10", "vqe_12"]
     # tols = range(1, 7)
-    tols = [1, 2, 3]
+    tols = [3]
     # tols = [6]
-    unique_circss = [100] #, 5, 20, 100, 1000, 10000]
+    unique_circss = [128] #, 5, 20, 100, 1000, 10000]
     # extra = "cliffordt"
     # extra = "_clifft"
-    extra = "_calc_bias"
+    extra = "_full_run"
     for circ in circs:
         for timestep in [0]:
             for tol in tols:

@@ -58,6 +58,7 @@ class FullBlockZXZPass(BasePass):
         start_from_left: bool = True,
         tree_depth: int = 0,
         perform_extract: bool = True,
+        extract_epsilon: float = 1e-5,
         instantiate_options: dict[str, Any] = {},
     ) -> None:
         """
@@ -99,7 +100,9 @@ class FullBlockZXZPass(BasePass):
             )
         self.bzxz = BlockZXZPass(min_qudit_size=min_qudit_size)
         self.mgd = MGDPass()
-        self.diag = ExtractDiagonalPass(qudit_size=min_qudit_size)
+        if perform_extract:
+            self.diag = ExtractDiagonalPass(qudit_size=min_qudit_size,
+                                        success_threshold=extract_epsilon)
 
     async def run(self, circuit: Circuit, data: PassData) -> None:
         """
@@ -250,7 +253,7 @@ class BlockZXZPass(BasePass):
         # multiply by -2.
         d_params: list[float] = list(np.angle(d) * -2)
 
-        return UnitaryMatrix(V), d_params, UnitaryMatrix(W)
+        return UnitaryMatrix(V, check_arguments=False), d_params, UnitaryMatrix(W, check_arguments=False)
 
     @staticmethod
     def zxz(orig_u: UnitaryMatrix) -> Circuit:
