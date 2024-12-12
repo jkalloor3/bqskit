@@ -4,6 +4,7 @@ from __future__ import annotations
 import logging
 from os.path import exists, join
 from os import mkdir
+import numpy as np
 import pickle
 from typing import Any
 from typing import Callable
@@ -110,16 +111,20 @@ class EnsembleScanningGateRemovalPass(BasePass):
         # for ens in ensembles:
         print("Launching Scanning Gate Removal on Ensemble", flush=True)
         all_sols: list[list[tuple[Circuit, float]]] = await get_runtime().map(self.run_circ, ens, data=data)
-        all_sols: list[tuple[Circuit, float]] = list(chain.from_iterable(all_sols))
-        all_sols = sorted(all_sols, key=lambda x: x[0].count(CNOTGate()))
-        print(f"After Scanning, we have {len(all_sols)} solutions", flush=True)
-        data["scan_sols"] = all_sols
+        # Pick 3 solutions from each list into final list
+        final_sols = []
+        for i in range(len(all_sols)):
+            num_sols = min(5, len(all_sols[i]))
+            random_inds = np.random.choice(len(all_sols[i]), num_sols, replace=False)
+            final_sols.extend([all_sols[i][j] for j in random_inds])
+
+        print(f"After Scanning, we have {len(final_sols)} solutions", flush=True)
+        data["scan_sols"] = final_sols
 
         if "checkpoint_dir" in data:
             checkpoint_data_file = data["checkpoint_data_file"]
             data[ "finished_scanning_gate_removal"] = True
             pickle.dump(data, open(checkpoint_data_file, "wb"))
-        
         return
 
 
@@ -149,7 +154,7 @@ class EnsembleScanningGateRemovalPass(BasePass):
 
         # print(f"Initial Gate Counts: {circuit.gate_counts}")
         # print(f"Initial Width: {circuit.num_qudits}", flush=True)
-        ops_removed = 0
+        ops_removed = []
 
         for i, (cycle, op) in enumerate(all_ops):
 
@@ -168,13 +173,13 @@ class EnsembleScanningGateRemovalPass(BasePass):
                 idx_shift -= working_copy.num_cycles
                 cycle -= idx_shift
 
-            working_copy.pop((cycle, op.location[0]))
+            pot_op = working_copy.pop((cycle, op.location[0]))
             working_copy.instantiate(target, **instantiate_options)
 
             working_cost = self.cost(working_copy, target)
             # print(f"Cost after removing {op} is {working_cost}", flush=True)
             if working_cost < success_threshold:
-                ops_removed += 1
+                ops_removed.append(op.gate)
                 all_solutions.append((working_copy.copy(), working_cost))
                 _logger.debug('Successfully removed operation.')
                 circuit_copy = working_copy        

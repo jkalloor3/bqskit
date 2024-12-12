@@ -286,7 +286,7 @@ class ForEachBlockPass(BasePass):
             # Change next subdirectory
             if should_checkpoint:
                 # Update checkpoint dir, circ file, and data file
-                print("Updating Checkpoint Data File", save_data_file, flush=True)
+                # print("Updating Checkpoint Data File", save_data_file, flush=True)
                 block_data["checkpoint_dir"] = join(checkpoint_dir, f'block_{block_num}')
                 block_data["checkpoint_circ_file"] = save_circuit_file
                 block_data["checkpoint_data_file"] = save_data_file
@@ -296,7 +296,7 @@ class ForEachBlockPass(BasePass):
             unfolded_circ = subcircuit.copy()
             unfolded_circ.unfold_all()
             # If skew factor is negative, then we are giving more error budget to blocks with fewer CNOT gates
-            skewed_gates = unfolded_circ.count(self.allocate_error_gate) ** self.allocate_skew_factor
+            skewed_gates = max(unfolded_circ.count(self.allocate_error_gate), 1) ** self.allocate_skew_factor
             block_gates.append(skewed_gates)
 
         # Assign error as percentage of block

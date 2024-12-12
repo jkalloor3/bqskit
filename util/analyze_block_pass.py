@@ -4,22 +4,20 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from bqskit.passes import ForEachBlockPass
 from bqskit.ir import Gate, Circuit
-from bqskit.ir.gates import RZGate, U3Gate, FixedRZGate
+from bqskit.ir.gates import CNOTGate
 from bqskit.compiler.basepass import BasePass
 from bqskit.compiler.passdata import PassData
-from bqskit.ext.supermarq import supermarq_parallelism
-from bqskit.ir.gates import U3Gate, CNOTGate
-from bqskit.runtime import get_runtime
-from itertools import product
 import numpy as np
-
+import matplotlib.pyplot as plt
+import pickle
 
 
 class AnalyzeBlockPass(BasePass):
     def __init__(
         self,
-        gate_to_count: Gate,
+        gate_to_count: Gate = CNOTGate(),
     ) -> None:
         """
         Construct a Instantiate Count pass and then 
@@ -30,11 +28,11 @@ class AnalyzeBlockPass(BasePass):
      
     async def run(
             self, 
-            circuit : Circuit, 
+            circ : Circuit, 
             data: PassData
     ) -> None:
             
-        unitary = circuit.get_unitary()
+        # unitary = circuit.get_unitary()
 
         # Get Unitary structure quantities
         # coeffs = unitary.schmidt_coefficients
@@ -43,14 +41,14 @@ class AnalyzeBlockPass(BasePass):
         # _logger.debug(coeffs)
         # data["entanglement_entropy"] = unitary.entanglement_entropy() 
 
-        # Get circuit structure quantities
-        data["block_depth"] = circuit.depth
-        data["block_twoq_count"] = circuit.count(self.gate_to_count)
+        # Get circuit structure quantitieså
+        circuit = circ.copy()
+        circuit.unfold_all()
+        data["depth"] = circuit.depth
+        data["2q_count"] = circuit.count(self.gate_to_count)
         data["num_gates"] = circuit.num_operations
+        data["free_params"] = circuit.num_params
         data["num_qubits"] = circuit.num_qudits
-        data["parallelism"] = supermarq_parallelism(circuit=circuit)
-
-
 
 class TCountPass(BasePass):
     def __init__(
@@ -90,3 +88,47 @@ class TCountPass(BasePass):
             final_t_count = np.mean(t_counts)
 
         print("T Count", final_t_count)
+
+
+class MakeHistogramPass(BasePass):
+
+    def create_histogram(counts: list[list], labels: list[str], filename: str):
+        fig, axes = plt.subplots(1, len(counts), figsize=(5 * len(counts), 5))
+        axes: list[plt.Axes] = list(axes)
+        for i, count in enumerate(counts):
+            axes[i].hist(count)
+            axes[i].set_ylabel(labels[i])
+        
+        fig.savefig(filename)
+
+
+    async def run(self, circuit: Circuit, data: PassData) -> None:
+        block_data = data[ForEachBlockPass.key][0]
+        counts = []
+        depths = []
+        params = []
+        widths = []
+
+        for i, block in enumerate(block_data):
+            counts.append(block["2q_count"])
+            depths.append(block["depth"])
+            params.append(block["free_params"])
+            widths.append(block["num_qubits"])
+
+        save_data_dir = data["checkpoint_dir"]
+        filename = f"{save_data_dir}/block_data.png"
+
+        data["2q_counts"] = counts
+        data["depths"] = depths
+        data["params"] = params
+        data["widths"] = widths
+
+        save_data_file = data["checkpoint_data_file"]
+        if save_data_file:
+            pickle.dump(data, open(save_data_file, "wb"))
+
+        
+        MakeHistogramPass.create_histogram([counts, depths, params, widths], 
+                                           ["Two Qubit Count", "Depth", 
+                                            "Free Params", "Width"], 
+                                            filename)

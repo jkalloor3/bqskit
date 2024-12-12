@@ -22,7 +22,7 @@ class HamiltonianNoisePass(BasePass):
         self.kmeans = kmeans
 
 
-    def get_perturbations(self, num_qudits: int, epsilon: float) -> list[UnitaryMatrix]:
+    def get_perturbations(num_qudits: int, epsilon: float, ens_size: int) -> list[UnitaryMatrix]:
         perturbations = []
         # Limit to length 2 paulis
         pauli_strings = PauliMatrices.get_pauli_strings(num_qudits, 2)
@@ -35,25 +35,8 @@ class HamiltonianNoisePass(BasePass):
                   pauli in pauli_strings]
         
         all_coeffs = []
-        if not self.kmeans:
-            for i in range(self.ensemble_size // 2):
-                all_coeffs.append(np.random.rand(len(paulis)))
-        else:
-            from sklearn.cluster import KMeans
-            kmeans = KMeans(n_clusters=(self.ensemble_size // 2))
-            initial_coeffs = np.random.rand(5000, len(paulis))
-            utries = [dot_product(coeff, paulis) for coeff in initial_coeffs]
-            utry_vecs = np.array([np.concatenate([np.real(utry.flatten()), 
-                                         np.imag(utry.flatten())]) 
-                                         for utry in utries])
-            # print("Utry Vecs: ", utry_vecs.shape, flush=True)
-            cluster_ids = kmeans.fit_predict(utry_vecs)
-            # print("KMeans Coeffs: ", cluster_ids.shape, flush=True)
-            # Select one coeff from each cluster
-            for i in range(self.ensemble_size // 2):
-                idxs = np.where(cluster_ids == i)[0]
-                idx = np.random.choice(idxs)
-                all_coeffs.append(initial_coeffs[idx])
+        for _ in range(ens_size // 2):
+            all_coeffs.append(np.random.rand(len(paulis)))
             
         for coeff in all_coeffs:
             coeff /= np.linalg.norm(coeff)
@@ -85,7 +68,8 @@ class HamiltonianNoisePass(BasePass):
 
         num_qudits = circuit.num_qudits
         base_un = circuit.get_unitary()
-        perturbations = self.get_perturbations(num_qudits, epsilon=epsilon)
+        perturbations = HamiltonianNoisePass.get_perturbations(num_qudits, epsilon=epsilon, 
+                                               ens_size=self.ensemble_size)
         bias = np.mean(perturbations, axis=0)
         # get norm of bias
         bias_norm = normalized_frob_cost(bias, np.eye(2 ** num_qudits))

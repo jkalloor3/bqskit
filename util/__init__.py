@@ -1,4 +1,4 @@
-from .analyze_block_pass import AnalyzeBlockPass, TCountPass
+from .analyze_block_pass import AnalyzeBlockPass, TCountPass, MakeHistogramPass
 from .second_leap import SecondLEAPSynthesisPass
 from .common import *
 from .stats import *
@@ -20,3 +20,4 @@ from .ensemble_leap import EnsembleLeap
 from .ensemble_zxzxz import EnsembleZXZXZ
 from .ensemble_scan import EnsembleScanningGateRemovalPass
 from .check_ensemble_quality import CheckEnsembleQualityPass
+from .jiggle_scans import JiggleScansPass

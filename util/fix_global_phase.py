@@ -31,5 +31,5 @@ class FixGlobalPhasePass(BasePass):
             new = frob_cost.calc_cost(psol[0], target)
             hs = hs_cost.calc_cost(psol[0], target)
             new_scan_sols.append((psol[0], new))
-            # print("Old cost: ", old, "New cost: ", new, "HS Cost: ", hs, flush=True)
+            print("Old cost: ", old, "New cost: ", new, "HS Cost: ", hs, flush=True)
         data["scan_sols"] = new_scan_sols

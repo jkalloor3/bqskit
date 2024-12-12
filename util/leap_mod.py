@@ -12,7 +12,7 @@ import time
 
 from bqskit.compiler.passdata import PassData
 from bqskit.ir.circuit import Circuit
-from bqskit.ir.gates import CNOTGate, VariableUnitaryGate
+from bqskit.ir.gates import CNOTGate, VariableUnitaryGate, U3Gate
 from bqskit.ir.opt.cost.functions import HilbertSchmidtResidualsGenerator
 from bqskit.ir.opt.cost.generator import CostFunctionGenerator
 from bqskit.passes.search.frontier import Frontier
@@ -21,7 +21,7 @@ from bqskit.passes.search.generators.seed import SeedLayerGenerator
 from bqskit.passes.search.generators.simple import SimpleLayerGenerator
 from bqskit.passes.search.heuristic import HeuristicFunction
 from bqskit.passes.search.heuristics import DijkstraHeuristic
-from bqskit.passes.synthesis.synthesis import SynthesisPass
+from bqskit.compiler.basepass import BasePass
 from bqskit.qis.state.state import StateVector
 from bqskit.qis.state.system import StateSystem
 from bqskit.qis.unitary import UnitaryMatrix
@@ -32,7 +32,7 @@ from bqskit.utils.typing import is_real_number
 _logger = logging.getLogger(__name__)
 
 
-class LEAPSynthesisPass2(SynthesisPass):
+class LEAPSynthesisPass2(BasePass):
     """
     A pass implementing the LEAP search synthesis algorithm.
 
@@ -432,8 +432,8 @@ class LEAPSynthesisPass2(SynthesisPass):
         wrap the previously selected layer generator.
         """
         # TODO: Deduplicate this code with qsearch synthesis
-        # layer_gen = SimpleLayerGenerator(CNOTGate(), single_qudit_gate_1=VariableUnitaryGate(1))
-        layer_gen = self.layer_gen or data.gate_set.build_mq_layer_generator()
+        layer_gen = SimpleLayerGenerator(CNOTGate(), single_qudit_gate_1=U3Gate())
+        # layer_gen = self.layer_gen or data.gate_set.build_mq_layer_generator()
 
         # Priority given to seeded synthesis
         if 'seed_circuits' in data:

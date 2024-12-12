@@ -15,16 +15,19 @@ from bqskit.passes import JiggleEnsemblePass
 from bqskit import enable_logging
 from util import normalized_frob_cost, LEAPSynthesisPass2, SecondLEAPSynthesisPass
 from util import normalized_gp_frob_cost, EnsembleScanningGateRemovalPass
-from util import CheckEnsembleQualityPass, FixGlobalPhasePass
+from util import CheckEnsembleQualityPass, FixGlobalPhasePass, JiggleScansPass
 
 # enable_logging(True)
 
 def get_shortest_circuits(circ_name: str, 
                           circ_file: str, 
                           tol: int, 
-                          num_unique_circs: int = 100) -> list[Circuit]:
+                          num_unique_circs: int = 100,
+                          jiggle_skew: int =1,
+                          ham_perturb: bool = False) -> list[Circuit]:
     circ = Circuit.from_file(circ_file)
     print("Original CNOT Count: ", circ.count(CNOTGate()))
+    print("Jiggle Skew: ", jiggle_skew, flush=True)
     
     # workflow = gpu_workflow(tol, f"{circ_name}_{tol}_{timestep}")
     if tol == 0:
@@ -34,7 +37,7 @@ def get_shortest_circuits(circ_name: str,
 
     extra_err_thresh = err_thresh * 0.01
     small_block_size = 3
-    checkpoint_dir = f"block_checkpoints/{circ_name}_{tol}_{num_unique_circs}/"
+    checkpoint_dir = f"block_checkpoints_mid_jiggle_{jiggle_skew}/{circ_name}_{tol}_{num_unique_circs}/"
 
     good_instantiation_options = {
         'multistarts': 8,
@@ -70,25 +73,27 @@ def get_shortest_circuits(circ_name: str,
     synthesis_pass = LEAPSynthesisPass2(
         store_partial_solutions=True,
         success_threshold = extra_err_thresh,
-        partial_success_threshold=err_thresh,
+        partial_success_threshold=err_thresh / 2,
         instantiate_options=instantiation_options,
         max_layer=14,
-        max_psols=7
+        max_psols=10
     )
 
     second_synthesis_pass = SecondLEAPSynthesisPass(
         success_threshold = extra_err_thresh,
-        partial_success_threshold=err_thresh,
+        partial_success_threshold=err_thresh / 2,
         instantiate_options=instantiation_options,
         max_layer=14,
         max_psols=5
     )
 
-    jiggle_pass = JiggleEnsemblePass(success_threshold=err_thresh, 
-                                  num_circs=1000, 
+    jiggle_pass = JiggleEnsemblePass(success_threshold=err_thresh * 3, 
+                                  num_circs=5000, 
                                   use_ensemble=True,
                                   use_calculated_error=False,
-                                  checkpoint_extra_str="_try1")
+                                  checkpoint_extra_str="_try1",
+                                  jiggle_skew=jiggle_skew,
+                                  do_u3_perturbation=ham_perturb)
     
     scan_pass = EnsembleScanningGateRemovalPass(
         success_threshold=err_thresh,
@@ -101,8 +106,9 @@ def get_shortest_circuits(circ_name: str,
         ForEachBlockPass(
             [
                 synthesis_pass,
+                # JiggleScansPass(success_threshold=err_thresh / 3),
                 second_synthesis_pass,
-                scan_pass,
+                # scan_pass,
                 FixGlobalPhasePass(),
             ],
             allocate_error=True,
@@ -113,12 +119,7 @@ def get_shortest_circuits(circ_name: str,
     ]
     num_workers = 128
     compiler = Compiler(num_workers=num_workers)
-    # target = circ.get_unitary()
-    out_circ, data = compiler.compile(circ, workflow=leap_workflow, request_data=True)
-    # print("Initial Gate Counts: ", circ.gate_counts)
-    # print("Final Gate Counts: ", out_circ.gate_counts)
-    # final_dist = normalized_gp_frob_cost(out_circ.get_unitary(), circ.get_unitary())
-    # print("Final Distance: ", final_dist)
+    compiler.compile(circ, workflow=leap_workflow, request_data=True)
     return
 
 if __name__ == '__main__':
@@ -126,7 +127,9 @@ if __name__ == '__main__':
     block_num = argv[2]
     tol = int(argv[3])
     num_unique_circs = int(argv[4])
+    jiggle_skew = int(argv[5])
+    ham_perturb = bool(int(argv[6])) if len(argv) > 6 else False
     circ_name = f"{circ_name}_{block_num}"
     circ_file = f"good_blocks/{circ_name}.qasm"
     # print("OPT STR", opt_str, opt, argv[5])
-    get_shortest_circuits(circ_name, circ_file, tol, num_unique_circs=num_unique_circs)
+    get_shortest_circuits(circ_name, circ_file, tol, num_unique_circs=num_unique_circs, jiggle_skew=jiggle_skew, ham_perturb=ham_perturb)
