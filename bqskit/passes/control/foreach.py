@@ -373,16 +373,23 @@ class ForEachBlockPass(BasePass):
 
     def cleanup_checkpoint_files(self, checkpoint_dir: str, num_blocks: int):
         # Remove checkpoint files
-        print("Removing checkpoint files", flush=True)
+        print("Removing checkpoint folders", flush=True)
         num_digits = len(str(num_blocks))
         for i in range(num_blocks):
             block_num = str(i).zfill(num_digits)
-            save_data_file = join(checkpoint_dir, f'block_{block_num}.data')
-            save_circuit_file = join(checkpoint_dir, f'block_{block_num}.pickle')
-            print("Removing", save_data_file, flush=True)
-            print("Removing", save_circuit_file, flush=True)
-            Path(save_data_file).unlink(missing_ok=True)
-            Path(save_circuit_file).unlink(missing_ok=True)
+            folder_path = join(checkpoint_dir, f'block_{block_num}')
+            # Clean up checkpoint folder
+            if exists(folder_path):
+                print("Removing", folder_path, flush=True)
+                # Remove all sub-files
+                for file in listdir(folder_path):
+                    file_path = join(folder_path, file)
+                    if file.endswith(".png"):
+                        continue
+                    Path(file_path).unlink()
+                # Remove folder if possible
+                if len(listdir(folder_path)) == 0:
+                    Path(folder_path).rmdir()
             time.sleep(0.3 * num_blocks)
         if exists(checkpoint_dir) and len(listdir(checkpoint_dir)) == 0:
             Path(checkpoint_dir).rmdir()

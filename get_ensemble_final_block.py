@@ -37,7 +37,7 @@ def get_shortest_circuits(circ_name: str,
 
     extra_err_thresh = err_thresh * 0.01
     small_block_size = 3
-    checkpoint_dir = f"block_checkpoints_mid_jiggle_{jiggle_skew}/{circ_name}_{tol}_{num_unique_circs}/"
+    checkpoint_dir = f"block_checkpoints_nisq_{jiggle_skew}/{circ_name}_{tol}_{num_unique_circs}/"
 
     good_instantiation_options = {
         'multistarts': 8,
@@ -87,7 +87,7 @@ def get_shortest_circuits(circ_name: str,
         max_psols=5
     )
 
-    jiggle_pass = JiggleEnsemblePass(success_threshold=err_thresh * 3, 
+    jiggle_pass = JiggleEnsemblePass(success_threshold=err_thresh, 
                                   num_circs=5000, 
                                   use_ensemble=True,
                                   use_calculated_error=False,

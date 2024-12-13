@@ -59,7 +59,8 @@ def get_shortest_circuits(circ_name: str) -> list[Circuit]:
                     ]
                 ),
                 MakeHistogramPass(),
-            ]
+            ],
+            check_checkpoint=True,
         ),
         MakeHistogramPass(),
     ]

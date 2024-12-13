@@ -75,6 +75,8 @@ if __name__ == '__main__':
         # block_nums = [file.split('_')[-1].split('.')[0] for file in circ_files]
         # print(circ_files)
         # print(block_nums)
+        if circ.startswith("qft") or circ.startswith("vqe") or circ.startswith("qml"):
+            continue
         block_nums = [0]
         for timestep in block_nums:
             for tol in tols:
@@ -83,12 +85,14 @@ if __name__ == '__main__':
                         # utries_file = f"/pscratch/sd/j/jkalloor/bqskit/ensemble_shortest_circuits_{unique_circs}_circ_final_min_post_calc_bias/{circ}/{tol}/{circ}.pkl"
                         # # log_file = f"/pscratch/sd/j/jkalloor/bqskit/slurm_logs/run_simulations_new_post_opt_{unique_circs}/{circ}/{tol}_tol_block_size_8"
                         # # utries_file = f"/pscratch/sd/j/jkalloor/bqskit/ensemble_shortest_circuits_{unique_circs}_circ_cliff_t_final/{circ}/{tol}/{circ}.pkl"
+                        hist_file = f"/pscratch/sd/j/jkalloor/bqskit/block_histograms/{circ}_8_3/block_data.png"
 
                         # if os.path.exists(utries_file):
                         #     continue
 
-                        # if os.path.exists(log_file):
-                        #     continue
+
+                        if os.path.exists(hist_file):
+                            continue
 
                         # to_write = open(file_name, 'w')
                         # to_write.write(header.format(file=file, circ=circ, tol=tol, timestep=timestep, extra=extra, unique_circs=unique_circs, jiggle_skew=jiggle_skew))

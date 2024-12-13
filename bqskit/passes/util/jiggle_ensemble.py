@@ -135,26 +135,24 @@ class  JiggleEnsemblePass(BasePass):
             new_circ_1.append_gate(GlobalPhaseGate(1, global_phase=global_phase_correction), (0,))
             global_phase_correction = target.get_target_correction_factor(new_circ_2.get_unitary())
             new_circ_2.append_gate(GlobalPhaseGate(1, global_phase=global_phase_correction), (0,))
+            
             # print("Orig Dist: ", dist, " New Cost: ", new_cost, " Threshold: ", self.success_threshold, flush=True)
             dist_1 = self.cost.calc_cost(new_circ_1, target)
             dist_2 = self.cost.calc_cost(new_circ_2, target)
-            if dist_1 < self.success_threshold:
-                final_circs.append((new_circ_1, dist_1))
-            if dist_2 < self.success_threshold:
-                final_circs.append((new_circ_2, dist_2))
+
+            new_c_1 = self.jiggle_params(full_params_1, new_circ_1, dist_1, target)
+            new_c_2 = self.jiggle_params(full_params_2, new_circ_2, dist_2, target)
+            final_circs.append(new_c_1)
+            final_circs.append(new_c_2)
         return final_circs
 
 
-    async def single_jiggle(self, params: list[float], circ: Circuit, dist: float, target: UnitaryMatrix, num: int) -> list[tuple[Circuit, float]]:
-        # print("Starting Jiggle", flush=True)
-        # start = time.time()
-        circs = []
-        for _ in range(num):
+    def jiggle_params(self, params: list[float], circ: Circuit, dist: float, target: UnitaryMatrix) -> tuple[Circuit, float]:
             cost_fn = self.cost.gen_cost(circ.copy(), target)
             trials = 0
             best_params = np.array(params.copy(), dtype=np.float64)
             extra_diff = max(self.success_threshold - dist, self.success_threshold / len(params))
-            while trials < 20:
+            while trials < 10:
                 trial_costs = []
                 if len(params) < 10:
                     num_params_to_jiggle = ceil(len(params) / 2)
@@ -163,9 +161,9 @@ class  JiggleEnsemblePass(BasePass):
                     # num_params_to_jiggle = min(num_params_to_jiggle, len(params))
                 # num_params_to_jiggle = len(params)
                 # Vary probability proportional to param location
-                # p = (np.arange(len(params)) + 1) ** self.jiggle_skew
-                # p = p / np.sum(p)
-                params_to_jiggle = np.random.choice(list(range(len(params))), num_params_to_jiggle, replace=False)
+                p = (np.arange(len(params)) + 1) ** self.jiggle_skew
+                p = p / np.sum(p)
+                params_to_jiggle = np.random.choice(list(range(len(params))), num_params_to_jiggle, replace=False, p=p)
                 jiggle_amounts = np.random.uniform(-1 * extra_diff, extra_diff, num_params_to_jiggle)
                 # print("jiggle_amounts", jiggle_amounts, flush=True)
                 next_params = best_params.copy()
@@ -186,9 +184,17 @@ class  JiggleEnsemblePass(BasePass):
             circ_copy = circ.copy()
             circ_copy.set_params(best_params)
             circ_cost = cost_fn.get_cost(best_params)
-            # circ_cost = frob_cost.calc_cost(circ_copy, target)
-            # circ_cost = normalized_frob_cost(circ_copy.get_unitary(), target)
-            circs.append((circ_copy, circ_cost))
+
+            return circ_copy, circ_cost
+
+    async def single_jiggle(self, params: list[float], circ: Circuit, dist: float, target: UnitaryMatrix, num: int) -> list[tuple[Circuit, float]]:
+        # print("Starting Jiggle", flush=True)
+        # start = time.time()
+        circs = []
+        for _ in range(num):
+            c = self.jiggle_params(params, circ, dist, target)
+            if c:
+                circs.append(c)
         JiggleEnsemblePass.num_jiggles += 1
         return circs
 

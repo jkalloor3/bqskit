@@ -19,10 +19,10 @@ class CheckEnsembleQualityPass(BasePass):
         self.count_t = count_t
         self.csv_name = csv_name
         self.ensemble_names = ["Least CNOTs", "Medium CNOTs", "Valid CNOTs"]
-        self.gate_title = "Avg. T Count" if count_t else "Avg. CNOT Count"
+        self.gate_title = "T Count" if count_t else "CNOT Count"
         self.gate_func = lambda x: x.count(TGate()) + x.count(TdgGate()) + x.num_params * 60 if count_t else x.count(CNOTGate())
     
-    async def get_ensemble_data(self, ens: list[tuple[Circuit, float]], target: UnitaryMatrix) -> dict[str, Any]:
+    async def get_ensemble_data(self, ens: list[tuple[Circuit, float]], target: UnitaryMatrix, orig_count: int) -> dict[str, Any]:
         ensemble_data = {}
         unitaries: list[UnitaryMatrix] = [x[0].get_unitary() for x in ens]
         norm_e1s = [normalized_frob_cost(un, target) for un in unitaries]
@@ -36,7 +36,8 @@ class CheckEnsembleQualityPass(BasePass):
         final_counts = [self.gate_func(circ) for circ, _ in ens]
         ensemble_data["Ensemble Generation Method"] = ""
         ensemble_data["Num Circs"] = len(ens)
-        ensemble_data[f"{self.gate_title}"] = np.mean(final_counts)
+        ensemble_data[f"Orig. {self.gate_title}"] = orig_count
+        ensemble_data[f"Avg. {self.gate_title}"] = np.mean(final_counts)
         ensemble_data["Norm. Epsilon"] = norm_e1
         ensemble_data["Epsilon"] = frob_e1
         ensemble_data["Norm. Bias"] = norm_bias
@@ -61,7 +62,7 @@ class CheckEnsembleQualityPass(BasePass):
             self.ensemble_names.append(f"Random Circuits #{i-2}")
         
         target = data.target
-        csv_dict: list[dict[str, Any]] = await get_runtime().map(self.get_ensemble_data, ensemble, target=target)
+        csv_dict: list[dict[str, Any]] = await get_runtime().map(self.get_ensemble_data, ensemble, target=target, orig_count = self.gate_func(circuit))
         final_ratios = []
         for i in range(len(ensemble)):
             csv_dict[i]["Ensemble Generation Method"] = self.ensemble_names[i]
