@@ -6,7 +6,7 @@ from typing import Any
 
 from bqskit.passes import ForEachBlockPass
 from bqskit.ir import Gate, Circuit
-from bqskit.ir.gates import CNOTGate
+from bqskit.ir.gates import CNOTGate, CircuitGate
 from bqskit.compiler.basepass import BasePass
 from bqskit.compiler.passdata import PassData
 import numpy as np
@@ -90,45 +90,89 @@ class TCountPass(BasePass):
         print("T Count", final_t_count)
 
 
+
+def rem_outliers(points: np.ndarray, thresh=3.5) -> np.ndarray[bool]:
+    """
+    Returns a boolean array with True if points are outliers and False 
+    otherwise.
+
+    Parameters:
+    -----------
+        points : An numobservations by numdimensions array of observations
+        thresh : The modified z-score to use as a threshold. Observations with
+            a modified z-score (based on the median absolute deviation) greater
+            than this value will be classified as outliers.
+
+    Returns:
+    --------
+        mask : A numobservations-length boolean array.
+
+    References:
+    ----------
+        Boris Iglewicz and David Hoaglin (1993), "Volume 16: How to Detect and
+        Handle Outliers", The ASQC Basic References in Quality Control:
+        Statistical Techniques, Edward F. Mykytka, Ph.D., Editor. 
+    """
+    if len(points.shape) == 1:
+        points = points[:,None]
+    median = np.median(points, axis=0)
+    diff = np.sum((points - median)**2, axis=-1)
+    diff = np.sqrt(diff)
+    med_abs_deviation = np.median(diff)
+
+    modified_z_score = 0.6745 * diff / med_abs_deviation
+
+    return modified_z_score <= thresh
+
+from collections import Counter
+
 class MakeHistogramPass(BasePass):
 
-    def create_histogram(counts: list[list], labels: list[str], filename: str):
-        fig, axes = plt.subplots(1, len(counts), figsize=(5 * len(counts), 5))
+    def create_histogram(counts: dict[str, list], filename: str):
+        fig, axes = plt.subplots(1, len(counts.keys()), figsize=(5 * len(counts.keys()), 5))
         axes: list[plt.Axes] = list(axes)
-        for i, count in enumerate(counts):
-            axes[i].hist(count)
-            axes[i].set_ylabel(labels[i])
+        i = 0
+        for label, count in counts.items():
+            filtered = np.array(count)
+            if not (label == "Widths"):
+                filtered = filtered[rem_outliers(filtered)]
+            axes[i].hist(filtered)
+            axes[i].set_ylabel(label)
+            i += 1
         
         fig.savefig(filename)
 
+    def get_block_data(self, block: CircuitGate) -> dict[str, Any]:
+        data = {}
+        circ = block._circuit.copy()
+        circ.unfold_all()
+        data["2q_count"] = circ.count(CNOTGate())
+        data["depth"] = circ.depth
+        data["free_params"] = circ.num_params
+        data["num_qubits"] = circ.num_qudits
+        return data
+
 
     async def run(self, circuit: Circuit, data: PassData) -> None:
-        block_data = data[ForEachBlockPass.key][0]
-        counts = []
-        depths = []
-        params = []
-        widths = []
+        all_data = {}
+        all_data["2Q Count"] = []
+        all_data["Depth"] = []
+        all_data["Free Params"] = []
+        all_data["Widths"] = []
+        for op in circuit:
+            if isinstance(op.gate, CircuitGate):
+                block_data = self.get_block_data(op.gate)
+                all_data["2Q Count"].append(block_data["2q_count"])
+                all_data["Depth"].append(block_data["depth"])
+                all_data["Free Params"].append(block_data["free_params"])
+                all_data["Widths"].append(block_data["num_qubits"])
 
-        for i, block in enumerate(block_data):
-            counts.append(block["2q_count"])
-            depths.append(block["depth"])
-            params.append(block["free_params"])
-            widths.append(block["num_qubits"])
-
-        save_data_dir = data["checkpoint_dir"]
-        filename = f"{save_data_dir}/block_data.png"
-
-        data["2q_counts"] = counts
-        data["depths"] = depths
-        data["params"] = params
-        data["widths"] = widths
-
-        save_data_file = data["checkpoint_data_file"]
+        save_data_file: str = data["checkpoint_data_file"]
+        filename = save_data_file.replace(".data", ".png")
         if save_data_file:
+            data.update(all_data)
             pickle.dump(data, open(save_data_file, "wb"))
 
         
-        MakeHistogramPass.create_histogram([counts, depths, params, widths], 
-                                           ["Two Qubit Count", "Depth", 
-                                            "Free Params", "Width"], 
+        MakeHistogramPass.create_histogram(all_data,
                                             filename)

@@ -10,15 +10,15 @@ header = """#!/bin/bash -l
 #SBATCH -q regular
 #SBATCH -A m4141_g
 #SBATCH -C gpu
-#SBATCH --time=4:55:00
+#SBATCH --time=6:55:00
 #SBATCH -N 1
 #SBATCH --signal=B:USR1@1
 #SBATCH --output=./slurm_logs/{file}{extra}_{unique_circs}/{circ}/{tol}_tol_block_size_6_{jiggle_skew}
 
 module load conda
 conda activate /global/common/software/m4141/ensemble_env_2
-echo "python {file}.py {circ} {timestep} {tol} {unique_circs} {jiggle_skew}"
-python {file}.py {circ} {timestep} {tol} {unique_circs} {jiggle_skew}
+echo "python {file}.py {circ} {timestep} {tol} {unique_circs} {jiggle_skew} 1"
+python {file}.py {circ} {timestep} {tol} {unique_circs} {jiggle_skew} 1
 """
 
 if __name__ == '__main__':
@@ -29,7 +29,8 @@ if __name__ == '__main__':
     # file = "get_ensemble_expectations"
     # file = "get_shortest_circuits_new"
     # file = "get_ensemble_final_block"
-    file = "create_block_data_hist"
+    file = "get_ensemble_final_block_cliffordt"
+    # file = "create_block_data_hist"
     
     # Get all circs
     dir_1 = "ensemble_benchmarks"
@@ -64,20 +65,22 @@ if __name__ == '__main__':
     # tols = range(1, 7)
     tols = [5]
     # tols = [6]
-    unique_circss = [500] #, 5, 20, 100, 1000, 10000]
+    unique_circss = [250] #, 5, 20, 100, 1000, 10000]
+    # jiggle_skews = [0, 2]
     jiggle_skews = [0]
     # extra = "cliffordt"
     # extra = "_clifft"
     extra = "_block"
+    skips = ["qft", "qml", "vqe", "shor"]
     for circ in circs:
         # Get all files of form good_blocks/{circ}_{block_num}.qasm
-        # circ_files = glob.glob(f"good_blocks/{circ}_*.qasm")
-        # block_nums = [file.split('_')[-1].split('.')[0] for file in circ_files]
-        # print(circ_files)
+        circ_files = glob.glob(f"good_blocks/{circ}_*.qasm")
+        block_nums = [file.split('_')[-1].split('.')[0] for file in circ_files]
         # print(block_nums)
-        if circ.startswith("qft") or circ.startswith("vqe") or circ.startswith("qml"):
-            continue
-        block_nums = [0]
+        # block_nums = [0]
+        # for skip in skips:
+        #     if circ.startswith(skip):
+        #         block_nums = []
         for timestep in block_nums:
             for tol in tols:
                 for unique_circs in unique_circss:
@@ -85,21 +88,21 @@ if __name__ == '__main__':
                         # utries_file = f"/pscratch/sd/j/jkalloor/bqskit/ensemble_shortest_circuits_{unique_circs}_circ_final_min_post_calc_bias/{circ}/{tol}/{circ}.pkl"
                         # # log_file = f"/pscratch/sd/j/jkalloor/bqskit/slurm_logs/run_simulations_new_post_opt_{unique_circs}/{circ}/{tol}_tol_block_size_8"
                         # # utries_file = f"/pscratch/sd/j/jkalloor/bqskit/ensemble_shortest_circuits_{unique_circs}_circ_cliff_t_final/{circ}/{tol}/{circ}.pkl"
-                        hist_file = f"/pscratch/sd/j/jkalloor/bqskit/block_histograms/{circ}_8_3/block_data.png"
+                        # hist_file = f"/pscratch/sd/j/jkalloor/bqskit/block_histograms/{circ}_8_3/data.png"
 
-                        # if os.path.exists(utries_file):
+                        # # if os.path.exists(utries_file):
+                        # #     continue
+
+
+                        # if os.path.exists(hist_file):
                         #     continue
 
-
-                        if os.path.exists(hist_file):
-                            continue
-
-                        # to_write = open(file_name, 'w')
-                        # to_write.write(header.format(file=file, circ=circ, tol=tol, timestep=timestep, extra=extra, unique_circs=unique_circs, jiggle_skew=jiggle_skew))
-                        # to_write.close()
-                        print(f"python {file}.py {circ} {timestep} {tol} {unique_circs} {jiggle_skew}")
-                        os.system(f"python {file}.py {circ} {timestep} {tol} {unique_circs} {jiggle_skew}")
+                        to_write = open(file_name, 'w')
+                        to_write.write(header.format(file=file, circ=circ, tol=tol, timestep=timestep, extra=extra, unique_circs=unique_circs, jiggle_skew=jiggle_skew))
+                        to_write.close()
+                        print(f"python {file}.py {circ} {timestep} {tol} {unique_circs} {jiggle_skew} 1")
+                        # os.system(f"python {file}.py {circ} {timestep} {tol} {unique_circs} {jiggle_skew}")
                         time.sleep(2*sleep_time)
-                        # output = subprocess.check_output(['sbatch' , file_name])
-                        # print(output)
-                        # time.sleep(sleep_time)
+                        output = subprocess.check_output(['sbatch' , file_name])
+                        print(output)
+                        time.sleep(sleep_time)
