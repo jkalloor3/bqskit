@@ -48,26 +48,19 @@ class ZXZXZDecomposition(BasePass):
         self.always_use_rx = always_use_rx
         self.always_use_u1 = always_use_u1
 
-    async def run(self, circuit: Circuit, data: PassData) -> None:
-        """Perform the pass's operation, see :class:`BasePass` for more."""
+    @staticmethod
+    def run_zxzxz_decomp(circuit: Circuit, 
+                         use_u1: bool = False,
+                         use_rx: bool = False) -> Circuit:
+        """
+        Convert a single-qubit circuit to ZXZXZ sequence.
 
-        if circuit.num_qudits != 1:
-            raise ValueError(
-                'Cannot convert multi-qudit circuit into ZXZXZ sequence.',
-            )
+        Args:
+            circuit (Circuit): The circuit to convert.
 
-        if circuit.radixes[0] != 2:
-            raise ValueError(
-                'Cannot convert non-qubit circuit into ZXZXZ sequence.',
-            )
-
-        # Decide on RX or SX
-        no_sx = RXGate() in data.gate_set and SqrtXGate() not in data.gate_set
-        use_rx = self.always_use_rx or no_sx
-
-        # Decide on RZ or U1
-        no_rz = U1Gate() in data.gate_set and RZGate() not in data.gate_set
-        use_u1 = self.always_use_u1 or no_rz
+        Returns:
+            Circuit: The ZXZXZ sequence.
+        """
 
         utry = circuit.get_unitary()
 
@@ -110,5 +103,30 @@ class ZXZXZDecomposition(BasePass):
             new_circuit.append_gate(U1Gate(), 0, [p])
         else:
             new_circuit.append_gate(RZGate(), 0, [p])
+
+        return new_circuit
+
+    async def run(self, circuit: Circuit, data: PassData) -> None:
+        """Perform the pass's operation, see :class:`BasePass` for more."""
+
+        if circuit.num_qudits != 1:
+            raise ValueError(
+                'Cannot convert multi-qudit circuit into ZXZXZ sequence.',
+            )
+
+        if circuit.radixes[0] != 2:
+            raise ValueError(
+                'Cannot convert non-qubit circuit into ZXZXZ sequence.',
+            )
+
+        # Decide on RX or SX
+        no_sx = RXGate() in data.gate_set and SqrtXGate() not in data.gate_set
+        use_rx = self.always_use_rx or no_sx
+
+        # Decide on RZ or U1
+        no_rz = U1Gate() in data.gate_set and RZGate() not in data.gate_set
+        use_u1 = self.always_use_u1 or no_rz
+
+        new_circuit = ZXZXZDecomposition.run_zxzxz_decomp(circuit, use_u1, use_rx)
 
         circuit.become(new_circuit)

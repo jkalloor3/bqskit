@@ -1,4 +1,4 @@
-from .analyze_block_pass import AnalyzeBlockPass
+from .analyze_block_pass import AnalyzeBlockPass, TCountPass, MakeHistogramPass
 from .second_leap import SecondLEAPSynthesisPass
 from .common import *
 from .stats import *
@@ -10,3 +10,14 @@ from .analyze_distribution import AnalyzeDistributionPass
 from .generate_probs_pass import GenerateProbabilityPass
 from .select_ensemble_pass import SelectFinalEnsemblePass
 from .jiggle_circ_pass import JiggleCircPass, GetErrorsPass
+from .convert_to_cliff import ConvertToZXZXZ, ConvertToZXZXZSimple
+from .leap_mod import LEAPSynthesisPass2
+from .qsearch_mod import QSearchSynthesisPass2
+from .distance import *
+from .write_qasm import WriteQasmPass, ReplaceWithQasmPass
+from .perturb_hamiltonian import HamiltonianNoisePass
+from .ensemble_leap import EnsembleLeap
+from .ensemble_zxzxz import EnsembleZXZXZ
+from .ensemble_scan import EnsembleScanningGateRemovalPass
+from .check_ensemble_quality import CheckEnsembleQualityPass
+from .jiggle_scans import JiggleScansPass

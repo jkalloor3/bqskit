@@ -52,12 +52,14 @@ def get_covar_elem(matrices):
 if __name__ == '__main__':
     global target
 
-    circ_name = argv[1]
-    timestep = int(argv[2])
-    tol = int(argv[3])
+    # circ_name = argv[1]
+    # timestep = int(argv[2])
+    skew = int(argv[1])
     np.set_printoptions(precision=2, threshold=np.inf, linewidth=np.inf)
 
-    circ = load_circuit(circ_name)
+    # circ = load_circuit(circ_name)
+    # target = circ.get_unitary()
+    circ = Circuit.from_file("/pscratch/sd/j/jkalloor/bqskit/good_blocks/tfim_3_0.qasm")
     target = circ.get_unitary()
 
     # Store approximate solutions
@@ -67,9 +69,12 @@ if __name__ == '__main__':
 
     min_tol = 1
 
-    circuits = load_compiled_circuits(circ_name, tol, timestep)[:1000]
+    # circuits = load_compiled_circuits(circ_name, tol, timestep)[:1000]
+    data = pickle.load(open(f"/pscratch/sd/j/jkalloor/bqskit/block_checkpoints_jiggle_{skew}/tfim_3_0_5_250/data.data", "rb"))
+    print(data.keys())
+    circuits: list[Circuit] = data["ensemble"][0]
     # Get differences
-    all_utries = [c.get_unitary() - target for c in circuits]
+    all_utries = [c.get_unitary() - target for c, _ in circuits]
 
     # Now, run PCA on all of the differences to get 2-vectors
     with mp.Pool() as pool:
@@ -92,7 +97,7 @@ if __name__ == '__main__':
     plt.xlabel('Principal Component 1')
     plt.ylabel('Principal Component 2')
     # plt.show()
-    plt.savefig(f"pca_{circ_name}_{timestep}_{tol}.png")
+    plt.savefig(f"pca_tfim_final_skew_{skew}.png")
 
 
 

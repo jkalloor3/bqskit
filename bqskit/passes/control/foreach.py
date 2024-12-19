@@ -4,8 +4,9 @@ from __future__ import annotations
 import functools
 import logging
 from typing import Callable, List
-import pickle
+import _pickle as pickle
 from os.path import join, exists
+from os import listdir
 from pathlib import Path
 
 # from bqskit.compiler.basepass import _sub_do_work
@@ -28,6 +29,8 @@ from bqskit.ir.location import CircuitLocation
 from bqskit.ir.operation import Operation
 from bqskit.ir.point import CircuitPoint
 from bqskit.runtime import get_runtime
+import numpy as np
+import time
 
 _logger = logging.getLogger(__name__)
 
@@ -72,10 +75,10 @@ class ForEachBlockPass(BasePass):
         collection_filter: Callable[[Operation], bool] | None = None,
         replace_filter: ReplaceFilterFn | str = 'always',
         batch_size: int | None = None,
-        blocks_to_run: List[int] = [],
         allocate_error: bool = False,
         allocate_error_gate: Gate = CNOTGate(),
-        allocate_skew_factor: int = 3
+        allocate_skew_factor: int = -1,
+        check_checkpoint: bool = False,
     ) -> None:
         """
         Construct a ForEachBlockPass.
@@ -140,11 +143,6 @@ class ForEachBlockPass(BasePass):
                 Defaults to 'always'.  #TODO: address importability
 
             batch_size (int): (Deprecated).
-
-            blocks_to_run (List[int]):
-                A list of blocks to run the ForEachBlockPass body on. By default
-                you run on all blocks. This is mainly used with checkpointing, 
-                where some blocks have already finished while others have not.
         """
         if batch_size is not None:
             import warnings
@@ -158,11 +156,11 @@ class ForEachBlockPass(BasePass):
         self.collection_filter = collection_filter or default_collection_filter
         self.replace_filter = replace_filter or default_replace_filter
         self.workflow = Workflow(loop_body)
-        self.blocks_to_run = sorted(blocks_to_run)
         self.allocate_error = allocate_error
         self.allocate_error_gate = allocate_error_gate
         self.allocate_skew_factor = allocate_skew_factor
         self.error_cost_gen = error_cost_gen
+        self.check_checkpoint = check_checkpoint
         if not callable(self.collection_filter):
             raise TypeError(
                 'Expected callable method that maps Operations to booleans for'
@@ -196,27 +194,16 @@ class ForEachBlockPass(BasePass):
 
         # Collect blocks
         blocks: list[tuple[int, Operation]] = []
-        if (len(self.blocks_to_run) == 0):
-            # TODO: This is buggy, need to fix to work with collection filter
-            self.blocks_to_run = list(range(circuit.num_operations))
-
-        block_ids = self.blocks_to_run.copy()
-        next_id = block_ids.pop(0)
         for i, (cycle, op) in enumerate(circuit.operations_with_cycles()):
-            if self.collection_filter(op) and i == next_id:
+            if self.collection_filter(op):
                 blocks.append((cycle, op))
-                try:
-                    next_id = block_ids.pop(0)
-                except IndexError:
-                    # No more blocks to run on
-                    break
 
         # No blocks, no work
         if len(blocks) == 0:
             data[self.key].append([])
             return
         
-        print("NUMBER OF BLOCKS", len(blocks))
+        # print("NUMBER OF BLOCKS", len(blocks), flush=True)
         # Get the machine model
         model = data.model
         coupling_graph = data.connectivity
@@ -225,18 +212,33 @@ class ForEachBlockPass(BasePass):
         subcircuits: list[Circuit] = []
         block_datas: list[PassData] = []
         block_gates = []
+
+        if self.check_checkpoint:
+            if data.get("inner_foreach_finished", False):
+                print("Skipping inner foreach", flush=True)
+                self.cleanup_checkpoint_files(checkpoint_dir, len(blocks))
+                # If the inner foreach pass has finished, we can skip this pass
+                return
+
         for i, (cycle, op) in enumerate(blocks):
             # Check if checkpoint exists:
             # Need to zero pad block ids for consistency
-            num_digits = len(str(circuit.num_operations))
-            block_num = str(self.blocks_to_run[i]).zfill(num_digits)
+            num_digits = len(str(len(blocks)))
+            block_num = str(i).zfill(num_digits)
             save_data_file = join(checkpoint_dir, f'block_{block_num}.data')
             save_circuit_file = join(checkpoint_dir, f'block_{block_num}.pickle')
+            checkpoint_found = False
             if should_checkpoint and exists(save_data_file):
                 _logger.debug(f'Loading block {i} from checkpoint.')
-                subcircuit = pickle.load(open(save_circuit_file, 'rb'))
-                block_data = pickle.load(open(save_data_file, 'rb'))
-            else:
+                try:
+                    subcircuit = pickle.load(open(save_circuit_file, 'rb'))
+                    block_data = pickle.load(open(save_data_file, 'rb'))
+                    checkpoint_found = True
+                except Exception as e:
+                    print(f"Exception for file: {save_data_file}", e)
+                    checkpoint_found = False
+            
+            if not checkpoint_found:
                 # Form Subcircuit
                 if isinstance(op.gate, CircuitGate):
                     subcircuit = op.gate._circuit.copy()
@@ -264,6 +266,7 @@ class ForEachBlockPass(BasePass):
                 block_data['point'] = CircuitPoint(cycle, op.location[0])
                 block_data['calculate_error_bound'] = self.calculate_error_bound
                 block_data['block_num'] = block_num
+                block_data['super_block_num'] = data.get('block_num', -2)
                 for key in data:
                     if key.startswith(self.pass_down_key_prefix):
                         block_data[key] = data[key]
@@ -283,6 +286,7 @@ class ForEachBlockPass(BasePass):
             # Change next subdirectory
             if should_checkpoint:
                 # Update checkpoint dir, circ file, and data file
+                # print("Updating Checkpoint Data File", save_data_file, flush=True)
                 block_data["checkpoint_dir"] = join(checkpoint_dir, f'block_{block_num}')
                 block_data["checkpoint_circ_file"] = save_circuit_file
                 block_data["checkpoint_data_file"] = save_data_file
@@ -291,13 +295,16 @@ class ForEachBlockPass(BasePass):
             # TODO: This is expensive, need to find a better way to do this
             unfolded_circ = subcircuit.copy()
             unfolded_circ.unfold_all()
-            skewed_gates = unfolded_circ.count(self.allocate_error_gate) ** self.allocate_skew_factor
+            # If skew factor is negative, then we are giving more error budget to blocks with fewer CNOT gates
+            skewed_gates = max(unfolded_circ.count(self.allocate_error_gate), 1) ** self.allocate_skew_factor
             block_gates.append(skewed_gates)
 
         # Assign error as percentage of block
         total_gates = sum(block_gates)
         if self.allocate_error:
             for i in range(len(block_datas)):
+                # Percentage is proportional to skew function
+                print("Error Percentage for Block: ", i, " is: ", block_gates[i] / total_gates * data.get("error_percentage_allocated", 1), flush=True)
                 block_datas[i]["error_percentage_allocated"] = block_gates[i] * data.get("error_percentage_allocated", 1) / total_gates 
 
         # Do the work
@@ -311,6 +318,12 @@ class ForEachBlockPass(BasePass):
 
         # Unpack results
         completed_subcircuits, completed_block_datas = zip(*results)
+
+        if "scan_sols" in completed_block_datas[0]:
+            scan_sols = [data['scan_sols'] for data in completed_block_datas]
+            completed_subcircuits = await knapsack_solve(scan_sols)
+
+        # print("Final len of completed subcircuits", len(completed_subcircuits), flush=True)
 
         # Postprocess blocks
         points: list[CircuitPoint] = []
@@ -341,6 +354,7 @@ class ForEachBlockPass(BasePass):
         # Replace blocks
         circuit.batch_replace(points, ops)
 
+        # print("CNOT Count", circuit.count(CNOTGate()), flush=True)
         # Record block data into pass data
         data[self.key].append(completed_block_datas)
 
@@ -348,6 +362,107 @@ class ForEachBlockPass(BasePass):
         data.update_error_mul(error_sum)
         if self.calculate_error_bound:
             _logger.debug(f'New circuit error is {data.error}.')
+
+        if self.check_checkpoint:
+            data["inner_foreach_finished"] = True
+            pickle.dump(data, open(data["checkpoint_data_file"], 'wb'))
+            self.cleanup_checkpoint_files(checkpoint_dir, len(blocks))
+
+        return
+
+
+    def cleanup_checkpoint_files(self, checkpoint_dir: str, num_blocks: int):
+        # Remove checkpoint files
+        print("Removing checkpoint folders", flush=True)
+        num_digits = len(str(num_blocks))
+        for i in range(num_blocks):
+            block_num = str(i).zfill(num_digits)
+            folder_path = join(checkpoint_dir, f'block_{block_num}')
+            # Clean up checkpoint folder
+            if exists(folder_path):
+                print("Removing", folder_path, flush=True)
+                # Remove all sub-files
+                for file in listdir(folder_path):
+                    file_path = join(folder_path, file)
+                    if file.endswith(".png"):
+                        continue
+                    Path(file_path).unlink()
+                # Remove folder if possible
+                if len(listdir(folder_path)) == 0:
+                    Path(folder_path).rmdir()
+            time.sleep(0.3 * num_blocks)
+        if exists(checkpoint_dir) and len(listdir(checkpoint_dir)) == 0:
+            Path(checkpoint_dir).rmdir()
+
+async def knapsack_solve(scan_sols: list[list[tuple[Circuit, float]]]) -> list:
+    '''
+    Pick an ensemble of circuits that minimizes the total number of CNOTs while keeping the total distance below a threshold
+    You must pick one psol from each list of psol_diffs.
+
+    
+
+    Args:
+        psol_diffs: list of lists of differences in CNOT counts
+        dists: list of lists of distances
+        total_dist: total distance allowed
+
+    Returns:
+        list of list of indices to pick. Each list corresponds to a list of psols. 
+        There are `num_circs` lists in total.
+    
+    '''
+
+
+
+    psols = [[psol for psol, _ in scan_sol] for scan_sol in scan_sols]
+    dists = [[dist for _,dist in scan_sol] for scan_sol in scan_sols]
+
+    psol_diffs = [[circ.count(CNOTGate()) - psol[-1].count(CNOTGate()) for circ in psol] for psol in psols]
+
+
+    # print(psol_diffs)
+    # print(dists)
+
+
+    # print("LEN PSOL DIFFS", len(psol_diffs))
+
+    total_dist = 0.001
+
+
+    # Most greedy algorithm
+    # Pick the psol that minimizes the difference in CNOT counts
+
+    diffs = np.ones([len(psol_diffs),len(max(psol_diffs,key = lambda x: len(x)))])
+    for i,j in enumerate(psol_diffs):
+        diffs[i][0:len(j)] = j
+
+    # print("Diffs shape", diffs.shape)
+
+    # Sort by best CNOT count diff
+    orig_inds = np.argsort(diffs[:, 0])
+    greediest_inds = [-1 for _ in psol_diffs]
+    greediest_dist = 0
+    
+    # print("ORIG INDS", orig_inds)
+    # print("LEN ORIG INDS", len(orig_inds))
+
+    cnots_saved = 0
+
+    for ind in orig_inds:
+        for i, dist in enumerate(dists[ind]):
+            # Will work because last dist is always 0
+            if (greediest_dist + dist) < total_dist:
+                greediest_inds[ind] = i
+                greediest_dist += dist
+                cnots_saved += psol_diffs[ind][i]
+                # print("GREEDIEST DIST", greediest_dist)
+                break
+
+    # print("GREEDIEST INDS", greediest_inds)
+    # print("NUM GREEDIEST INDS", len(greediest_inds))
+    # print("CNOTS SAVED", cnots_saved, flush=True)
+
+    return [psols[i][greediest_inds[i]] for i in range(len(psol_diffs))]
 
 
 async def _sub_do_work(

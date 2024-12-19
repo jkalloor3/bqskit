@@ -23,6 +23,7 @@ BQSKit Gates (:mod:`bqskit.ir.gates`)
     CXGate
     CYGate
     CZGate
+    ECRGate
     HGate
     IdentityGate
     ISwapGate
@@ -37,6 +38,7 @@ BQSKit Gates (:mod:`bqskit.ir.gates`)
     ShiftGate
     SqrtCNOTGate
     SqrtISwapGate
+    SqrtTGate
     SubSwapGate
     SwapGate
     SqrtXGate
@@ -70,7 +72,10 @@ BQSKit Gates (:mod:`bqskit.ir.gates`)
     CRZGate
     CUGate
     FSIMGate
+    MPRYGate
+    MPRZGate
     PauliGate
+    PauliZGate
     PhasedXZGate
     RSU3Gate
     RXGate
@@ -97,6 +102,7 @@ BQSKit Gates (:mod:`bqskit.ir.gates`)
     :template: autosummary/gate.rst
 
     ControlledGate
+    PowerGate
     DaggerGate
     EmbeddedGate
     FrozenParameterGate

@@ -3,10 +3,18 @@ from bqskit.qis import UnitaryMatrix
 from pathlib import Path
 import pickle
 import numpy as np
+import os
 
 extra = "_qsearch"
 
-def load_circuit(circ_name: str, timestep: int = 0) -> Circuit:
+def load_circuit(circ_name: str, timestep: int = 0, opt: bool = False) -> Circuit:
+    opt_str = "_opt" if opt else ""
+    
+    if "JW" in circ_name:
+        circ_name = f"JWCircs/{circ_name}"
+    
+    ext = ".qasm"
+    
     if timestep > 0:
         return Circuit.from_file(f"/home/jkalloor/bqskit/ensemble_benchmarks/{circ_name}_{timestep}.qasm")
     else:

@@ -1,182 +1,97 @@
-import cirq.circuits
-import cirq.circuits.circuit
-import cirq.sim
 from bqskit.ir.circuit import Circuit
+from bqskit.ir.gates import CNOTGate
 from sys import argv
-from scipy.stats import entropy
 import numpy as np
+from itertools import chain
 
-import matplotlib.pyplot as plt
-import random
 from bqskit.ir.gates.parameterized.u3 import U3Gate
 from bqskit.ir.point import CircuitPoint
 
-
-from qiskit import QuantumCircuit
-from qiskit_aer import AerSimulator
-from qiskit.providers.fake_provider import FakeCasablancaV2
+from qiskit import QuantumCircuit, transpile
+from qiskit.quantum_info import Statevector
 
 from util import load_circuit, load_compiled_circuits
+from util.distance import normalized_frob_cost, tvd, trace_distance, get_density_matrix, get_average_density_matrix
 
 from bqskit.ext import bqskit_to_qiskit
 
-from qiskit_aer.noise import NoiseModel, pauli_error
+shots = 100
 
-import multiprocessing as mp
-
-import cirq
-
-def run_circuit(circuit: QuantumCircuit, shots: int = 1024):
-    global calc_func
-    results = sim.run(circuit, num_shots=shots).result()
-    noisy_counts = results.get_counts(circuit)
-    return noisy_counts
-
-
-def prob_squared(N, result: dict, shots: int):
-    # Calculate sum(p(x)^2)
-    probs = [v / shots for v in result.values()]
-    return sum(p*p for p in probs)
-
-def create_pauli_noise_model(rb_fid_1q, rb_fid_2q):
-    rb_err_1q = 1 - rb_fid_1q
-    rb_err_2q = 1 - rb_fid_2q
-
-    # Create an empty noise model
-    noise_model = NoiseModel()
-
-    # Add depolarizing error to all single qubit u1, u2, u3 gates
-    one_q_error = pauli_error([('X', rb_err_1q /3), ('Y', rb_err_1q /3), ('Z', rb_err_1q / 3), ('I', rb_fid_1q)])
-    two_q_error = pauli_error([('XX', rb_err_2q / 15), ('YX', rb_err_2q / 15), ('ZX', rb_err_2q / 15),
-                            ('XY', rb_err_2q / 15), ('YY', rb_err_2q / 15), ('ZY', rb_err_2q / 15),
-                                ('XZ', rb_err_2q / 15), ('YZ', rb_err_2q / 15), ('ZZ', rb_err_2q / 15),
-                                ('XI', rb_err_2q / 15), ('YI', rb_err_2q / 15), ('ZI', rb_err_2q / 15),
-                                ('IX', rb_err_2q / 15), ('IY', rb_err_2q / 15), ('IZ', rb_err_2q / 15), 
-                                ('II', rb_fid_2q)])
-    noise_model.add_all_qubit_quantum_error(one_q_error, ['u3'])
-    noise_model.add_all_qubit_quantum_error(two_q_error, ['cx'])
-
-    return noise_model
-
-def create_pauli_noise_model_backend(rb_fid_1q, rb_fid_2q):
-    rb_err_1q = 1 - rb_fid_1q
-    rb_err_2q = 1 - rb_fid_2q
-
-    # Create an empty noise model
-    noise_model = NoiseModel()
-
-    # Add depolarizing error to all single qubit u1, u2, u3 gates
-    one_q_error = pauli_error([('X', rb_err_1q /3), ('Y', rb_err_1q /3), ('Z', rb_err_1q / 3), ('I', rb_fid_1q)])
-    two_q_error = pauli_error([('XX', rb_err_2q / 15), ('YX', rb_err_2q / 15), ('ZX', rb_err_2q / 15),
-                            ('XY', rb_err_2q / 15), ('YY', rb_err_2q / 15), ('ZY', rb_err_2q / 15),
-                                ('XZ', rb_err_2q / 15), ('YZ', rb_err_2q / 15), ('ZZ', rb_err_2q / 15),
-                                ('XI', rb_err_2q / 15), ('YI', rb_err_2q / 15), ('ZI', rb_err_2q / 15),
-                                ('IX', rb_err_2q / 15), ('IY', rb_err_2q / 15), ('IZ', rb_err_2q / 15), 
-                                ('II', rb_fid_2q)])
-    noise_model.add_all_qubit_quantum_error(one_q_error, ['u3'])
-    noise_model.add_all_qubit_quantum_error(two_q_error, ['cx'])
-
-
-# sim = AerSimulator()
-device_backend = FakeCasablancaV2()
-one_q_fid = 0.9999
-two_q_fid = 0.995
-noisy_backend = create_pauli_noise_model(one_q_fid, two_q_fid)
-noise_model_backend = create_pauli_noise_model(one_q_fid, two_q_fid)
-sim = AerSimulator(noise_model=noisy_backend)
-# sim = AerSimulator()
-sim_perf = AerSimulator()
-shots = 1024
-
-def staggered_magnetization(N, result: dict, shots: int):
-    sm_val = 0
-    for spin_str, count in result.items():
-        spin_int = [1 - 2 * float(s) for s in spin_str]
-        for i in range(len(spin_int)):
-            spin_int[i] = spin_int[i]*(-1)**i
-        sm_val += (sum(spin_int) / len(spin_int)) * count
-    average_sm = sm_val/shots
-    return average_sm
-
-def local_magnetization(N, result: dict, shots: int, qub: int):
-    """Compute average magnetization from results of qk.execution.
-    Args:
-    - N: number of spins
-    - result (dict): a dictionary with the counts for each qubit, see qk.result.result module
-    - shots (int): number of trials
-    Return:
-    - average_mag (float)
-    """
-    mag = 0
-    q_idx = N - qub -1
-    pers = [0 for _ in range(2 ** N)]
-    for spin_str, count in result.items():
-        # print(count / shots, end=",")
-        ind = int(spin_str, base=2)
-        pers[ind] = count / shots
-        spin_int = [1 - 2 * float(spin_str[q_idx])]
-        mag += (sum(spin_int) / len(spin_int)) * count
-    average_mag = mag / shots
-    return average_mag
-
-def excitation_displacement(N, result: dict, shots: int):
-    dis = 0
-    for qub in range(1, N):
-        z = local_magnetization(N,result, shots, qub)
-        dis += qub*((1.0 - z)/2.0)
-    return dis
-
-import itertools
-def get_ensemble_mags(ens_size):
+def get_ensemble_mags(ens_size, random_states: list[np.ndarray] = None) -> tuple[list[np.ndarray[np.float64]], 
+                                                                                 list[np.ndarray[np.float64]], 
+                                                                                 np.ndarray[np.complex128] | None]:
     global all_qcircs
-    global calc_func
+    global bqskit_circs
+    global target
 
-    ensemble: list[QuantumCircuit] = random.sample(all_qcircs, ens_size)
-    results = sim.run(ensemble, num_shots=shots).result()
-    # Sum over all c
-    total_dict = {}
-    for c in ensemble:
-        results_dict = results.get_counts(c)
-        x = total_dict
-        y = results_dict
-        total_dict = {k: x.get(k, 0) + y.get(k, 0) for k in set(x) | set(y)}
-        
-    # return calc_func(c.num_qubits, total_dict, shots=shots * len(ensemble))
-    return prob_squared(c.num_qubits, total_dict, shots=shots * len(ensemble))
+    print(len(bqskit_circs), len(all_qcircs))
 
+    ensemble_inds: list[int] = np.random.choice(len(bqskit_circs), ens_size)
+    ensemble: list[QuantumCircuit] = [all_qcircs[i] for i in ensemble_inds]
+    
+    if ensemble[0].num_qubits <= 10:
+        mean_un = np.mean(np.array([bqskit_circs[i].get_unitary().numpy for i in ensemble_inds]), axis=0)
+    else:
+        mean_un = None
 
-def execute_circuit(circuit: QuantumCircuit):
-    global calc_func
-    results = sim.run(circuit, num_shots=shots).result()
-    noisy_counts = results.get_counts(circuit)
-    return calc_func(circuit.num_qubits, noisy_counts, shots=shots)
-
+    print("Avg CNOT count: ", np.mean([c.count_ops()['cx'] for c in ensemble]))
+    random_qcircs = get_random_init_state_circuits(ensemble, random_states)
+    noisy_rhos = []
+    noisy_probs = []
+    for circs in random_qcircs:
+        noisy_svs = np.array([Statevector.from_instruction(circ).data for circ in circs])
+        probs = np.array([np.abs(sv)**2 for sv in noisy_svs], dtype=np.float64)
+        avg_probs = np.mean(probs, axis=0)
+        noisy_rho = get_average_density_matrix(noisy_svs)
+        noisy_rhos.append(noisy_rho)
+        noisy_probs.append(avg_probs)
+    return noisy_rhos, noisy_probs, mean_un
 
 def get_qcirc(circ: Circuit):
     for cycle, op in circ.operations_with_cycles():
-        if op.num_qudits == 1:
+        if op.num_qudits == 1 and not isinstance(op.gate, U3Gate):
             params = U3Gate().calc_params(op.get_unitary())
             point = CircuitPoint(cycle, op.location[0])
             circ.replace_gate(point, U3Gate(), op.location, params)
 
     q_circ = bqskit_to_qiskit(circ)
-    q_circ.measure_all()
-    # (time.time() - start)
     return q_circ
 
-def get_covar_elem(matrices):
-    A, B = matrices
-    elem =  2*np.real(np.trace(A.conj().T @ B))
-    return elem
+def get_random_states(num_qubits: int, num_random_states: int = 4):
+    states = []
+    for i in range(4):
+        state = np.random.randint(0, 2, num_qubits)
+        states.append(state)
+    return states
+
+def get_random_init_state_circuits(qcircs: list[QuantumCircuit], random_states: list[np.ndarray]) -> list[list[QuantumCircuit]]:
+    all_qcircs = []
+    for state in random_states:
+        circs = []
+        for qcirc in qcircs:
+            init_circ: QuantumCircuit = qcirc.copy()
+            for i in range(init_circ.num_qubits):
+                if state[i] == 1:
+                    init_circ.h(i)
+            init_circ.compose(qcirc, inplace=True)
+            circs.append(transpile(init_circ, optimization_level=0))
+        all_qcircs.append(circs)
+    return all_qcircs
+
+def aggregate_results(results: list):
+    total_dict = {}
+    for r in results:
+        # print("Result: ", r)
+        x = total_dict
+        y = r.data.meas.get_counts()
+        total_dict = {k: x.get(k, 0) + y.get(k, 0) for k in set(x) | set(y)}
+    return total_dict
 
 # Circ 
 if __name__ == '__main__':
-
-    # print(get_oneq_rb(device_backend))
-    # print(get_twoq_rb(device_backend))
-    global basic_circ
     global all_qcircs
-    global calc_func
+    global bqskit_circs
+    global target
 
     circ_type = argv[1]
 
@@ -186,11 +101,22 @@ if __name__ == '__main__':
     circ_name = argv[1]
     timestep = int(argv[2])
     tol = int(argv[3])
-
-    initial_circ = load_circuit(circ_name)
-    target = initial_circ.get_unitary()
     num_unique_circs = int(argv[4])
-    circs = load_compiled_circuits(circ_name, tol, timestep, ignore_timestep=True, extra_str=f"_{num_unique_circs}_circ_final")
+    cliff = bool(int(argv[5])) if len(argv) > 5 else False
+
+    initial_circ = load_circuit(circ_name, opt=False)
+    print("Original CX Count: ", initial_circ.count(CNOTGate()))
+    if initial_circ.num_qudits <= 10:
+        target = initial_circ.get_unitary()
+
+    opt_str = ""
+
+    if cliff:
+        bqskit_circs = load_compiled_circuits(circ_name, tol, timestep, ignore_timestep=True, extra_str=f"_{num_unique_circs}_circ_cliff_t_final")
+    else:
+        bqskit_circs = load_compiled_circuits(circ_name, tol, timestep, ignore_timestep=True, extra_str=f"_{num_unique_circs}_circ_final_min_post{opt_str}_calc_bias")
+
+    print("LOADED CIRCUITS", flush=True)
 
     # Store approximate solutions
     all_utries = []
@@ -199,29 +125,52 @@ if __name__ == '__main__':
     base_excitations = []
     noisy_excitations = []
 
-    calc_func = prob_squared
+    ensemble_sizes = [1, 10, 100, 1000] #, 2000, 4000]
+    shot_ratio = max(ensemble_sizes)
 
+    # sampler = Sampler(mode=sim)
 
+    random_states = get_random_states(initial_circ.num_qudits, num_random_states=5)
     qiskit_circ = bqskit_to_qiskit(initial_circ)
-    qiskit_circ.measure_all()
-    result = sim_perf.run(qiskit_circ, shots=shots*100).result()
-    result_dict = result.get_counts(qiskit_circ)
-    noisy_result = sim.run(qiskit_circ, shots=shots*100).result()
-    noisy_result_dict = noisy_result.get_counts(qiskit_circ)
-    base_excitations.append(calc_func(initial_circ.num_qudits, result_dict, shots*100))
-    noisy_excitations.append(calc_func(initial_circ.num_qudits, noisy_result_dict, shots*100))
+    qiskit_circs = get_random_init_state_circuits([qiskit_circ], random_states)
+    qiskit_circs = list(chain(*qiskit_circs))
+    print("Got all circuits", flush=True)
+    svs = [Statevector.from_instruction(circ).data for circ in qiskit_circs]
+    rhos = [get_density_matrix(sv) for sv in svs]
+    print("Len of rhos: ", len(rhos))
+    true_probs = [np.abs(sv)**2 for sv in svs]
+    noisy_svs = [Statevector.from_instruction(circ).data for circ in qiskit_circs]
+    noisy_rhos = [get_density_matrix(sv) for sv in noisy_svs]
+    noisy_dists = [trace_distance(rhos[i], noisy_rho) for i,noisy_rho in enumerate(noisy_rhos)]
+    print("Noisy Distances: ", noisy_dists)
+    
+    
+    # print("Noisy Counts: ", noisy_result_dict)
+    print("Finished Running", flush=True)
+    # noisy_result_dict = noisy_result.get_counts(qiskit_circ)
+    base_excitations.append(0)
+    noisy_excitations.append(np.mean(noisy_dists))
 
-    with mp.Pool() as pool:
-       all_qcircs = pool.map(get_qcirc, circs)
+    all_qcircs = [get_qcirc(c) for c in bqskit_circs]
+    print("Got MAP", flush=True)
 
-    ensemble_mags = [0,0,0,0,0,0]
-    ensemble_sizes = [1, 10, 100, 1000, 2000]
-
-
-    print("Runing QCIRCS")
-    print(f"Base Excitation: {base_excitations[0]}, Noisy Excitation {noisy_excitations[0]}")
+    print("Runing PERFECT ENSEMBLES: ")
+    print(f"Base TVD: {base_excitations[0]}, Noisy TVD {noisy_excitations[0]}")
     for j, ens_size in enumerate(ensemble_sizes):
-        ensemble_mags[j] = get_ensemble_mags(ens_size)
-        print(f"Ensemble Size: {ens_size},  Ensemble Excitation {ensemble_mags[j]}")
+        final_rhos, final_probs, mean_un = get_ensemble_mags(ens_size, random_states)
+
+        print("Len of final rhos: ", len(final_rhos))
+
+        tds = [trace_distance(final_rho, rhos[i]) for i,final_rho in enumerate(final_rhos)]
+        tvds = [tvd(prob, true_probs[i]) for i,prob in enumerate(final_probs)]
+        td = np.mean(tds)
+        mean_tvd = np.mean(tvds)
+        if mean_un is not None:
+            frob_cost = normalized_frob_cost(target, mean_un)
+            print(f"Ensemble Size: {ens_size},  Trace Distance: {tds}, TVDS: {tvds}")
+            print(f"Mean Trace Distance: {td}, Mean TVD: {mean_tvd}, Frobenius Distance: {frob_cost}")
+        else:
+            print(f"Ensemble Size: {ens_size},  Trace Distance: {tds}, TVDS: {tvds}")
+            print(f"Mean Trace Distance: {td}, Mean TVD: {mean_tvd}")
 
 

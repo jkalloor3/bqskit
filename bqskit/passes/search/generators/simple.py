@@ -195,5 +195,10 @@ class SimpleLayerGenerator(LayerGenerator):
             successor.append_gate(self.single_qudit_gate_1, edge[0])
             successor.append_gate(self.single_qudit_gate_2, edge[1])
             successors.append(successor)
+            successor_2 = circuit.copy()
+            successor_2.append_gate(self.two_qudit_gate, [edge[1], edge[0]])
+            successor_2.append_gate(self.single_qudit_gate_1, edge[1])
+            successor_2.append_gate(self.single_qudit_gate_2, edge[0])
+            successors.append(successor_2)
 
         return successors

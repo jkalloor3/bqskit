@@ -42,7 +42,7 @@ class GlobalPhaseGate(ConstantGate):
         self._num_qudits = num_qudits
         self._radixes = tuple(radixes or [2] * num_qudits)
         self._dim = int(np.prod(self.radixes))
-        self._utry = UnitaryMatrix.identity(self.dim, self.radixes) * global_phase
+        self._utry = UnitaryMatrix(UnitaryMatrix.identity(self.dim, self.radixes) * global_phase)
         self.global_phase = global_phase
         self._qasm_name = 'identity%d' % self.num_qudits
 

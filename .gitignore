@@ -15,7 +15,6 @@ dask-worker-space
 dist
 build
 scratch/
-
 QFT/
 *logs*/
 *.pdf
@@ -34,7 +33,7 @@ QFT/
 **/*.sh 
 **/*.qasm
 slurm_logs/*
-*.csv
+*.csv*
 **/*.json
 **/*.png
 

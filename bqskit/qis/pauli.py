@@ -208,6 +208,37 @@ class PauliMatrices(Sequence[npt.NDArray[np.complex128]]):
 
         return np.array(np.sum([a * s for a, s in zip(alpha, self.paulis)], 0))
 
+
+    @staticmethod
+    def get_pauli_strings(total_bits: int, max_length: int) -> set[str]:
+        if max_length > total_bits or max_length < 0:
+            # Not possible
+            return set()
+        
+        if total_bits == 1:
+            if max_length == 1:
+                return set(['I', 'X', 'Y', 'Z'])
+            return set(['I'])
+
+        pauli_strings = set()
+
+        # Get strings with length <= (max_length - 1)
+        smaller_strings = PauliMatrices.get_pauli_strings(total_bits - 1, 
+                                                          max_length - 1)
+        for string in smaller_strings:
+            for char in ['I', 'X', 'Y', 'Z']:
+                new_string = char + string
+                # if len(new_string) <= max_length:
+                pauli_strings.add(new_string)
+        
+        bigger_strings = PauliMatrices.get_pauli_strings(total_bits - 1,
+                                                            max_length)
+        
+        for string in bigger_strings:
+            pauli_strings.add('I' + string)
+        
+        return pauli_strings
+
     @staticmethod
     def from_string(
             pauli_string: str,
