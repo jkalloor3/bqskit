@@ -12,6 +12,7 @@ from util import load_circuit
 import os
 import glob
 import pickle
+import pandas as pd
 
 checkpoint_dir = "block_histograms/"
 
@@ -63,12 +64,16 @@ def get_shortest_circuits(circ_name: str) -> list[Circuit]:
     out_circ, data = compiler.compile(circ, workflow=leap_workflow, request_data=True)
     return 
 
+def get_csv_data(file_name: str) -> list:
+    data = pd.read_csv(file_name, header=0)
+    print(data['Ratio'])
+    return min(data['Ratio'])
 
 def get_data(file_name: str) -> tuple[list, list, list, list]:
     with open(file_name, 'rb') as f:
         data = pickle.load(f)
     return data['2Q Count'], data['Depth'], data['Free Params'], data['Widths']
-
+    
 def create_small_block_histogram():
     all_data = {}
     all_data["2Q Count"] = []
@@ -118,10 +123,31 @@ def create_large_block_histogram():
     
     MakeHistogramPass.create_histogram( all_data,  'large_block_histograms.png')
 
+def create_ratio_histogram(full_checkpoint_dir: str):
+    all_data = {}
+    all_data["Bias Reduction Ratio"] = []
+    for folder_name in os.listdir(full_checkpoint_dir):
+        # run = False
+        # for inc in includes:
+        #     if folder_name.startswith(inc):
+        #         run = True
+        # if not run:
+        #     continue
+        folder_path = os.path.join(full_checkpoint_dir, folder_name)
+        # print(folder_path)
+        if os.path.isdir(folder_path):
+            data_file = os.path.join(folder_path, 'data_try1.csv')
+            if os.path.exists(data_file):
+                print(data_file)
+                min_ratio = get_csv_data(data_file)
+                all_data["Bias Reduction Ratio"].append(min_ratio)
+    
+    MakeHistogramPass.create_histogram( all_data,  'good_ratio_histogram.png', False)
+
 
 if __name__ == '__main__':
     global target
-    circ_name = argv[1]
+    # circ_name = argv[1]
     # get_shortest_circuits(circ_name)
-    create_large_block_histogram()
-    create_small_block_histogram()
+    # create_large_block_histogram()
+    create_ratio_histogram("/pscratch/sd/j/jkalloor/bqskit/block_checkpoints_nisq_2")

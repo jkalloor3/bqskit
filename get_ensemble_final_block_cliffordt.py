@@ -4,7 +4,7 @@ import numpy as np
 from bqskit.compiler.compiler import Compiler
 from bqskit.ir.gates import CNOTGate, RZGate, U3Gate
 # Generate a super ensemble for some error bounds
-from bqskit.passes import LEAPSynthesisPass, CheckpointRestartPass
+from bqskit.passes import LEAPSynthesisPass, CheckpointRestartPass, ToU3Pass
 from bqskit.passes import ForEachBlockPass, ScanPartitioner, CreateEnsemblePass
 from bqskit.passes import JiggleEnsemblePass
 from ntro import NumericalTReductionPass
@@ -73,7 +73,7 @@ def get_shortest_circuits(circ_name: str, circ_file: str, tol: int, num_unique_c
             num_random_ensembles=4,
             solve_exact_dists=True,
             sort_by_t=True,
-            checkpoint_extra_str="_try1"
+            checkpoint_extra_str="_try"
     )
 
     synthesis_pass = LEAPSynthesisPass2(
@@ -91,7 +91,7 @@ def get_shortest_circuits(circ_name: str, circ_file: str, tol: int, num_unique_c
                                   use_calculated_error=False,
                                   checkpoint_extra_str="_try1",
                                   count_t=True,
-                                  do_u3_perturbation=False)
+                                  do_u3_perturbation=True)
 
     leap_workflow = [
         CheckpointRestartPass(checkpoint_dir, 
@@ -99,12 +99,13 @@ def get_shortest_circuits(circ_name: str, circ_file: str, tol: int, num_unique_c
         ForEachBlockPass(
             [
                 synthesis_pass,
-                JiggleScansPass(success_threshold=err_thresh / 2),
+                # JiggleScansPass(success_threshold=err_thresh / 2),
                 ConvertToZXZXZSimple(),
                 NumericalTReductionPass(
                     full_loops=5,
-                    success_threshold=err_thresh / 10,
+                    success_threshold=err_thresh / 5,
                     use_calculated_error=True),
+                ToU3Pass(ensemble=True, group=True),
                 FixGlobalPhasePass(),
                 # scan_pass,
             ],

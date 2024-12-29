@@ -431,9 +431,9 @@ class CreateEnsemblePass(BasePass):
 
         checkpoint_str = CreateEnsemblePass.finished_pass_str + self.checkpoint_extra_str
 
-        if checkpoint_str in data:
-            print("Finished Create Ensemble", flush=True)
-            return
+        # if checkpoint_str in data:
+        #     print("Finished Create Ensemble", flush=True)
+        #     return
 
         # Get scan_sols for each circuit_gate
         block_data = data[ForEachBlockPass.key]
