@@ -72,6 +72,7 @@ if __name__ == '__main__':
     # extra = "_clifft"
     extra = "_block"
     skips = ["qft", "qml", "vqe", "shor"]
+    print(circs)
     for circ in circs:
         # Get all files of form good_blocks/{circ}_{block_num}.qasm
         circ_files = glob.glob(f"good_blocks/{circ}_*.qasm")
@@ -93,16 +94,17 @@ if __name__ == '__main__':
                         # # if os.path.exists(utries_file):
                         # #     continue
 
+                        data_file = f"/home/jkalloor/bqskit/block_checkpoints_clifft/{circ}_08_{tol}_{unique_circs}/data.csv"
 
-                        # if os.path.exists(hist_file):
-                        #     continue
+                        if os.path.exists(data_file):
+                            continue
 
-                        to_write = open(file_name, 'w')
-                        to_write.write(header.format(file=file, circ=circ, tol=tol, timestep=timestep, extra=extra, unique_circs=unique_circs, jiggle_skew=jiggle_skew))
-                        to_write.close()
+                        # to_write = open(file_name, 'w')
+                        # to_write.write(header.format(file=file, circ=circ, tol=tol, timestep=timestep, extra=extra, unique_circs=unique_circs, jiggle_skew=jiggle_skew))
+                        # to_write.close()
                         print(f"python {file}.py {circ} {timestep} {tol} {unique_circs} {jiggle_skew} 1")
-                        # os.system(f"python {file}.py {circ} {timestep} {tol} {unique_circs} {jiggle_skew}")
+                        os.system(f"python {file}.py {circ} {timestep} {tol} {unique_circs} {jiggle_skew}")
                         time.sleep(2*sleep_time)
-                        output = subprocess.check_output(['sbatch' , file_name])
-                        print(output)
+                        # output = subprocess.check_output(['sbatch' , file_name])
+                        # print(output)
                         time.sleep(sleep_time)

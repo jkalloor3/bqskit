@@ -1,6 +1,7 @@
 from bqskit.ir.circuit import Circuit
 from sys import argv
 import numpy as np
+import multiprocessing as mp
 from bqskit.compiler.compiler import Compiler
 from bqskit.ir.gates import CNOTGate, RZGate, U3Gate
 # Generate a super ensemble for some error bounds
@@ -99,7 +100,7 @@ def get_shortest_circuits(circ_name: str, circ_file: str, tol: int, num_unique_c
         ForEachBlockPass(
             [
                 synthesis_pass,
-                JiggleScansPass(success_threshold=err_thresh / 2),
+                # JiggleScansPass(success_threshold=err_thresh / 2),
                 ConvertToZXZXZSimple(),
                 NumericalTReductionPass(
                     full_loops=5,
@@ -114,7 +115,7 @@ def get_shortest_circuits(circ_name: str, circ_file: str, tol: int, num_unique_c
         jiggle_pass,
         CheckEnsembleQualityPass(True, csv_name="_try1"),
     ]
-    num_workers = 128
+    num_workers = mp.cpu_count()
     compiler = Compiler(num_workers=num_workers)
     # target = circ.get_unitary()
     out_circ, data = compiler.compile(circ, workflow=leap_workflow, request_data=True)
