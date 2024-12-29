@@ -29,7 +29,7 @@ class FixGlobalPhasePass(BasePass):
             global_phase_correction = target.get_target_correction_factor(unitary)
             psol[0].append_gate(GlobalPhaseGate(1, global_phase=global_phase_correction), (0,))
             new = frob_cost.calc_cost(psol[0], target)
-            hs = hs_cost.calc_cost(psol[0], target)
+            # hs = hs_cost.calc_cost(psol[0], target)
             new_scan_sols.append((psol[0], new))
-            print("Old cost: ", old, "New cost: ", new, "HS Cost: ", hs, flush=True)
+            print("Old cost: ", old, "New cost: ", new, flush=True)
         data["scan_sols"] = new_scan_sols
