@@ -21,3 +21,4 @@ from .ensemble_zxzxz import EnsembleZXZXZ
 from .ensemble_scan import EnsembleScanningGateRemovalPass
 from .check_ensemble_quality import CheckEnsembleQualityPass
 from .jiggle_scans import JiggleScansPass
+from .jiggle_ensemble import JiggleEnsemblePass

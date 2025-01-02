@@ -15,7 +15,6 @@ from bqskit.passes.util.structure import StructureAnalysisPass
 from bqskit.passes.util.unfold import UnfoldPass
 from bqskit.passes.util.update import UpdateDataPass
 from bqskit.passes.util.ensemble import CreateEnsemblePass
-from bqskit.passes.util.jiggle_ensemble import JiggleEnsemblePass
 
 __all__ = [
     'CompressPass',
@@ -32,5 +31,4 @@ __all__ = [
     'ToVariablePass',
     'StructureAnalysisPass',
     'CreateEnsemblePass',
-    'JiggleEnsemblePass'
 ]

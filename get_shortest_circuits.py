@@ -14,6 +14,7 @@ import pickle
 from bqskit.ir.opt.cost.functions import HilbertSchmidtResidualsGenerator, HilbertSchmidtCostGenerator, FrobeniusCostGenerator
 from bqskit.ir.opt.minimizers.lbfgs import LBFGSMinimizer
 from qfactorjax.qfactor import QFactorJax
+from util import JiggleEnsemblePass
 
 from util import AnalyzeBlockPass, SecondLEAPSynthesisPass
 

@@ -11,7 +11,7 @@ from bqskit.ir.gates import CNOTGate, GlobalPhaseGate, VariableUnitaryGate
 # Generate a super ensemble for some error bounds
 from bqskit.passes import UnfoldPass, LEAPSynthesisPass, CheckpointRestartPass
 from bqskit.passes import ForEachBlockPass, ScanPartitioner, CreateEnsemblePass
-from bqskit.passes import JiggleEnsemblePass
+from util import JiggleEnsemblePass
 from bqskit import enable_logging
 from util import normalized_frob_cost, LEAPSynthesisPass2, SecondLEAPSynthesisPass
 from util import normalized_gp_frob_cost, EnsembleScanningGateRemovalPass
@@ -37,7 +37,7 @@ def get_shortest_circuits(circ_name: str,
 
     extra_err_thresh = err_thresh * 0.01
     small_block_size = 3
-    checkpoint_dir = f"block_checkpoints_nisq_{jiggle_skew}/{circ_name}_{tol}_{num_unique_circs}/"
+    checkpoint_dir = f"bad_block_checkpoints_nisq_{jiggle_skew}/{circ_name}_{tol}_{num_unique_circs}/"
 
     good_instantiation_options = {
         'multistarts': 8,
@@ -88,12 +88,13 @@ def get_shortest_circuits(circ_name: str,
     )
 
     jiggle_pass = JiggleEnsemblePass(success_threshold=err_thresh, 
-                                  num_circs=5000, 
+                                  num_circs=10000, 
                                   use_ensemble=True,
                                   use_calculated_error=False,
                                   checkpoint_extra_str="_try1",
                                   jiggle_skew=jiggle_skew,
-                                  do_u3_perturbation=ham_perturb)
+                                  do_u3_perturbation=ham_perturb,
+                                  flood_circ=True)
     
     scan_pass = EnsembleScanningGateRemovalPass(
         success_threshold=err_thresh,
@@ -130,6 +131,6 @@ if __name__ == '__main__':
     jiggle_skew = int(argv[5])
     ham_perturb = bool(int(argv[6])) if len(argv) > 6 else False
     circ_name = f"{circ_name}_{block_num}"
-    circ_file = f"good_blocks/{circ_name}.qasm"
+    circ_file = f"bad_blocks/{circ_name}.qasm"
     # print("OPT STR", opt_str, opt, argv[5])
     get_shortest_circuits(circ_name, circ_file, tol, num_unique_circs=num_unique_circs, jiggle_skew=jiggle_skew, ham_perturb=ham_perturb)

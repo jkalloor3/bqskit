@@ -10,6 +10,7 @@ from bqskit.ir.opt.cost.functions import  HilbertSchmidtCostGenerator
 # from qfactorjax.qfactor_sample_jax import QFactorSampleJax
 from qfactorjax.qfactor import QFactorJax
 from bqskit.passes import ScanningGateRemovalPass
+from util import JiggleEnsemblePass
 
 
 # from util import SubselectEnsemblePass, GenerateProbabilityPass, SelectFinalEnsemblePass

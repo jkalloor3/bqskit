@@ -8,7 +8,7 @@ from bqskit.ir.gates import CNOTGate, GlobalPhaseGate, VariableUnitaryGate
 from bqskit.passes import *
 from bqskit.ir.opt.cost.functions import HilbertSchmidtCostGenerator, FrobeniusNoPhaseCostGenerator
 from bqskit.passes.search.heuristics import AStarHeuristic
-
+from util import JiggleEnsemblePass
 from util import SecondQSearchSynthesisPass, SubselectEnsemblePass
 
 from bqskit import enable_logging

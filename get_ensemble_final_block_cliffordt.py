@@ -6,7 +6,7 @@ from bqskit.ir.gates import CNOTGate, RZGate, U3Gate
 # Generate a super ensemble for some error bounds
 from bqskit.passes import LEAPSynthesisPass, CheckpointRestartPass, ToU3Pass
 from bqskit.passes import ForEachBlockPass, ScanPartitioner, CreateEnsemblePass
-from bqskit.passes import JiggleEnsemblePass
+from util import JiggleEnsemblePass
 from ntro import NumericalTReductionPass
 from bqskit import enable_logging
 from util import normalized_frob_cost, LEAPSynthesisPass2, SecondLEAPSynthesisPass
