@@ -47,7 +47,7 @@ class ToU3Pass(BasePass):
                 point = CircuitPoint(cycle, op.location[0])
                 circuit.replace_gate(point, U3Gate(), op.location, params)
 
-    async def run_group_circ(self, circuit: Circuit) -> None:
+    def run_group_circ(circuit: Circuit) -> None:
         """Perform the pass's operation"""
         orig_gate_counts = circuit.gate_counts
         GroupSingleQuditGatePass.group(circuit)
@@ -58,14 +58,13 @@ class ToU3Pass(BasePass):
                 circuit.replace_gate(point, U3Gate(), op.location, params)
         
         circuit.unfold_all()
-        print("Circuit Gates: ", orig_gate_counts,  circuit.gate_counts, flush=True)
 
 
     async def run(self, circuit: Circuit, data: PassData) -> None:
         if self.ensemble:
             for circ, dist in data['scan_sols']:
                 if self.group:
-                    await self.run_group_circ(circ)
+                    ToU3Pass.run_group_circ(circ)
                 else:
                     await self.run_circ(circ)
         else:

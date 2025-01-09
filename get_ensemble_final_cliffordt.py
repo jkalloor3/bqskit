@@ -9,7 +9,7 @@ import pickle
 from bqskit.ir.opt.cost.functions import  HilbertSchmidtCostGenerator
 
 from util import GenerateProbabilityPass, SelectFinalEnsemblePass, ConvertToZXZXZSimple, LEAPSynthesisPass2, FixGlobalPhasePass
-
+from util import JiggleEnsemblePass
 from bqskit import enable_logging
 
 from pathlib import Path

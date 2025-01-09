@@ -14,7 +14,7 @@ from bqskit.runtime import get_runtime
 import pickle
 from bqskit.ir.opt.cost.functions import  HilbertSchmidtCostGenerator, FrobeniusNoPhaseCostGenerator
 from bqskit.passes import ScanningGateRemovalPass, IfThenElsePass, PassPredicate
-
+from util import JiggleEnsemblePass
 
 from util import SecondLEAPSynthesisPass, GenerateProbabilityPass, SelectFinalEnsemblePass, LEAPSynthesisPass2, SubselectEnsemblePass
 from util import WriteQasmPass, ReplaceWithQasmPass, CheckEnsembleQualityPass, HamiltonianNoisePass, EnsembleLeap, EnsembleZXZXZ

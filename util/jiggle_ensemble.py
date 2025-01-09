@@ -5,19 +5,19 @@ import logging
 
 from bqskit.compiler.basepass import BasePass
 from bqskit.compiler.passdata import PassData
-from bqskit.ir.circuit import Circuit
+from bqskit.passes import ToU3Pass
+from bqskit.ir.circuit import Circuit, CircuitPoint
 from bqskit.runtime import get_runtime
 from typing import Any
 from bqskit.ir.opt.cost.functions import FrobeniusCostGenerator
 from bqskit.ir.opt.minimizers.lbfgs import LBFGSMinimizer
 from bqskit.ir.opt.cost.generator import CostFunctionGenerator
-from bqskit.ir.gates import U3Gate, CNOTGate, TGate, TdgGate, GlobalPhaseGate
+from bqskit.ir.gates import U3Gate, CNOTGate, GlobalPhaseGate
 from bqskit.qis import UnitaryMatrix
 import numpy as np
 from math import ceil
 from itertools import chain
 import pickle 
-import csv
 
 from bqskit.qis.pauli import PauliMatrices
 from bqskit.ir import Circuit
@@ -42,7 +42,8 @@ class  JiggleEnsemblePass(BasePass):
                  count_t: bool = False,
                  checkpoint_extra_str: str = "",
                  jiggle_skew: int = 0,
-                 do_u3_perturbation: bool = True) -> None:
+                 do_u3_perturbation: bool = True,
+                 flood_circ: bool = False) -> None:
         """
         Construct a ToU3Pass.
 
@@ -67,6 +68,7 @@ class  JiggleEnsemblePass(BasePass):
         self.checkpoint_extra_str = checkpoint_extra_str
         self.jiggle_skew = jiggle_skew
         self.do_u3_perturbation = do_u3_perturbation
+        self.flood_circ = flood_circ
 
     async def get_circ(params: list[float], circuit: Circuit):
         circ_copy = circuit.copy()
@@ -214,28 +216,39 @@ class  JiggleEnsemblePass(BasePass):
         
         params = circ.params
 
-        while len(params) < 30:
-            # Insert random U3 Identities
-            random_cycle = np.random.randint(0, circ.num_cycles)
-            random_loc = np.random.randint(0, circ.num_qudits)
-            circ.insert_gate(random_cycle, U3Gate(), random_loc, [0, 0, 0])
-            params = circ.params
+        orig_gate_counts =  circ.gate_counts
+
+        # assert than each circ has U3 gates after their CNOTs
+        if self.flood_circ:
+            flooded_cnot = Circuit(2)
+            flooded_cnot.append_gate(CNOTGate(), (0, 1))
+            flooded_cnot.append_gate(U3Gate(), (0,), [0, 0, 0])
+            flooded_cnot.append_gate(U3Gate(), (1,), [0, 0, 0])
+            init_u3_circ = Circuit(circ.num_qudits)
+            for i in range(circ.num_qudits):
+                init_u3_circ.append_gate(U3Gate(), (i,), [0, 0, 0])
+            circ.insert_circuit(0, init_u3_circ, tuple(range(circ.num_qudits)))
+            for cycle, op in circ.operations_with_cycles():
+                if isinstance(op.gate, CNOTGate):
+                    op_pt = CircuitPoint(cycle, op.location[0])
+                    circ.replace_with_circuit(op_pt, flooded_cnot.copy(), as_circuit_gate=True)
+            circ.unfold_all()
+            ToU3Pass.run_group_circ(circ)
+        
         all_circs = []
 
-        if num_circs > 60:
-            # print(f"Awaiting All {num_circs // 50} Jiggles")
-            # print(f"Launching {ceil(num_circs / 20)} Tasks", flush=True)
-            if self.do_u3_perturbation:
-                all_circs: list[list[tuple[Circuit, float]]] = await self.single_jiggle_ham(circ, dist=dist, num=num_circs, target=target)
-            else:
-                all_circs: list[list[tuple[Circuit, float]]] = await get_runtime().map(self.single_jiggle, [params] * ceil(num_circs / 20), circ=circ, dist=dist, target=target, num=20)
-            # print(f"Finished {ceil(num_circs / 20)} Tasks", flush=True)
-            all_circs: list[tuple[Circuit, float]] = list(chain.from_iterable(all_circs))
+        # print(f"Awaiting All {num_circs // 50} Jiggles")
+        # print(f"Launching {ceil(num_circs / 20)} Tasks", flush=True)
+        num_tasks = ceil(num_circs / 40)
+        circs_per_task = ceil(num_circs / num_tasks)
+        if self.do_u3_perturbation:
+            in_circs = [circ.copy() for _ in range(num_tasks)]
+            all_circs: list[list[tuple[Circuit, float]]] = await get_runtime().map(self.single_jiggle_ham, in_circs, dist=dist, num=circs_per_task, target=target)
         else:
-            if self.do_u3_perturbation:
-                all_circs: list[list[tuple[Circuit, float]]] = await self.single_jiggle_ham(circ, dist=dist, num=num_circs, target=target)
-            else:  
-                all_circs: list[tuple[Circuit, float]] = await self.single_jiggle(params, circ, dist, target, num_circs)
+            all_circs: list[list[tuple[Circuit, float]]] = await get_runtime().map(self.single_jiggle, [params] * num_tasks, circ=circ, dist=dist, target=target, num=circs_per_task)
+            # print(f"Finished {ceil(num_circs / 20)} Tasks", flush=True)
+        
+        all_circs: list[tuple[Circuit, float]] = list(chain.from_iterable(all_circs))
         
         return all_circs
 
