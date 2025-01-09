@@ -56,7 +56,7 @@ class CheckEnsembleQualityPass(BasePass):
             data["good_ensemble"] = False
             return
 
-        ensemble: list[tuple[Circuit, float]] = data["ensemble"]
+        ensemble: list[list[tuple[Circuit, float]]] = data["ensemble"]
 
         for i in range(3, len(ensemble)):
             self.ensemble_names.append(f"Random Circuits #{i-2}")

@@ -48,7 +48,7 @@ def get_shortest_circuits(circ_name: str, circ_file: str, tol: int, num_unique_c
 
     extra_err_thresh = err_thresh * 0.01
     small_block_size = 3
-    checkpoint_dir = f"block_checkpoints_clifft/{circ_name}_{tol}_{num_unique_circs}/"
+    checkpoint_dir = f"block_checkpoints_clifft_final/{circ_name}_{tol}_{num_unique_circs}/"
 
     good_instantiation_options = {
         'multistarts': 8,
@@ -97,22 +97,22 @@ def get_shortest_circuits(circ_name: str, circ_file: str, tol: int, num_unique_c
     leap_workflow = [
         CheckpointRestartPass(checkpoint_dir, 
                                 default_passes=partitioner_passes),
-        ForEachBlockPass(
-            [
-                synthesis_pass,
-                # JiggleScansPass(success_threshold=err_thresh / 2),
-                ConvertToZXZXZSimple(),
-                NumericalTReductionPass(
-                    full_loops=5,
-                    success_threshold=err_thresh / 5,
-                    use_calculated_error=True),
-                ToU3Pass(ensemble=True, group=True),
-                FixGlobalPhasePass(),
-                # scan_pass,
-            ],
-            allocate_error=True,
-        ),
-        create_ensemble_pass,
+        # ForEachBlockPass(
+        #     [
+        #         synthesis_pass,
+        #         # JiggleScansPass(success_threshold=err_thresh / 2),
+        #         ConvertToZXZXZSimple(),
+        #         NumericalTReductionPass(
+        #             full_loops=5,
+        #             success_threshold=err_thresh / 5,
+        #             use_calculated_error=True),
+        #         ToU3Pass(ensemble=True, group=True),
+        #         FixGlobalPhasePass(),
+        #         # scan_pass,
+        #     ],
+        #     allocate_error=True,
+        # ),
+        # create_ensemble_pass,
         jiggle_pass,
         CheckEnsembleQualityPass(True, csv_name="_try1"),
     ]

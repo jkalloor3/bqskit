@@ -150,4 +150,4 @@ if __name__ == '__main__':
     # circ_name = argv[1]
     # get_shortest_circuits(circ_name)
     # create_large_block_histogram()
-    create_ratio_histogram("/pscratch/sd/j/jkalloor/bqskit/block_checkpoints_nisq_2")
+    create_ratio_histogram("/home/jkalloor/bqskit/block_checkpoints_clifft/")
