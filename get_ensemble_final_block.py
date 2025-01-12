@@ -9,13 +9,13 @@ from bqskit.compiler.compiler import Compiler, WorkflowLike
 from bqskit.ir.point import CircuitPoint
 from bqskit.ir.gates import CNOTGate, GlobalPhaseGate, VariableUnitaryGate
 # Generate a super ensemble for some error bounds
-from bqskit.passes import UnfoldPass, LEAPSynthesisPass, CheckpointRestartPass
+from bqskit.passes import LEAPSynthesisPass, CheckpointRestartPass
 from bqskit.passes import ForEachBlockPass, ScanPartitioner, CreateEnsemblePass
 from util import JiggleEnsemblePass
-from bqskit import enable_logging
-from util import normalized_frob_cost, LEAPSynthesisPass2, SecondLEAPSynthesisPass
-from util import normalized_gp_frob_cost, EnsembleScanningGateRemovalPass
-from util import CheckEnsembleQualityPass, FixGlobalPhasePass, JiggleScansPass
+from util import  LEAPSynthesisPass2, SecondLEAPSynthesisPass
+from util import EnsembleScanningGateRemovalPass
+from util import CheckEnsembleQualityPass, FixGlobalPhasePass
+from util import GenerateProbabilityPass
 
 # enable_logging(True)
 
@@ -37,7 +37,8 @@ def get_shortest_circuits(circ_name: str,
 
     extra_err_thresh = err_thresh * 0.01
     small_block_size = 3
-    checkpoint_dir = f"bad_block_checkpoints_nisq_{jiggle_skew}/{circ_name}_{tol}_{num_unique_circs}/"
+    checkpoint_dir = f"block_checkpoints_nisq_{jiggle_skew}/{circ_name}_{tol}_{num_unique_circs}/"
+    print("Checkpoint Dir: ", checkpoint_dir, flush=True)
 
     good_instantiation_options = {
         'multistarts': 8,
@@ -104,19 +105,20 @@ def get_shortest_circuits(circ_name: str,
     leap_workflow = [
         CheckpointRestartPass(checkpoint_dir, 
                                 default_passes=partitioner_passes),
-        ForEachBlockPass(
-            [
-                synthesis_pass,
-                # JiggleScansPass(success_threshold=err_thresh / 3),
-                second_synthesis_pass,
-                # scan_pass,
-                FixGlobalPhasePass(),
-            ],
-            allocate_error=True,
-        ),
-        create_ensemble_pass,
-        jiggle_pass,
+        # ForEachBlockPass(
+        #     [
+        #         synthesis_pass,
+        #         # JiggleScansPass(success_threshold=err_thresh / 3),
+        #         second_synthesis_pass,
+        #         # scan_pass,
+        #         FixGlobalPhasePass(),
+        #     ],
+        #     allocate_error=True,
+        # ),
+        # create_ensemble_pass,
+        # jiggle_pass,
         CheckEnsembleQualityPass(False, csv_name="_try1"),
+        GenerateProbabilityPass(success_threshold=err_thresh, size=10000)
     ]
     num_workers = 128
     compiler = Compiler(num_workers=num_workers)
@@ -131,6 +133,6 @@ if __name__ == '__main__':
     jiggle_skew = int(argv[5])
     ham_perturb = bool(int(argv[6])) if len(argv) > 6 else False
     circ_name = f"{circ_name}_{block_num}"
-    circ_file = f"bad_blocks/{circ_name}.qasm"
+    circ_file = f"good_blocks/{circ_name}.qasm"
     # print("OPT STR", opt_str, opt, argv[5])
     get_shortest_circuits(circ_name, circ_file, tol, num_unique_circs=num_unique_circs, jiggle_skew=jiggle_skew, ham_perturb=ham_perturb)

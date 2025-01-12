@@ -14,7 +14,7 @@ import random
 import multiprocessing as mp
 import time
 
-from util import get_upperbound_error_mean, get_tvd_magnetization, load_circuit, get_ensemble_mean, load_compiled_circuits, get_unitary
+from util import load_block, load_compiled_block_circuits
 
 
 def local_magnetization(u: UnitaryMatrix, N,  qub: int):
@@ -105,8 +105,6 @@ def get_covar_elem(matrices):
     elem =  2*np.real(np.trace(A.conj().T @ B))
     return elem
 
-from qiskit import Aer
-
 # Circ 
 if __name__ == '__main__':
     global basic_circ
@@ -114,15 +112,18 @@ if __name__ == '__main__':
     global all_utries
 
     circ_name = argv[1]
-    timestep = int(argv[2])
+    block_num = argv[2]
     tol = int(argv[3])
+    num_unique_circs = int(argv[4])
 
-    circ = load_circuit(circ_name)
+    circ_path = load_block(circ_name, block_num, good=True)
+    circ = Circuit.from_file(circ_path)
     target = circ.get_unitary()
-    circs = load_compiled_circuits(circ_name, tol, timestep)
+    circs = load_compiled_block_circuits(circ_name, block_num, tol, num_unique_circs)
 
-    dists = [target.get_frobenius_distance(c.get_unitary()) for c in circs[:20]]
-
+    # dists = [target.get_frobenius_distance(c.get_unitary()) for c in circs[:20]]
+    dists = [c[1] for c in circs]
+    circs = [c[0] for c in circs]
     print(np.mean(dists))
 
     base_excitations = []

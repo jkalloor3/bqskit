@@ -34,34 +34,34 @@ class GenerateProbabilityPass(BasePass):
         self.target = None
         return
     
-    async def calculate_chi_1_chi_2(self, ensemble: np.ndarray):
-        num_reps = 50
-        chi_1 = 0
-        chi_2 = 0
-        mean = np.mean(ensemble, axis=0)
-        mean_epsi = 0
+    # async def calculate_chi_1_chi_2(self, ensemble: np.ndarray):
+    #     num_reps = 50
+    #     chi_1 = 0
+    #     chi_2 = 0
+    #     mean = np.mean(ensemble, axis=0)
+    #     mean_epsi = 0
 
-        for un in ensemble:
-            diff = un - mean
-            mean_epsi += np.abs(np.sum(np.einsum("ij,ij->", diff.conj(), diff)))
+    #     for un in ensemble:
+    #         diff = un - mean
+    #         mean_epsi += np.abs(np.sum(np.einsum("ij,ij->", diff.conj(), diff)))
         
-        mean_epsi /= len(ensemble)
+    #     mean_epsi /= len(ensemble)
 
 
-        for _ in range(num_reps):
-            if self.size > len(ensemble):
-                print(f"How tf is this possible {len(ensemble)}")
-                # print(ensemble[0])
-                size = len(ensemble)
-            else:
-                size = self.size
-            sub_ensemble_inds = np.random.choice(len(ensemble), size, replace=False)
-            sub_ensemble = ensemble[sub_ensemble_inds]
-            c_1, c_2 = get_chi_1_chi_2(sub_ensemble, mean=mean, mean_epsi=mean_epsi)
-            chi_1 += c_1
-            chi_2 += c_2
+    #     for _ in range(num_reps):
+    #         if self.size > len(ensemble):
+    #             print(f"How tf is this possible {len(ensemble)}")
+    #             # print(ensemble[0])
+    #             size = len(ensemble)
+    #         else:
+    #             size = self.size
+    #         sub_ensemble_inds = np.random.choice(len(ensemble), size, replace=False)
+    #         sub_ensemble = ensemble[sub_ensemble_inds]
+    #         c_1, c_2 = get_chi_1_chi_2(sub_ensemble, mean=mean, mean_epsi=mean_epsi)
+    #         chi_1 += c_1
+    #         chi_2 += c_2
 
-        return (chi_1 / num_reps, chi_2 / num_reps)
+    #     return (chi_1 / num_reps, chi_2 / num_reps)
     
     def calculate_bias(self, ensemble: list[UnitaryMatrix], target: UnitaryMatrix):
         mean_un = np.mean(ensemble, axis=0)
@@ -82,8 +82,10 @@ class GenerateProbabilityPass(BasePass):
 
         for jj in range(M):
             tr_V_Us[jj] = np.trace(target.conj().T @ ensemble[jj])
-            for kk in range(M):
-                tr_Us[jj, kk] = np.trace(ensemble[jj].conj().T @ ensemble[kk])
+            for kk in range(jj, M):
+                a = np.trace(ensemble[jj].conj().T @ ensemble[kk])
+                tr_Us[jj, kk] = a
+                tr_Us[kk, jj] = a
 
         # Create f and H matrices
         f = -2 * np.real(tr_V_Us)
@@ -133,54 +135,56 @@ class GenerateProbabilityPass(BasePass):
             # data["final_ensemble_probs"] = [1 / len(final_ensemble) for _ in final_ensemble]
             return
 
-        all_ensembles: list[list[Circuit]] = data["sub_select_ensemble"]
-        all_ensemble_unitaries: list[list[UnitaryMatrix]] = [[circ.get_unitary() for circ in ens] for ens in all_ensembles]
-        data["ensemble_unitaries"] = all_ensemble_unitaries
+        # all_ensembles: list[list[Circuit]] = data["sub_select_ensemble"]
+        # all_ensemble_unitaries: list[list[UnitaryMatrix]] = [[circ.get_unitary() for circ in ens] for ens in all_ensembles]
+        # data["ensemble_unitaries"] = all_ensemble_unitaries
 
 
-        if len(all_ensembles) == 0:
-            print("No ensembles to choose from")
-            print(circuit)
-            print(data.target)
-            all_ensembles: list[list[Circuit]] = [[circuit.copy()]]
-            all_ensemble_unitaries: list[list[UnitaryMatrix]] = [[circuit.get_unitary()]]
+        # if len(all_ensembles) == 0:
+        #     print("No ensembles to choose from")
+        #     print(circuit)
+        #     print(data.target)
+        #     all_ensembles: list[list[Circuit]] = [[circuit.copy()]]
+        #     all_ensemble_unitaries: list[list[UnitaryMatrix]] = [[circuit.get_unitary()]]
 
-        # For each ensemble, calculate the bias term
-        biases: list[float] = [self.calculate_bias(ens, target=data.target) for ens in all_ensemble_unitaries]
-        e1s: list[float] = [self.calculate_e1(ens, target=data.target) for ens in all_ensemble_unitaries]
+        # # For each ensemble, calculate the bias term
+        # biases: list[float] = [self.calculate_bias(ens, target=data.target) for ens in all_ensemble_unitaries]
+        # e1s: list[float] = [self.calculate_e1(ens, target=data.target) for ens in all_ensemble_unitaries]
 
-        ratios = [bias / (e1 * e1) for bias, e1 in zip(biases, e1s)]
+        # ratios = [bias / (e1 * e1) for bias, e1 in zip(biases, e1s)]
 
-        print("BIASES, ", biases)
+        # print("BIASES, ", biases)
 
-        ensemble_ind = 0
-        best_ratio = ratios[0]
+        # ensemble_ind = 0
+        # best_ratio = ratios[0]
 
-        # Want ratio to be below 5
-        for i, ratio in enumerate(ratios):
-            if ratio < best_ratio:
-                best_ratio = ratio
-                ensemble_ind = i
+        # # Want ratio to be below 5
+        # for i, ratio in enumerate(ratios):
+        #     if ratio < best_ratio:
+        #         best_ratio = ratio
+        #         ensemble_ind = i
             
-            if best_ratio < 5:
-                break
+        #     if best_ratio < 5:
+        #         break
 
-        if best_ratio > 100:
-            # REALLY BAD ENSEMBLES ONLY
-            print("No good ensemble found, defaulting to single circuit")
-            best_ensemble = [circuit.copy()]
-            best_ensemble_unitaries = [circuit.get_unitary()]
-        else:
-            best_ensemble = all_ensembles[ensemble_ind]
-            best_ensemble_unitaries = np.array([u.numpy for u in all_ensemble_unitaries[ensemble_ind]])
+        # if best_ratio > 100:
+        #     # REALLY BAD ENSEMBLES ONLY
+        #     print("No good ensemble found, defaulting to single circuit")
+        #     best_ensemble = [circuit.copy()]
+        #     best_ensemble_unitaries = [circuit.get_unitary()]
+        # else:
+        #     best_ensemble = all_ensembles[ensemble_ind]
+        #     best_ensemble_unitaries = np.array([u.numpy for u in all_ensemble_unitaries[ensemble_ind]])
 
-        avg_cnots = np.mean([circ.count(CNOTGate()) for circ in best_ensemble])
+        # avg_cnots = np.mean([circ.count(CNOTGate()) for circ in best_ensemble])
 
-        print("Orig CNOTS", circuit.count(CNOTGate()), flush=True)
-        print("Average CNOTS", avg_cnots, flush=True)
-        print("Ratio: ", best_ratio, flush=True)
+        # print("Orig CNOTS", circuit.count(CNOTGate()), flush=True)
+        # print("Average CNOTS", avg_cnots, flush=True)
+        # print("Ratio: ", best_ratio, flush=True)
 
-        data["final_ensemble"] = best_ensemble
+        # data["final_ensemble"] = best_ensemble
+        best_ensemble: list[tuple[Circuit, float]] = data["final_ensemble"]
+        best_ensemble_unitaries: list[UnitaryMatrix] = np.array([circ.get_unitary() for circ, _ in best_ensemble])
 
         if len(best_ensemble) < 5:
             data["final_ensemble_probs"] = [1 / len(best_ensemble) for _ in best_ensemble]
@@ -192,12 +196,8 @@ class GenerateProbabilityPass(BasePass):
 
         if "checkpoint_dir" in data:
             data["finished_probs_generation"] = True
-            data.pop("sub_select_ensemble")
+            # data.pop("sub_select_ensemble")
             checkpoint_data_file = data["checkpoint_data_file"]
             pickle.dump(data, open(checkpoint_data_file, "wb"))
         return
-
-
-
-
 

@@ -1,0 +1,7 @@
+Original CNOT Count:  68
+Jiggle Skew:  0
+Checkpoint Dir:  block_checkpoints_nisq_0/qft_8_0_5_250/
+RESTORING FROM CHECKPOINT
+Num Ensembles:  6
+Ensemble Lengths:  [20000, 20000, 20000, 20000, 20000, 20000]
+Running Generate Probability Pass

@@ -10,7 +10,7 @@ header = """#!/bin/bash -l
 #SBATCH -q regular
 #SBATCH -A m4141_g
 #SBATCH -C gpu
-#SBATCH --time=6:55:00
+#SBATCH --time=4:20:00
 #SBATCH -N 1
 #SBATCH --signal=B:USR1@1
 #SBATCH --output=./slurm_logs/{file}{extra}_{unique_circs}/{circ}/{tol}_tol_block_size_6_{jiggle_skew}
@@ -28,8 +28,9 @@ if __name__ == '__main__':
     # file = "get_counts"
     # file = "get_ensemble_expectations"
     # file = "get_shortest_circuits_new"
-    # file = "get_ensemble_final_block"
-    file = "get_ensemble_final_block_cliffordt"
+    file = "get_ensemble_final_block"
+    # file = "get_ensemble_final_block_cliffordt"
+    # file = "run_simulations_block"
     # file = "create_block_data_hist"
     
     # Get all circs
@@ -89,6 +90,7 @@ if __name__ == '__main__':
                         # # log_file = f"/pscratch/sd/j/jkalloor/bqskit/slurm_logs/run_simulations_new_post_opt_{unique_circs}/{circ}/{tol}_tol_block_size_8"
                         # # utries_file = f"/pscratch/sd/j/jkalloor/bqskit/ensemble_shortest_circuits_{unique_circs}_circ_cliff_t_final/{circ}/{tol}/{circ}.pkl"
                         # hist_file = f"/pscratch/sd/j/jkalloor/bqskit/block_histograms/{circ}_8_3/data.png"
+                        csv_file = f"/pscratch/sd/j/jkalloor/bqskit/block_checkpoints_nisq_{jiggle_skew}/{circ}_{timestep}_{tol}_{unique_circs}/data_try1.csv"
 
                         # # if os.path.exists(utries_file):
                         # #     continue
@@ -96,6 +98,9 @@ if __name__ == '__main__':
 
                         # if os.path.exists(hist_file):
                         #     continue
+
+                        if not os.path.exists(csv_file):
+                            continue
 
                         to_write = open(file_name, 'w')
                         to_write.write(header.format(file=file, circ=circ, tol=tol, timestep=timestep, extra=extra, unique_circs=unique_circs, jiggle_skew=jiggle_skew))

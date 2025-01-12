@@ -4,8 +4,19 @@ from pathlib import Path
 import pickle
 import numpy as np
 import os
+import pandas as pd
+import numpy as np
 
 extra = "_qsearch"
+
+def load_block(circ_name, block_num, good=True) -> str:
+    circ_name = f"{circ_name}_{block_num}"
+    if good:
+        circ_file = f"good_blocks/{circ_name}.qasm"
+    else:
+        circ_file = f"bad_blocks/{circ_name}.qasm"
+    return circ_file
+
 
 def load_circuit(circ_name: str, timestep: int = 0, opt: bool = False) -> Circuit:
     opt_str = "_opt" if opt else ""
@@ -49,6 +60,26 @@ def load_compiled_circuits(circ_name: int, tol: int, timestep: int, extra_str=ex
         full_path = f"/pscratch/sd/j/jkalloor/bqskit/ensemble_shortest_circuits{extra_str}/{circ_name}/{tol}/{circ_name}.pkl"
     print(full_path)
     return pickle.load(open(full_path, "rb"))
+
+def load_compiled_block_circuits(circ_name: int, block_num: int,  tol: int, num_unique_circs: int) -> list[tuple[Circuit, float]]:
+    full_path = f"/pscratch/sd/j/jkalloor/bqskit/block_checkpoints_nisq_0/{circ_name}_{block_num}_{tol}_{num_unique_circs}/data.data"
+    csv_path = f"/pscratch/sd/j/jkalloor/bqskit/block_checkpoints_nisq_0/{circ_name}_{block_num}_{tol}_{num_unique_circs}/data_try1.csv"
+    data = pickle.load(open(full_path, "rb"))["ensemble"]
+    df = pd.read_csv(csv_path, header=0)
+    ind = np.argmin(df["Ratio"])
+    print("Selecting ensemble number ", ind, "with a ratio of ", df["Ratio"][ind], "and circ count of ", len(data[ind]), flush=True)
+    return data[ind]
+
+def load_compiled_block_circuits_qp(circ_name: int, block_num: int,  tol: int, num_unique_circs: int) -> list[tuple[Circuit, float]]:
+    full_path = f"/pscratch/sd/j/jkalloor/bqskit/block_checkpoints_nisq_0/{circ_name}_{block_num}_{tol}_{num_unique_circs}/data.data"
+    data = pickle.load(open(full_path, "rb"))
+    orig_ensemble = data["final_ensemble"]
+    probs = data["final_ensemble_probs"]
+    # Sample 10000 circuits according to probs
+    ens_inds = np.random.choice(len(orig_ensemble), size=10000, p=probs)
+    ens = [orig_ensemble[i] for i in ens_inds]
+    return ens
+
 
 def load_compiled_circuits_varied(circ_name: int, tol: int, vary: int) -> list[Circuit]:
     full_path = f"/pscratch/sd/j/jkalloor/bqskit/ensemble_circ_varied/ensemble_shortest_circuits_{vary}_circ/{circ_name}/{tol}/{circ_name}.pkl"

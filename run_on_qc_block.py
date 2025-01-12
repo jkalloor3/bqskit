@@ -24,18 +24,11 @@ from qiskit_aer.noise import NoiseModel, pauli_error
 
 from bqskit.ext import bqskit_to_qiskit, qiskit_to_bqskit
 
-from util import load_circuit, load_compiled_circuits
-
-import multiprocessing as mp
+from util import load_block, load_compiled_block_circuits, frobenius_cost, tvd_dict
 
 shots = 100
 
-def tvd(p: dict[str, int], q: dict[str, int], shots: int):
-    p = {k: v/shots for k, v in p.items()}
-    q = {k: v/shots for k, v in q.items()}
-    return 0.5 * sum(abs(p.get(k, 0) - q.get(k, 0)) for k in set(p) | set(q))
-
-def run_circuits(all_circs: list[list[QuantumCircuit]], shots: int, backend: IBMBackend = None) -> list[list[dict[str, int]]]:
+def run_circuits(all_circs: list[list[QuantumCircuit]], shots: int, backend: IBMBackend = None) -> list[dict[str, int]]:
     '''
     Run a set of noisy circuits on a given backend
     '''
@@ -43,18 +36,21 @@ def run_circuits(all_circs: list[list[QuantumCircuit]], shots: int, backend: IBM
         sampler = Sampler()
     else:
         sampler = BackendSampler(backend=backend)
+    # Return aggregated results for each random circuit
     all_results = []
     for circs in all_circs:
         job = sampler.run(circs, shots=shots)
         print(f">>> Job ID: {job.job_id()}")
         print(f">>> Job Status: {job.status()}")
         result = job.result()
-        results = [result[j].data.meas.get_counts() for j in range(len(circs))]
-        all_results.append(results)
-    # final_sv = aggregate_results(results)
+        if len(all_results) == 0:
+            all_results = [result[j].data.meas.get_counts() for j in range(len(circs))]
+        else:
+            results = [result[j].data.meas.get_counts() for j in range(len(circs))]
+            all_results = [aggregate_results([all_results[i], results[i]]) for i in range(len(circs))]
     return all_results
 
-def run_noisy_ensemble(ens_size, shots: int = 1, random_states: list[np.ndarray] = None, backend: IBMBackend = None) -> tuple[list[list[dict[str, int]]], np.ndarray]:
+def run_noisy_ensemble(ens_size, shots: int = 1, random_states: list[np.ndarray] = None, backend: IBMBackend = None) -> tuple[list[dict[str, int]], np.ndarray]:
     '''
     Run an ensemble of size `ens_size` on a noisy backend.
 
@@ -63,18 +59,12 @@ def run_noisy_ensemble(ens_size, shots: int = 1, random_states: list[np.ndarray]
     Also, if the number of qubits is less than 10, returns the mean unitary of the ensemble.
     '''
     global all_qcircs
-    global circs
+    global uns
 
     ensemble_inds: list[int] = np.random.choice(len(all_qcircs), ens_size)
     ensemble: list[QuantumCircuit] = [all_qcircs[i] for i in ensemble_inds]
-    
-    if ensemble[0].num_qubits <= 10:
-        if ens_size < 10:
-            print([normalized_frob_dist(circs[i].get_unitary()) for i in ensemble_inds])
-        mean_un = np.mean(np.array([circs[i].get_unitary().numpy for i in ensemble_inds]), axis=0)
-    else:
-        mean_un = None
-
+    ensemble_uns = [uns[i] for i in ensemble_inds]
+    mean_un = np.mean(np.array(ensemble_uns), axis=0)
     print("Avg CNOT count: ", np.mean([c.count_ops()['cx'] for c in ensemble]))
     all_circs = [get_random_init_state_circuits(c, random_states, backend=backend) for c in ensemble]
     final_svs = run_circuits(all_circs, shots=shots, backend=backend)
@@ -100,11 +90,6 @@ def get_qcirc(circ: Circuit):
     q_circ.measure_all()
     # (time.time() - start)
     return q_circ
-
-def normalized_frob_dist(mat: np.ndarray):
-    global target
-    frob_dist = target.get_frobenius_distance(mat) / np.sqrt(mat.shape[0] * 2)
-    return frob_dist
 
 def get_random_states(num_qubits: int, num_random_states: int = 4) -> list[np.ndarray]:
     states = []
@@ -147,49 +132,40 @@ def setup_ibm(num_qubits: int) -> tuple[QiskitRuntimeService, IBMBackend]:
     print(backend.name, backend.status())
     return service, backend
 
-
-# Circ 
 if __name__ == '__main__':
-
-    # print(get_oneq_rb(device_backend))
-    # print(get_twoq_rb(device_backend))
-    global basic_circ
     global all_qcircs
-    global calc_func
-    global circs
+    global uns
     global target
-
-    # circ_type = argv[1]
 
     np.set_printoptions(precision=2, threshold=np.inf, linewidth=np.inf)
 
+    circ_name = argv[1]
+    block_num = argv[2]
+    tol = int(argv[3])
+    num_unique_circs = int(argv[4])
+    cliff = False
 
-    # circ_name = argv[1]
-    # timestep = int(argv[2])
-    # tol = int(argv[3])
+    circ_path = load_block(circ_name, block_num, good=True)
+    initial_circ = Circuit.from_file(circ_path)
+    target = initial_circ.get_unitary()
 
-    # initial_circ = load_circuit(circ_name, opt=True)
-    initial_circ = Circuit.from_file(
-        '/pscratch/sd/j/jkalloor/bqskit/fixed_block_checkpoints_min' + 
-        '/adder9_0_2_8_3/block_2.qasm')
     service, backend = setup_ibm(initial_circ.num_qudits)
 
+    circs = load_compiled_block_circuits(circ_name, block_num, tol, num_unique_circs)
+    print("Num Circs: ", len(circs), flush=True)
+
+    # dists = [target.get_frobenius_distance(c.get_unitary()) for c in circs[:20]]
+    dists = [c[1] for c in circs]
+    bqskit_circs = [c[0] for c in circs]
+    uns = [c.get_unitary() for c in bqskit_circs]
+    frob_dists = [frobenius_cost(target, un) for un in uns]
+    print("Avg Norm. Dist: ", np.mean(dists))
+    print("Avg Dist: ", np.mean(frob_dists))
     print("Original CX Count: ", initial_circ.count(CNOTGate()))
-    if initial_circ.num_qudits <= 10:
-        target = initial_circ.get_unitary()
 
-    # num_unique_circs = int(argv[4])
-    # opt_str = "_post_opt" if int(argv[5]) == 1 else ""
-    # circs = load_compiled_circuits(circ_name, tol, timestep, 
-    #                                ignore_timestep=True, 
-    #                                extra_str=f"_{num_unique_circs}_circ_final_min{opt_str}")
+    print("LOADED CIRCUITS", flush=True)
 
-    data: PassData = pickle.load(open("/pscratch/sd/j/jkalloor/bqskit/hamiltonian_perturbation_checkpoints_zxzxz/adder9_hard_0.0001_1e-06_32/" + 
-                                      "data.data", 
-                                      "rb"))
-    circs = data.get("ensemble")
-
-    all_qcircs = [get_qcirc(c) for c in circs]
+    all_qcircs = [get_qcirc(c) for c in bqskit_circs]
     print("Got MAP", flush=True)
 
     print("LOADED CIRCUITS", flush=True)
@@ -202,7 +178,7 @@ if __name__ == '__main__':
     base_excitations = []
     noisy_excitations = []
 
-    ensemble_sizes = [1, 10, 32] #, 1000] #, 2000, 4000]
+    ensemble_sizes = [1, 10, 32, 500, 1000] #, 2000, 4000]
     shot_ratio = max(ensemble_sizes)
 
     num_random_states = 2
@@ -212,11 +188,14 @@ if __name__ == '__main__':
     qiskit_circs = get_random_init_state_circuits(qiskit_circ, random_states, backend=backend)
 
     # Get the base results
-    base_svs = run_circuits([qiskit_circs], shots=shots*shot_ratio)[0]
+    base_svs = run_circuits([qiskit_circs], shots=shots*shot_ratio)
     noisy_svs = run_circuits([qiskit_circs], shots=shots*shot_ratio, 
-                            backend=backend)[0]
+                            backend=backend)
+    
+    # print(base_svs)
+    # print(noisy_svs)
 
-    noisy_tvds = [tvd(base_svs[i], noisy_svs[i], shots=shots*shot_ratio) for i in range(num_random_states)]
+    noisy_tvds = [tvd_dict(base_svs[i], noisy_svs[i], shots=shots*shot_ratio) for i in range(num_random_states)]
 
     print("Noisy TVD: ", noisy_tvds)
 
@@ -230,16 +209,11 @@ if __name__ == '__main__':
     for j, ens_size in enumerate(ensemble_sizes):
         shots_per_circuit = shots * (shot_ratio // ens_size)
         final_svs, mean_un = run_noisy_ensemble(ens_size, shots=shots_per_circuit, random_states=random_states, backend=backend)
-        print("Final SVS Shape: ", len(final_svs), len(final_svs[0]))
-        aggregated_svs = [aggregate_results([final_svs[j][i] for j in range(ens_size)]) for i in range(num_random_states)]
-        avg_noisy_tvds = np.array([tvd(base_svs[i], aggregated_svs[j][i],
+        avg_noisy_tvds = np.array([tvd_dict(base_svs[i], final_svs[i],
                                     shots=shots_per_circuit*ens_size) 
                                     for i in range(num_random_states)])
-        if mean_un is not None:
-            frob_dist = normalized_frob_dist(mean_un)
-            print(f"Ensemble Size: {ens_size}, Frobenius Distance Normalized: {frob_dist}")
-        else:
-            print(f"Ensemble Size: {ens_size}")
+        frob_dist = frobenius_cost(mean_un, target)
+        print(f"Ensemble Size: {ens_size}, Frobenius Distance: {frob_dist}")
 
         print("Avg Noisy TVD: ", avg_noisy_tvds)
 
