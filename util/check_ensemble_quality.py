@@ -24,6 +24,9 @@ class CheckEnsembleQualityPass(BasePass):
     
     async def get_ensemble_data(self, ens: list[tuple[Circuit, float]], target: UnitaryMatrix, orig_count: int) -> dict[str, Any]:
         ensemble_data = {}
+        print(type(ens))
+        print(type(ens[0]))
+        print(type(ens[0][0]))
         unitaries: list[UnitaryMatrix] = [x[0].get_unitary() for x in ens]
         norm_e1s = [normalized_frob_cost(un, target) for un in unitaries]
         frob_e1s = [frobenius_cost(un, target) for un in unitaries]
@@ -52,17 +55,24 @@ class CheckEnsembleQualityPass(BasePass):
 
     async def run(self, circuit: Circuit, data: PassData) -> None:
         # Check Ensemble Quality and output it to a CSV
-        if "ensemble" not in data:
-            data["good_ensemble"] = False
-            return
+        # if "ensemble" not in data:
+        #     data["good_ensemble"] = False
+        #     return
 
         ensemble: list[list[tuple[Circuit, float]]] = data["ensemble"]
+
+        print("Num Ensembles: ", len(ensemble), flush=True)
+        print("Ensemble Lengths: ", [len(x) for x in ensemble], flush=True)
 
         for i in range(3, len(ensemble)):
             self.ensemble_names.append(f"Random Circuits #{i-2}")
         
         target = data.target
-        csv_dict: list[dict[str, Any]] = await get_runtime().map(self.get_ensemble_data, ensemble, target=target, orig_count = self.gate_func(circuit))
+        if len(ensemble) == 1:
+            csv_dict = [await self.get_ensemble_data(ensemble[0], target, self.gate_func(circuit))]
+        else:
+            csv_dict: list[dict[str, Any]] = await get_runtime().map(self.get_ensemble_data, ensemble, target=target, orig_count = self.gate_func(circuit))
+        
         final_ratios = []
         for i in range(len(ensemble)):
             csv_dict[i]["Ensemble Generation Method"] = self.ensemble_names[i]
@@ -73,6 +83,16 @@ class CheckEnsembleQualityPass(BasePass):
 
         if data["good_ensemble"]:
             print("FOUND GOOD ENSEMBLE", flush=True)
+
+        # Pick best ensemble
+        best_ind = np.argmin(final_ratios)
+        # Randomly sample 2000 circuits from the best ensemble
+        best_ensemble = ensemble[best_ind]
+        if len(best_ensemble) > 2000:
+            rand_inds = np.random.choice(len(best_ensemble), 2500, replace=False)
+            best_ensemble = [best_ensemble[i] for i in rand_inds]
+            # best_ensemble = np.random.choice(best_ensemble, 2000, replace=False)
+        data["final_ensemble"] = best_ensemble
         
         if "checkpoint_dir" in data:
             checkpoint_data_file: str = data["checkpoint_data_file"]

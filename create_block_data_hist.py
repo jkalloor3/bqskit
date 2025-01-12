@@ -66,7 +66,7 @@ def get_shortest_circuits(circ_name: str) -> list[Circuit]:
 
 def get_csv_data(file_name: str) -> list:
     data = pd.read_csv(file_name, header=0)
-    print(data['Ratio'])
+    # print(data['Ratio'])
     return min(data['Ratio'])
 
 def get_data(file_name: str) -> tuple[list, list, list, list]:

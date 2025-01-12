@@ -22,8 +22,8 @@ def get_density_matrix(vector: np.ndarray[np.complex128]) -> np.ndarray[np.compl
     return np.array(np.outer(vector, vector.conj()), dtype=np.complex128)
 
 def get_average_density_matrix(vectors: list[np.ndarray[np.complex128]]) -> np.ndarray[np.complex128]:
-    mat = get_density_matrix(vectors[0]) / len(vectors)
-    for vector in vectors[1:]:
+    mat = 0
+    for vector in vectors:
         mat += get_density_matrix(vector) / len(vectors)
     return mat
 
@@ -33,6 +33,11 @@ Calculate the TVD between two probability distributions.
 
 def tvd(p: np.ndarray[np.complex128], q: np.ndarray[np.complex128]) -> np.float64:
     return 0.5 * np.sum(np.abs(p - q))
+
+def tvd_dict(p: dict[str, int], q: dict[str, int], shots: int) -> np.float64:
+    p = {k: v/shots for k, v in p.items()}
+    q = {k: v/shots for k, v in q.items()}
+    return 0.5 * sum(abs(p.get(k, 0) - q.get(k, 0)) for k in set(p) | set(q))
 
 def frobenius_cost(utry: UnitaryMatrix, target: UnitaryMatrix):
     '''
