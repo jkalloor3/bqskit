@@ -439,6 +439,22 @@ class CreateEnsemblePass(BasePass):
             print("Finished Create Ensemble", flush=True)
             data["ensemble"] = ensembles
             return
+        
+        # Check this for old data
+        if "ensemble" in data:
+            print("Already created ensemble", flush=True)
+            for i, ens in enumerate(data["ensemble"]):
+                if len(ens) > 2000:
+                    # Already jiggled
+                    store_ensemble(ens, f"{checkpoint_dir}/jiggled_ensemble_{i}_{self.checkpoint_extra_str}.qasms")
+                store_ensemble(ens, f"{checkpoint_dir}/ensemble_{i}_{self.checkpoint_extra_str}.qasms")
+            print(list(data.keys()), flush=True)
+            data.pop("scan_sols", None)
+            data.pop("ensemble", None)
+            data.pop("jiggled_ensemble", None)
+            data.pop("final_ensemble", None)
+            data.pop("final_ensemble_probs", None)
+            return
 
         # Get scan_sols for each circuit_gate
         block_data = data[ForEachBlockPass.key]
