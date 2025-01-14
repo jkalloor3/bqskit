@@ -5,13 +5,12 @@ import multiprocessing as mp
 from bqskit.compiler.compiler import Compiler
 from bqskit.ir.gates import CNOTGate, RZGate, U3Gate
 # Generate a super ensemble for some error bounds
-from bqskit.passes import LEAPSynthesisPass, CheckpointRestartPass, ToU3Pass
-from bqskit.passes import ForEachBlockPass, ScanPartitioner, CreateEnsemblePass
-from util import JiggleEnsemblePass
+from bqskit.passes import CheckpointRestartPass, ToU3Pass
+from bqskit.passes import ForEachBlockPass, ScanPartitioner
+from util import JiggleEnsemblePass, CreateEnsemblePass
 from ntro import NumericalTReductionPass
 from bqskit import enable_logging
-from util import normalized_frob_cost, LEAPSynthesisPass2, SecondLEAPSynthesisPass
-from util import normalized_gp_frob_cost, EnsembleScanningGateRemovalPass, JiggleScansPass
+from util import LEAPSynthesisPass2
 from util import CheckEnsembleQualityPass, FixGlobalPhasePass, ConvertToZXZXZSimple
 
 # enable_logging(True)

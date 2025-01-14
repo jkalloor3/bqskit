@@ -435,7 +435,8 @@ class CreateEnsemblePass(BasePass):
             ensembles = []
             while os.path.exists(file_name):
                 ensembles.append(load_ensemble(file_name, data.target))
-                file_name = f"{checkpoint_dir}/ensemble_{len(ensembles)}.qasms"
+                file_name = f"{checkpoint_dir}/ensemble_{len(ensembles)}_{self.checkpoint_extra_str}.qasms"
+            print(f"File Name: {file_name} does not exist", flush=True)
             print("Finished Create Ensemble", flush=True)
             data["ensemble"] = ensembles
             return

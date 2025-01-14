@@ -10,12 +10,13 @@ from bqskit.ir.point import CircuitPoint
 from bqskit.ir.gates import CNOTGate, GlobalPhaseGate, VariableUnitaryGate
 # Generate a super ensemble for some error bounds
 from bqskit.passes import LEAPSynthesisPass, CheckpointRestartPass
-from bqskit.passes import ForEachBlockPass, ScanPartitioner, CreateEnsemblePass
+from bqskit.passes import ForEachBlockPass, ScanPartitioner
 from util import JiggleEnsemblePass
 from util import  LEAPSynthesisPass2, SecondLEAPSynthesisPass
 from util import EnsembleScanningGateRemovalPass
 from util import CheckEnsembleQualityPass, FixGlobalPhasePass
 from util import GenerateProbabilityPass
+from util import CreateEnsemblePass
 
 # enable_logging(True)
 
