@@ -73,6 +73,8 @@ def load_compiled_block_circuits(circ_name: int, block_num: int,  tol: int, num_
 def load_compiled_block_circuits_qp(circ_name: int, block_num: int,  tol: int, num_unique_circs: int) -> list[tuple[Circuit, float]]:
     full_path = f"/pscratch/sd/j/jkalloor/bqskit/block_checkpoints_nisq_0/{circ_name}_{block_num}_{tol}_{num_unique_circs}/data.data"
     data = pickle.load(open(full_path, "rb"))
+    if "final_ensemble_probs" not in data:
+        return []
     orig_ensemble = data["final_ensemble"]
     probs = data["final_ensemble_probs"]
     # Sample 10000 circuits according to probs

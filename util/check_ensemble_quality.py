@@ -8,6 +8,7 @@ from bqskit.ir.gates import CNOTGate, TGate, TdgGate
 from bqskit.ir import Circuit
 from bqskit.qis import UnitaryMatrix
 from bqskit.runtime import get_runtime
+import pickle
 
 from .distance import normalized_frob_cost, frobenius_cost
 
@@ -96,6 +97,7 @@ class CheckEnsembleQualityPass(BasePass):
         
         if "checkpoint_dir" in data:
             checkpoint_data_file: str = data["checkpoint_data_file"]
+            pickle.dump(data, open(checkpoint_data_file, "wb"))
             csv_file = checkpoint_data_file.replace(".data", f"{self.csv_name}.csv")
             writer = csv.DictWriter(open(csv_file, "w", newline=""), fieldnames=csv_dict[0].keys())
             writer.writeheader()

@@ -2,8 +2,6 @@ from bqskit.ir.circuit import Circuit
 from sys import argv
 from bqskit.compiler.compiler import Compiler
 # Generate a super ensemble for some error bounds
-from bqskit.passes import *
-from bqskit.ir.gates import CNOTGate
 
 from util import AnalyzeBlockPass, WriteQasmPass, MakeHistogramPass
 from util import WriteQasmPass
@@ -150,4 +148,6 @@ if __name__ == '__main__':
     # circ_name = argv[1]
     # get_shortest_circuits(circ_name)
     # create_large_block_histogram()
-    create_ratio_histogram("/pscratch/sd/j/jkalloor/bqskit/block_checkpoints_nisq_2")
+    cliff_t_dir = "/pscratch/sd/j/jkalloor/bqskit/block_checkpoints_clifft"
+    nisq_dir = "/pscratch/sd/j/jkalloor/bqskit/block_checkpoints_nisq_0"
+    create_ratio_histogram(nisq_dir)
