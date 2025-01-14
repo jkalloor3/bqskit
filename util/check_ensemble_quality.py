@@ -4,6 +4,8 @@ from typing import Any
 
 from bqskit.compiler.passdata import PassData
 from bqskit.compiler.basepass import BasePass
+from bqskit.passes import ForEachBlockPass
+import pickle
 from bqskit.ir.gates import CNOTGate, TGate, TdgGate
 from bqskit.ir import Circuit
 from bqskit.qis import UnitaryMatrix
@@ -24,10 +26,14 @@ class CheckEnsembleQualityPass(BasePass):
     
     async def get_ensemble_data(self, ens: list[tuple[Circuit, float]], target: UnitaryMatrix, orig_count: int) -> dict[str, Any]:
         ensemble_data = {}
-        print(type(ens))
-        print(type(ens[0]))
-        print(type(ens[0][0]))
-        unitaries: list[UnitaryMatrix] = [x[0].get_unitary() for x in ens]
+        if isinstance(ens[0], Circuit):
+            print(type(ens[0]))
+            unitaries = [x.get_unitary() for x in ens if isinstance(x, Circuit)]
+        else:
+            print(type(ens[0][0]), type(ens[0][1]), flush=True)
+            unitaries: list[UnitaryMatrix] = [x[0].get_unitary() for x in ens]
+
+        print("Num Unitaries: ", len(unitaries), flush=True)
         norm_e1s = [normalized_frob_cost(un, target) for un in unitaries]
         frob_e1s = [frobenius_cost(un, target) for un in unitaries]
         norm_e1 = np.mean(norm_e1s)
@@ -59,6 +65,15 @@ class CheckEnsembleQualityPass(BasePass):
         #     data["good_ensemble"] = False
         #     return
 
+        data.pop(ForEachBlockPass.key, None)
+
+        print("Popped ForEachBlockPass key", flush=True)
+        print(data.keys(), flush=True)
+
+        if "checkpoint_dir" in data:
+            checkpoint_data_file = data["checkpoint_data_file"]
+            pickle.dump(data, open(checkpoint_data_file, "wb"))
+
         ensemble: list[list[tuple[Circuit, float]]] = data["ensemble"]
 
         print("Num Ensembles: ", len(ensemble), flush=True)
@@ -80,6 +95,8 @@ class CheckEnsembleQualityPass(BasePass):
 
         # Ensemble is good if any of the final ratios is less than 10
         data["good_ensemble"] = any([x < 10 for x in final_ratios])
+
+        print("Final Ratios: ", final_ratios, flush=True)
 
         if data["good_ensemble"]:
             print("FOUND GOOD ENSEMBLE", flush=True)

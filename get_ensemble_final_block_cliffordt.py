@@ -92,6 +92,7 @@ def get_shortest_circuits(circ_name: str, circ_file: str, tol: int, num_unique_c
                                   use_calculated_error=False,
                                   checkpoint_extra_str="_try1",
                                   count_t=True,
+                                  flood_circ=False,
                                   do_u3_perturbation=True)
 
     leap_workflow = [
@@ -113,10 +114,11 @@ def get_shortest_circuits(circ_name: str, circ_file: str, tol: int, num_unique_c
         #     allocate_error=True,
         # ),
         # create_ensemble_pass,
-        jiggle_pass,
+        # jiggle_pass,
         CheckEnsembleQualityPass(True, csv_name="_try1"),
     ]
     num_workers = mp.cpu_count()
+    print("Num Workers: ", num_workers)
     compiler = Compiler(num_workers=num_workers)
     # target = circ.get_unitary()
     out_circ, data = compiler.compile(circ, workflow=leap_workflow, request_data=True)

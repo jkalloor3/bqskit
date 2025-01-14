@@ -5,7 +5,7 @@ import logging
 
 from bqskit.compiler.basepass import BasePass
 from bqskit.compiler.passdata import PassData
-from bqskit.passes import ToU3Pass
+from bqskit.passes import ToU3Pass, ForEachBlockPass
 from bqskit.ir.circuit import Circuit, CircuitPoint
 from bqskit.runtime import get_runtime
 from typing import Any
@@ -112,7 +112,7 @@ class  JiggleEnsemblePass(BasePass):
         # For each u3, come up with 16 param perturbations
         num_options = 16
         u3_param_options: list[list[list[float]]] = []
-        perturb_dist = (self.success_threshold - dist) / (num_u3s)
+        perturb_dist = (self.success_threshold - dist) / (num_u3s + 1)
         for op in circ.operations():
             if isinstance(op.gate, U3Gate):
                 cur_u3_utry = op.get_unitary()
@@ -121,36 +121,38 @@ class  JiggleEnsemblePass(BasePass):
         # Now randomly pick num combinations of these options
         final_circs = []
         for _ in range(num):
-            rand_inds = np.random.choice(num_options, num_u3s, replace=True)
-            # Positive perturbation
-            full_params_1: list[list[float]] = [u3_param_options[i][ind * 2] for i, ind in enumerate(rand_inds)]
-            # Negative perturbation
-            full_params_2: list[list[float]] = [u3_param_options[i][ind * 2 + 1] for i, ind in enumerate(rand_inds)]
-            # full_params_1 = list(chain.from_iterable(full_params_1))
-            new_circ_1 = circ.copy()
-            ind = 0
-            for op in new_circ_1.operations():
-                if isinstance(op.gate, U3Gate):
-                    op.params = full_params_1[ind]
-                    ind += 1
-            
-            new_circ_2 = circ.copy()
-            ind = 0
-            for op in new_circ_2.operations():
-                if isinstance(op.gate, U3Gate):
-                    op.params = full_params_2[ind]
-                    ind += 1
+            if num_u3s > 0:
+                rand_inds = np.random.choice(num_options, num_u3s, replace=True)
+                # Positive perturbation
+                full_params_1: list[list[float]] = [u3_param_options[i][ind * 2] for i, ind in enumerate(rand_inds)]
+                # Negative perturbation
+                full_params_2: list[list[float]] = [u3_param_options[i][ind * 2 + 1] for i, ind in enumerate(rand_inds)]
+                # full_params_1 = list(chain.from_iterable(full_params_1))
+                new_circ_1 = circ.copy()
+                ind = 0
+                for op in new_circ_1.operations():
+                    if isinstance(op.gate, U3Gate):
+                        op.params = full_params_1[ind]
+                        ind += 1
+                
+                new_circ_2 = circ.copy()
+                ind = 0
+                for op in new_circ_2.operations():
+                    if isinstance(op.gate, U3Gate):
+                        op.params = full_params_2[ind]
+                        ind += 1
 
-            global_phase_correction = target.get_target_correction_factor(new_circ_1.get_unitary())
-            new_circ_1.append_gate(GlobalPhaseGate(1, global_phase=global_phase_correction), (0,))
-            global_phase_correction = target.get_target_correction_factor(new_circ_2.get_unitary())
-            new_circ_2.append_gate(GlobalPhaseGate(1, global_phase=global_phase_correction), (0,))
+                global_phase_correction = target.get_target_correction_factor(new_circ_1.get_unitary())
+                new_circ_1.append_gate(GlobalPhaseGate(1, global_phase=global_phase_correction), (0,))
+                global_phase_correction = target.get_target_correction_factor(new_circ_2.get_unitary())
+                new_circ_2.append_gate(GlobalPhaseGate(1, global_phase=global_phase_correction), (0,))
+                
+            else:
+                new_circ_1 = circ.copy()
+                new_circ_2 = circ.copy()
             
             dist_1 = self.cost.calc_cost(new_circ_1, target)
             dist_2 = self.cost.calc_cost(new_circ_2, target)
-
-            # print("Orig Dist: ", dist, " New Cost: ", dist_1, " Threshold: ", self.success_threshold, flush=True)
-
             full_params_1 = new_circ_1.params
             full_params_2 = new_circ_2.params
             new_c_1 = self.jiggle_params(full_params_1, new_circ_1, dist_1, target)
@@ -319,10 +321,10 @@ class  JiggleEnsemblePass(BasePass):
 
         data["ensemble"] = ensemble
 
-        if "checkpoint_dir" in data:
-            data[checkpoint_str] = True
-            checkpoint_data_file = data["checkpoint_data_file"]
-            pickle.dump(data, open(checkpoint_data_file, "wb"))
+        # if "checkpoint_dir" in data:
+        #     data[checkpoint_str] = True
+        #     checkpoint_data_file = data["checkpoint_data_file"]
+        #     pickle.dump(data, open(checkpoint_data_file, "wb"))
         return
 
         
