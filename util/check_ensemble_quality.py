@@ -8,7 +8,8 @@ from bqskit.ir.gates import CNOTGate, TGate, TdgGate
 from bqskit.ir import Circuit
 from bqskit.qis import UnitaryMatrix
 from bqskit.runtime import get_runtime
-import pickle
+import os
+from util.common import load_ensemble, store_ensemble
 
 from .distance import normalized_frob_cost, frobenius_cost
 
@@ -16,18 +17,17 @@ class CheckEnsembleQualityPass(BasePass):
     def __init__(self, 
                  count_t: bool = False,
                  csv_name: str = "",
+                 checkpoint_extra_str: str = ""
                  ) -> None:
         self.count_t = count_t
         self.csv_name = csv_name
         self.ensemble_names = ["Least CNOTs", "Medium CNOTs", "Valid CNOTs"]
         self.gate_title = "T Count" if count_t else "CNOT Count"
         self.gate_func = lambda x: x.count(TGate()) + x.count(TdgGate()) + x.num_params * 60 if count_t else x.count(CNOTGate())
+        self.checkpoint_extra_str = checkpoint_extra_str
     
     async def get_ensemble_data(self, ens: list[tuple[Circuit, float]], target: UnitaryMatrix, orig_count: int) -> dict[str, Any]:
         ensemble_data = {}
-        print(type(ens))
-        print(type(ens[0]))
-        print(type(ens[0][0]))
         unitaries: list[UnitaryMatrix] = [x[0].get_unitary() for x in ens]
         norm_e1s = [normalized_frob_cost(un, target) for un in unitaries]
         frob_e1s = [frobenius_cost(un, target) for un in unitaries]
@@ -56,11 +56,17 @@ class CheckEnsembleQualityPass(BasePass):
 
     async def run(self, circuit: Circuit, data: PassData) -> None:
         # Check Ensemble Quality and output it to a CSV
-        # if "ensemble" not in data:
-        #     data["good_ensemble"] = False
-        #     return
 
         ensemble: list[list[tuple[Circuit, float]]] = data["ensemble"]
+        checkpoint_dir = data["checkpoint_dir"]
+        final_ens_file = f"{checkpoint_dir}/ensemble_final.qasms"
+        
+        if os.path.exists(final_ens_file):
+            # Load the ensemble from the checkpoint
+            data["final_ensemble"] = load_ensemble(final_ens_file, data.target, 
+                                                   add_floats=False)
+            print("Check Ensemble Quality Pass", flush=True)
+            return
 
         print("Num Ensembles: ", len(ensemble), flush=True)
         print("Ensemble Lengths: ", [len(x) for x in ensemble], flush=True)
@@ -70,9 +76,12 @@ class CheckEnsembleQualityPass(BasePass):
         
         target = data.target
         if len(ensemble) == 1:
-            csv_dict = [await self.get_ensemble_data(ensemble[0], target, self.gate_func(circuit))]
+            csv_dict = [await self.get_ensemble_data(ensemble[0], target, 
+                                                     self.gate_func(circuit))]
         else:
-            csv_dict: list[dict[str, Any]] = await get_runtime().map(self.get_ensemble_data, ensemble, target=target, orig_count = self.gate_func(circuit))
+            csv_dict: list[dict[str, Any]] = await get_runtime().map(
+                self.get_ensemble_data, ensemble, target=target, 
+                orig_count = self.gate_func(circuit))
         
         final_ratios = []
         for i in range(len(ensemble)):
@@ -93,13 +102,18 @@ class CheckEnsembleQualityPass(BasePass):
             rand_inds = np.random.choice(len(best_ensemble), 2500, replace=False)
             best_ensemble = [best_ensemble[i] for i in rand_inds]
             # best_ensemble = np.random.choice(best_ensemble, 2000, replace=False)
+
+        best_ensemble = [x[0] for x in best_ensemble]
         data["final_ensemble"] = best_ensemble
         
         if "checkpoint_dir" in data:
             checkpoint_data_file: str = data["checkpoint_data_file"]
-            pickle.dump(data, open(checkpoint_data_file, "wb"))
             csv_file = checkpoint_data_file.replace(".data", f"{self.csv_name}.csv")
-            writer = csv.DictWriter(open(csv_file, "w", newline=""), fieldnames=csv_dict[0].keys())
+            writer = csv.DictWriter(open(csv_file, "w", newline=""), 
+                                    fieldnames=csv_dict[0].keys())
             writer.writeheader()
             for row in csv_dict:
                 writer.writerow(row)
+            # Save final ensemble to file
+            store_ensemble(best_ensemble, final_ens_file, has_float=False)
+            print("Saved Ensemble to File", flush=True)

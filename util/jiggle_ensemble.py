@@ -26,6 +26,9 @@ import scipy as sp
 from bqskit.utils.math import dot_product
 from bqskit.runtime import get_runtime
 
+import os
+from .common import store_ensemble, load_ensemble
+
 _logger = logging.getLogger(__name__)
 
 class  JiggleEnsemblePass(BasePass):
@@ -276,11 +279,18 @@ class  JiggleEnsemblePass(BasePass):
         # Collected one solution from synthesis
         print("Starting JIGGLE ENSEMBLE", flush=True)
 
-        checkpoint_str = JiggleEnsemblePass.finished_pass_str + self.checkpoint_extra_str
+        checkpoint_dir = data["checkpoint_dir"]
+        file_name = f"{checkpoint_dir}/jiggled_ensemble_0_{self.checkpoint_extra_str}.qasms"
         
-        # if checkpoint_str in data and data[checkpoint_str]:
-        #     print("Already Jiggled", flush=True)
-        #     return
+        if os.path.exists(file_name):
+            # Load the ensemble from the checkpoint
+            ensembles = []
+            while os.path.exists(file_name):
+                ensembles.append(load_ensemble(file_name, data.target))
+                file_name = f"{checkpoint_dir}/jiggled_ensemble_{len(ensembles)}_{self.checkpoint_extra_str}.qasms"
+            print("Finished Jiggle Ensemble Pass", flush=True)
+            data["ensemble"] = ensembles
+            return
 
         print("Number of ensembles", len(data["ensemble"]), flush=True)
 
@@ -288,8 +298,6 @@ class  JiggleEnsemblePass(BasePass):
             # print("OLD", self.success_threshold)
             self.success_threshold = self.success_threshold * data.get("error_percentage_allocated", 1)
             # print("NEW", self.success_threshold)
-
-        data[checkpoint_str] = False
 
         ensemble = []
 
@@ -320,9 +328,9 @@ class  JiggleEnsemblePass(BasePass):
         data["ensemble"] = ensemble
 
         if "checkpoint_dir" in data:
-            data[checkpoint_str] = True
-            checkpoint_data_file = data["checkpoint_data_file"]
-            pickle.dump(data, open(checkpoint_data_file, "wb"))
+            checkpoint_dir = data["checkpoint_dir"]
+            for i, ens in enumerate(data["ensemble"]):
+                store_ensemble(ens, f"{checkpoint_dir}/jiggled_ensemble_{i}_{self.checkpoint_extra_str}.qasms")
         return
 
         

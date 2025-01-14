@@ -6,8 +6,29 @@ import numpy as np
 import os
 import pandas as pd
 import numpy as np
+from bqskit.ir.lang import get_language
+from .distance import frobenius_cost
 
 extra = "_qsearch"
+
+def store_ensemble(ensemble: list[Circuit, float], file_name: str, has_float: bool = True):
+    # Store as list of qasm strings
+    if has_float:
+        qasms = [circ.to("qasm") for circ, _ in ensemble]
+    else:
+        qasms = [circ.to("qasm") for circ in ensemble]
+    with open(file_name, "w") as f:
+        f.write("\nBREAK\n".join(qasms))
+
+def load_ensemble(file_name: str, target: UnitaryMatrix, add_floats: bool = True) -> list[Circuit]:
+    with open(file_name, "r") as f:
+        qasms = f.read().split("\nBREAK\n")
+    lang = get_language("qasm")
+    circs = [lang.decode(qasm) for qasm in qasms]
+    if add_floats:
+        return [(circ, frobenius_cost(circ.get_unitary(), target)) for circ in circs]
+    else:
+        return circs
 
 def load_block(circ_name, block_num, good=True) -> str:
     circ_name = f"{circ_name}_{block_num}"
