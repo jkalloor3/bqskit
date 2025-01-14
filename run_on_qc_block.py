@@ -4,6 +4,7 @@ from sys import argv
 from scipy.stats import entropy
 import numpy as np
 import pickle
+import json
 
 import matplotlib.pyplot as plt
 import random
@@ -40,8 +41,8 @@ def run_circuits(all_circs: list[list[QuantumCircuit]], shots: int, backend: IBM
     all_results = []
     for circs in all_circs:
         job = sampler.run(circs, shots=shots)
-        print(f">>> Job ID: {job.job_id()}")
-        print(f">>> Job Status: {job.status()}")
+        # print(f">>> Job ID: {job.job_id()}")
+        # print(f">>> Job Status: {job.status()}")
         result = job.result()
         if len(all_results) == 0:
             all_results = [result[j].data.meas.get_counts() for j in range(len(circs))]
@@ -93,7 +94,7 @@ def get_qcirc(circ: Circuit):
 
 def get_random_states(num_qubits: int, num_random_states: int = 4) -> list[np.ndarray]:
     states = []
-    for i in range(4):
+    for i in range(num_random_states):
         state = np.random.randint(0, 2, num_qubits)
         states.append(state)
     return states
@@ -132,6 +133,63 @@ def setup_ibm(num_qubits: int) -> tuple[QiskitRuntimeService, IBMBackend]:
     print(backend.name, backend.status())
     return service, backend
 
+
+def create_pauli_noise_model(rb_fid_1q, rb_fid_2q):
+    rb_err_1q = 1 - rb_fid_1q
+    rb_err_2q = 1 - rb_fid_2q
+
+    # Create an empty noise model
+    noise_model = NoiseModel()
+
+    # Add depolarizing error to all single qubit u1, u2, u3 gates
+    one_q_error = pauli_error([('X', rb_err_1q /3), ('Y', rb_err_1q /3), ('Z', rb_err_1q / 3), ('I', rb_fid_1q)])
+    two_q_error = pauli_error([('XX', rb_err_2q / 15), ('YX', rb_err_2q / 15), ('ZX', rb_err_2q / 15),
+                            ('XY', rb_err_2q / 15), ('YY', rb_err_2q / 15), ('ZY', rb_err_2q / 15),
+                                ('XZ', rb_err_2q / 15), ('YZ', rb_err_2q / 15), ('ZZ', rb_err_2q / 15),
+                                ('XI', rb_err_2q / 15), ('YI', rb_err_2q / 15), ('ZI', rb_err_2q / 15),
+                                ('IX', rb_err_2q / 15), ('IY', rb_err_2q / 15), ('IZ', rb_err_2q / 15), 
+                                ('II', rb_fid_2q)])
+    noise_model.add_all_qubit_quantum_error(one_q_error, ['u3'])
+    noise_model.add_all_qubit_quantum_error(two_q_error, ['cx'])
+
+    return noise_model
+
+def get_sim_backend(num_1q_gates: int, num_2q_gates: int):
+    total_targeted_fid = 1 - 1e-5
+    # Find x and y such that x ^ (num_1q_gates) * y ^ (num_2q_gates) = total_targeted_fid
+    x = 0.99999
+    y = 0.9999
+    num_tries = 0
+    while num_tries < 100:
+        pred_fid = x ** num_1q_gates * y ** num_2q_gates
+        ratio = pred_fid / total_targeted_fid
+        # If pred fid is much higher, decrease y
+        if ratio > 1.001:
+            y = (y * 3) - int(y * 3)
+            y = max(0.8, y)
+        elif ratio > 1.01:
+            # Decrease x
+            x = (x * 10) - int(x * 10)
+            x = max(0.99, x)
+        # If pred fid is much lower, increase y
+        elif ratio < 0.999:
+            y *= 1.1
+            y = min(0.999999, y)
+        elif ratio < 0.9999:
+            # Increase x
+            x *= 1.1
+            x = min(0.99999999, x)
+        else:
+            break
+        
+        num_tries += 1
+    
+    print("Targeted Fid: ", total_targeted_fid)
+    pred_fid = x ** num_1q_gates * y ** num_2q_gates
+    print("Final pred fid: ", pred_fid, "X: ", x, "Y: ", y, flush=True)
+
+    return AerSimulator(noise_model=create_pauli_noise_model(x, y))
+
 if __name__ == '__main__':
     global all_qcircs
     global uns
@@ -149,7 +207,12 @@ if __name__ == '__main__':
     initial_circ = Circuit.from_file(circ_path)
     target = initial_circ.get_unitary()
 
-    service, backend = setup_ibm(initial_circ.num_qudits)
+    # _ , backend = setup_ibm(initial_circ.num_qudits)
+    num_1q_gates = len([op for op in initial_circ.operations() if op.num_qudits == 1])
+    num_2q_gates = len([op for op in initial_circ.operations() if op.num_qudits == 2])
+    backend = get_sim_backend(num_1q_gates, num_2q_gates)
+
+    # exit(0)
 
     circs = load_compiled_block_circuits(circ_name, block_num, tol, num_unique_circs)
     print("Num Circs: ", len(circs), flush=True)
@@ -181,11 +244,12 @@ if __name__ == '__main__':
     ensemble_sizes = [1, 10, 32, 500, 1000] #, 2000, 4000]
     shot_ratio = max(ensemble_sizes)
 
-    num_random_states = 2
+    num_random_states = 16
     random_states = get_random_states(initial_circ.num_qudits, num_random_states=num_random_states)
     qiskit_circ = bqskit_to_qiskit(initial_circ)
     qiskit_circ.measure_all()
     qiskit_circs = get_random_init_state_circuits(qiskit_circ, random_states, backend=backend)
+    print("Num Random Circuits: ", len(qiskit_circs))
 
     # Get the base results
     base_svs = run_circuits([qiskit_circs], shots=shots*shot_ratio)
@@ -206,6 +270,8 @@ if __name__ == '__main__':
 
     print("Runing Noisy ENSEMBLES: ")
     # print(f"Base TVD: {base_excitations[0]}, Noisy TVD {noisy_excitations[0]}")
+    final_tvds = []
+    final_frobs = []
     for j, ens_size in enumerate(ensemble_sizes):
         shots_per_circuit = shots * (shot_ratio // ens_size)
         final_svs, mean_un = run_noisy_ensemble(ens_size, shots=shots_per_circuit, random_states=random_states, backend=backend)
@@ -216,5 +282,15 @@ if __name__ == '__main__':
         print(f"Ensemble Size: {ens_size}, Frobenius Distance: {frob_dist}")
 
         print("Avg Noisy TVD: ", avg_noisy_tvds)
+        final_tvds.append(np.mean(avg_noisy_tvds))
+        final_frobs.append(np.mean(frob_dist))
+
+    
+    headers = ["Ensemble Size", "TVD", "Frobenius Distance"]
+    out_data = {}
+    out_data["Ensemble Size"] = ensemble_sizes
+    out_data["TVD"] = final_tvds
+    out_data["Frobenius Distance"] = final_frobs
+    json.dump(out_data, open(f"no_qp_conv_data_noisy/{circ_name}_{block_num}_{tol}_{num_unique_circs}.json", "w"))
 
 

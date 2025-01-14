@@ -30,19 +30,23 @@ def get_ensemble_mags(ens_size, random_states: list[np.ndarray] = None) -> tuple
     mean_un = np.mean(ensemble_uns, axis=0)
 
     print("Avg CNOT count: ", np.mean([c.count_ops()['cx'] for c in ensemble]))
-    if random_states:
-        random_qcircs = get_random_init_state_circuits(ensemble, random_states)
-    else:
-        random_qcircs = [ensemble]
     noisy_rhos = []
     noisy_probs = []
-    for circs in random_qcircs:
+    mean_uns = []
+    for random_state in random_states:
+        ensemble_inds: list[int] = np.random.choice(len(all_qcircs), ens_size)
+        ensemble: list[QuantumCircuit] = [all_qcircs[i] for i in ensemble_inds]
+        ensemble_uns = np.array([uns[i] for i in ensemble_inds])
+        mean_un = np.mean(ensemble_uns, axis=0)
+        circs = get_random_init_state_circuits(ensemble, [random_state])[0]
         noisy_svs = np.array([Statevector.from_instruction(circ).data for circ in circs])
         probs = np.array([np.abs(sv)**2 for sv in noisy_svs], dtype=np.float64)
         avg_probs = np.mean(probs, axis=0)
         noisy_rho = get_average_density_matrix(noisy_svs)
         noisy_rhos.append(noisy_rho)
         noisy_probs.append(avg_probs)
+        mean_uns.append(mean_un)
+    mean_un = np.mean(mean_uns, axis=0)
     return noisy_rhos, noisy_probs, mean_un
 
 def get_qcirc(circ: Circuit):
@@ -105,6 +109,10 @@ if __name__ == '__main__':
     circs = load_compiled_block_circuits_qp(circ_name, block_num, tol, num_unique_circs)
     print("Num Circs: ", len(circs), flush=True)
 
+    if len(circs) == 0:
+        print("No circuits found")
+        exit(0)
+
     # dists = [target.get_frobenius_distance(c.get_unitary()) for c in circs[:20]]
     dists = [c[1] for c in circs]
     bqskit_circs = [c[0] for c in circs]
@@ -125,7 +133,7 @@ if __name__ == '__main__':
     base_excitations = []
     noisy_excitations = []
 
-    ensemble_sizes = [1, 10, 100, 1000, 5000, 10000] #, 2000, 4000]
+    ensemble_sizes = [1, 10, 100, 1000, 5000] #, 2000, 4000]
     shot_ratio = max(ensemble_sizes)
 
     # sampler = Sampler(mode=sim)
@@ -180,4 +188,4 @@ if __name__ == '__main__':
     out_data["Trace Distance"] = final_tds
     out_data["TVD"] = final_tvds
     out_data["Frobenius Distance"] = final_frobs
-    json.dump(out_data, open(f"qp_conv_data/{circ_name}_{block_num}_{tol}_{num_unique_circs}.json", "w"))
+    json.dump(out_data, open(f"qp_conv_data_2/{circ_name}_{block_num}_{tol}_{num_unique_circs}.json", "w"))

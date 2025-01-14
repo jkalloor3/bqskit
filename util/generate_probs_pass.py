@@ -12,6 +12,7 @@ import numpy as np
 from .distance import frobenius_cost, normalized_frob_cost
 from qpsolvers import solve_ls
 import pickle
+import os
 
 
 class GenerateProbabilityPass(BasePass):
@@ -128,63 +129,16 @@ class GenerateProbabilityPass(BasePass):
     ) -> None:
 
         print("Running Generate Probability Pass", flush=True)
+        checkpoint_dir = data["checkpoint_dir"]
+        probs_file = f"{checkpoint_dir}/probs.data"
 
-        if "finished_probs_generation" in data:
+        if os.path.exists(probs_file):
             print("Already Generated Probs", flush=True)
-            # final_ensemble = data["final_ensemble"]
-            # data["final_ensemble_probs"] = [1 / len(final_ensemble) for _ in final_ensemble]
+            data["final_ensemble_probs"] = pickle.load(open(probs_file, "rb"))
             return
-
-        # all_ensembles: list[list[Circuit]] = data["sub_select_ensemble"]
-        # all_ensemble_unitaries: list[list[UnitaryMatrix]] = [[circ.get_unitary() for circ in ens] for ens in all_ensembles]
-        # data["ensemble_unitaries"] = all_ensemble_unitaries
-
-
-        # if len(all_ensembles) == 0:
-        #     print("No ensembles to choose from")
-        #     print(circuit)
-        #     print(data.target)
-        #     all_ensembles: list[list[Circuit]] = [[circuit.copy()]]
-        #     all_ensemble_unitaries: list[list[UnitaryMatrix]] = [[circuit.get_unitary()]]
-
-        # # For each ensemble, calculate the bias term
-        # biases: list[float] = [self.calculate_bias(ens, target=data.target) for ens in all_ensemble_unitaries]
-        # e1s: list[float] = [self.calculate_e1(ens, target=data.target) for ens in all_ensemble_unitaries]
-
-        # ratios = [bias / (e1 * e1) for bias, e1 in zip(biases, e1s)]
-
-        # print("BIASES, ", biases)
-
-        # ensemble_ind = 0
-        # best_ratio = ratios[0]
-
-        # # Want ratio to be below 5
-        # for i, ratio in enumerate(ratios):
-        #     if ratio < best_ratio:
-        #         best_ratio = ratio
-        #         ensemble_ind = i
-            
-        #     if best_ratio < 5:
-        #         break
-
-        # if best_ratio > 100:
-        #     # REALLY BAD ENSEMBLES ONLY
-        #     print("No good ensemble found, defaulting to single circuit")
-        #     best_ensemble = [circuit.copy()]
-        #     best_ensemble_unitaries = [circuit.get_unitary()]
-        # else:
-        #     best_ensemble = all_ensembles[ensemble_ind]
-        #     best_ensemble_unitaries = np.array([u.numpy for u in all_ensemble_unitaries[ensemble_ind]])
-
-        # avg_cnots = np.mean([circ.count(CNOTGate()) for circ in best_ensemble])
-
-        # print("Orig CNOTS", circuit.count(CNOTGate()), flush=True)
-        # print("Average CNOTS", avg_cnots, flush=True)
-        # print("Ratio: ", best_ratio, flush=True)
-
-        # data["final_ensemble"] = best_ensemble
-        best_ensemble: list[tuple[Circuit, float]] = data["final_ensemble"]
-        best_ensemble_unitaries: list[UnitaryMatrix] = np.array([circ.get_unitary() for circ, _ in best_ensemble])
+        
+        best_ensemble: list[Circuit] = data["final_ensemble"]
+        best_ensemble_unitaries: list[UnitaryMatrix] = np.array([circ.get_unitary() for circ in best_ensemble])
 
         if len(best_ensemble) < 5:
             data["final_ensemble_probs"] = [1 / len(best_ensemble) for _ in best_ensemble]
@@ -195,9 +149,6 @@ class GenerateProbabilityPass(BasePass):
         print("Calculated Probabilities", flush=True)
 
         if "checkpoint_dir" in data:
-            data["finished_probs_generation"] = True
-            # data.pop("sub_select_ensemble")
-            checkpoint_data_file = data["checkpoint_data_file"]
-            pickle.dump(data, open(checkpoint_data_file, "wb"))
+            pickle.dump(data["final_ensemble_probs"], open(probs_file, "wb"))
         return
 

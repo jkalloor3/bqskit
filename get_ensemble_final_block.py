@@ -105,19 +105,17 @@ def get_shortest_circuits(circ_name: str,
     leap_workflow = [
         CheckpointRestartPass(checkpoint_dir, 
                                 default_passes=partitioner_passes),
-        # ForEachBlockPass(
-        #     [
-        #         synthesis_pass,
-        #         # JiggleScansPass(success_threshold=err_thresh / 3),
-        #         second_synthesis_pass,
-        #         # scan_pass,
-        #         FixGlobalPhasePass(),
-        #     ],
-        #     allocate_error=True,
-        # ),
-        # create_ensemble_pass,
-        # jiggle_pass,
-        CheckEnsembleQualityPass(False, csv_name="_try1"),
+        ForEachBlockPass(
+            [
+                synthesis_pass,
+                second_synthesis_pass,
+                FixGlobalPhasePass(),
+            ],
+            allocate_error=True,
+        ),
+        create_ensemble_pass,
+        jiggle_pass,
+        CheckEnsembleQualityPass(False, csv_name="_try1", checkpoint_extra_str="_try1"),
         GenerateProbabilityPass(success_threshold=err_thresh, size=10000)
     ]
     num_workers = 128

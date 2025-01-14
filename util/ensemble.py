@@ -11,14 +11,14 @@ from bqskit.runtime import get_runtime
 from typing import Any
 from collections import deque
 from bqskit.ir.opt.cost.functions import FrobeniusCostGenerator
-from bqskit.ir.opt.minimizers.lbfgs import LBFGSMinimizer
 from bqskit.ir.opt.cost.generator import CostFunctionGenerator
 from bqskit.ir.gates import CircuitGate
-from bqskit.ir.gates import CNOTGate, FixedRZGate
+from bqskit.ir.gates import CNOTGate
 from bqskit.qis import UnitaryMatrix
 import numpy as np
-import pickle
 import os
+
+from .common import load_ensemble, store_ensemble
 
 
 _logger = logging.getLogger(__name__)
@@ -428,12 +428,17 @@ class CreateEnsemblePass(BasePass):
     async def run(self, circuit: Circuit, data: PassData) -> None:
         """Perform the pass's operation, see :class:`BasePass` for more."""
         print("Running Ensemble Pass on block", data.get("block_num", -1), flush=True)
-
-        checkpoint_str = CreateEnsemblePass.finished_pass_str + self.checkpoint_extra_str
-
-        # if checkpoint_str in data:
-        #     print("Finished Create Ensemble", flush=True)
-        #     return
+        checkpoint_dir = data["checkpoint_dir"]
+        file_name = f"{checkpoint_dir}/ensemble_0_{self.checkpoint_extra_str}.qasms"
+        if os.path.exists(file_name):
+            # Load the ensemble from the checkpoint
+            ensembles = []
+            while os.path.exists(file_name):
+                ensembles.append(load_ensemble(file_name, data.target))
+                file_name = f"{checkpoint_dir}/ensemble_{len(ensembles)}.qasms"
+            print("Finished Create Ensemble", flush=True)
+            data["ensemble"] = ensembles
+            return
 
         # Get scan_sols for each circuit_gate
         block_data = data[ForEachBlockPass.key]
@@ -441,19 +446,6 @@ class CreateEnsemblePass(BasePass):
         if self.use_calculated_error:
             self.success_threshold = self.success_threshold * data["error_percentage_allocated"]
 
-
-        # See if ensemble pickle exists
-        # save_data_file = data["checkpoint_data_file"]
-        # ensemble_file = save_data_file.replace(".data", "_scan_ensemble.pkl")
-        # print("ENSEMBLE FILE", ensemble_file, flush=True)
-        # if os.path.exists(ensemble_file):
-        #     print("Using SCANNING GATE ENSEMBLE!", flush=True)
-        #     scan_sols = pickle.load(open(ensemble_file, "rb"))
-        #     all_circ_dists = [(circ, frob_cost.calc_cost(circ, data.target)) for circ, _ in scan_sols]
-        #     all_circ_dists = sorted(all_circ_dists, key=lambda x: x[0].count(CNOTGate()))
-        #     data["ensemble"] = [all_circ_dists]
-        #     data["scan_sols"] = [all_circ_dists]
-        # else:
         data["scan_sols"] = []
         data["ensemble"] = []
             
@@ -472,12 +464,10 @@ class CreateEnsemblePass(BasePass):
             return
 
         if "checkpoint_dir" in data:
-            checkpoint_data_file = data["checkpoint_data_file"]
-            data[checkpoint_str] = True
-            # No longer need block data
-            # data.pop(ForEachBlockPass.key, None)
-            # print("Saving keys", list(data.keys()), flush=True)
-            pickle.dump(data, open(checkpoint_data_file, "wb"))
+            # Store ensembles separately
+            checkpoint_dir = data["checkpoint_dir"]
+            for i, ens in enumerate(data["ensemble"]):
+                store_ensemble(ens, f"{checkpoint_dir}/ensemble_{i}_{self.checkpoint_extra_str}.qasms")
         
         return
 

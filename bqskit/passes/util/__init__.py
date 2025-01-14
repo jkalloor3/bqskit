@@ -14,7 +14,6 @@ from bqskit.passes.util.record import RecordStatsPass
 from bqskit.passes.util.structure import StructureAnalysisPass
 from bqskit.passes.util.unfold import UnfoldPass
 from bqskit.passes.util.update import UpdateDataPass
-from bqskit.passes.util.ensemble import CreateEnsemblePass
 
 __all__ = [
     'CompressPass',
@@ -30,5 +29,4 @@ __all__ = [
     'FillSingleQuditGatesPass',
     'ToVariablePass',
     'StructureAnalysisPass',
-    'CreateEnsemblePass',
 ]
