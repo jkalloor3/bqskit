@@ -21,7 +21,7 @@ from qiskit_ibm_runtime import QiskitRuntimeService
 from qiskit_aer import AerSimulator, StatevectorSimulator
 from qiskit_aer.primitives import SamplerV2 as Sampler
 from qiskit.quantum_info import Statevector, DensityMatrix
-from qiskit_aer.noise import NoiseModel, pauli_error
+from qiskit_aer.noise import NoiseModel, depolarizing_error
 import multiprocessing as mp
 
 from bqskit.ext import bqskit_to_qiskit, qiskit_to_bqskit
@@ -118,95 +118,26 @@ def aggregate_results(results: list[dict[str, int]]) -> dict[str, int]:
         total_dict = {k: x.get(k, 0) + y.get(k, 0) for k in set(x) | set(y)}
     return total_dict
 
-def setup_ibm(num_qubits: int) -> tuple[QiskitRuntimeService, IBMBackend]:
-    '''
-    Set up the IBM Quantum account and get the least busy backend with the required number of qubits.
-    '''
-    # service = QiskitRuntimeService.save_account(
-    #                                 channel="ibm_quantum", 
-    #                                 token="c04b6dfb98ed86857ab1b56cc7aeffeab68467dc0d61f60ad5b47a7797f30a55af880991a02859f88165e1cdf7d3c23161f5384ecbb54cc6e68e4588a695e36b",
-    #                                 set_as_default=True,
-    #                                 overwrite=True
-    #                                )
-    
-    service = QiskitRuntimeService()
-    backend = service.least_busy(operational=True, simulator=False, min_num_qubits=num_qubits)
-    print(backend.name, backend.status())
-    return service, backend
-
-def create_pauli_noise_model(rb_fid_1q, rb_fid_2q):
-    rb_err_1q = 1 - rb_fid_1q
-    rb_err_2q = 1 - rb_fid_2q
+def create_noise_model(t_gate_err: float, logical_gate_err: float, one_q_gates: list[str]):
 
     # Create an empty noise model
     noise_model = NoiseModel()
 
     # Add depolarizing error to all single qubit u1, u2, u3 gates
-    one_q_error = pauli_error([('X', rb_err_1q /3), ('Y', rb_err_1q /3), ('Z', rb_err_1q / 3), ('I', rb_fid_1q)])
-    two_q_error = pauli_error([('XX', rb_err_2q / 15), ('YX', rb_err_2q / 15), ('ZX', rb_err_2q / 15),
-                            ('XY', rb_err_2q / 15), ('YY', rb_err_2q / 15), ('ZY', rb_err_2q / 15),
-                                ('XZ', rb_err_2q / 15), ('YZ', rb_err_2q / 15), ('ZZ', rb_err_2q / 15),
-                                ('XI', rb_err_2q / 15), ('YI', rb_err_2q / 15), ('ZI', rb_err_2q / 15),
-                                ('IX', rb_err_2q / 15), ('IY', rb_err_2q / 15), ('IZ', rb_err_2q / 15), 
-                                ('II', rb_fid_2q)])
-    noise_model.add_all_qubit_quantum_error(one_q_error, ['u3'])
+    one_q_error = depolarizing_error(logical_gate_err, 1)
+    two_q_error = one_q_error.tensor(one_q_error)
+    t_error = depolarizing_error(t_gate_err, 1)
+    noise_model.add_all_qubit_quantum_error(t_error, ['t', 'tdg'])
+    noise_model.add_all_qubit_quantum_error(one_q_error, one_q_gates)
     noise_model.add_all_qubit_quantum_error(two_q_error, ['cx'])
 
     return noise_model
 
-def get_sim_backend(num_1q_gates: int, num_2q_gates: int, target_fid: float = 0.99):
-    # Find x and y such that x ^ (num_1q_gates) * y ^ (num_2q_gates) = total_targeted_fid
-    x_err = 1e-3
-    y_err = 1e-2
-
-    min_x_err = 1e-8
-    min_y_err = 1e-6
-    max_x_err = 0.2
-    max_y_err = 0.4
-    num_tries = 0
-    pred_fids = []
-
-    while num_tries < 100:
-        x_fid = 1 - x_err
-        y_fid = 1 - y_err
-        pred_fid = x_fid ** num_1q_gates * y_fid ** num_2q_gates
-        pred_fids.append(pred_fid)
-        ratio = pred_fid / target_fid
-        # If pred fid is much higher, increase y err
-        if ratio > 1.001 or (ratio > 1 and x_err == max_x_err):
-            # Increase both errors
-            y_err *= 1.5
-            x_err *= 1.5
-            x_err = min(max_x_err, x_err)
-            y_err = min(max_y_err, y_err)
-        elif ratio > 1:
-            # Increase just x err
-            x_err *= 2
-            x_err = min(max_x_err, x_err)
-        # If pred fid is much lower, decrease y err
-        elif ratio < 0.999 or (ratio < 1 and x_err == min_x_err):
-            # Decrease both
-            y_err *= 0.8
-            y_err = max(min_y_err, y_err)
-            x_err *= 0.8
-            x_err = max(min_x_err, x_err)
-        elif ratio < 1:
-            # Decrease just x
-            x_err *= 0.5
-            x_err = max(min_x_err, x_err)
-        else:
-            break
-        
-        num_tries += 1
-    
-    print("Targeted Fid: ", target_fid)
-    print("Pred Fids: ", pred_fids)
-    x_fid = 1 - x_err
-    y_fid = 1 - y_err
-    pred_fid = x_fid ** num_1q_gates * y_fid ** num_2q_gates
-    print("Final pred fid: ", pred_fid, "X: ", x_fid, "Y: ", y_fid, flush=True)
-
-    return AerSimulator(noise_model=create_pauli_noise_model(x_fid, y_fid))
+def get_sim_backend(circ: QuantumCircuit, t_err: float, logical_err: float):
+    one_q_gates = list(circ.count_ops().keys())
+    one_q_gates.pop('cx')
+    print("One Q Gates: ", one_q_gates)
+    return AerSimulator(noise_model=create_noise_model(t_err, logical_err, one_q_gates))
 
 if __name__ == '__main__':
     global all_qcircs

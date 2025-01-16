@@ -44,6 +44,7 @@ class CheckEnsembleQualityPass(BasePass):
         ensemble_data[f"Avg. {self.gate_title}"] = np.mean(final_counts)
         ensemble_data["Norm. Epsilon"] = norm_e1
         ensemble_data["Epsilon"] = frob_e1
+        ensemble_data["Max Epsilon"] = np.max(frob_e1s)
         ensemble_data["Norm. Bias"] = norm_bias
         ensemble_data["Bias"] = frob_bias
         norm_ratio = norm_bias / (norm_e1 * norm_e1)

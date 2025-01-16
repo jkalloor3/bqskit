@@ -117,7 +117,7 @@ def get_shortest_circuits(circ_name: str,
         create_ensemble_pass,
         jiggle_pass,
         CheckEnsembleQualityPass(False, csv_name="_try1", checkpoint_extra_str="_try1"),
-        GenerateProbabilityPass(success_threshold=err_thresh, size=10000)
+        # GenerateProbabilityPass(success_threshold=err_thresh, size=10000)
     ]
     num_workers = 128
     compiler = Compiler(num_workers=num_workers)
@@ -127,7 +127,7 @@ def get_shortest_circuits(circ_name: str,
 if __name__ == '__main__':
     circ_name = argv[1]
     block_num = argv[2]
-    tol = int(argv[3])
+    tol = float(argv[3])
     num_unique_circs = int(argv[4])
     jiggle_skew = int(argv[5])
     ham_perturb = bool(int(argv[6])) if len(argv) > 6 else False

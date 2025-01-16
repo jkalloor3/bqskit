@@ -10,7 +10,7 @@ header = """#!/bin/bash -l
 #SBATCH -q regular
 #SBATCH -A m4141_g
 #SBATCH -C gpu
-#SBATCH --time=4:20:00
+#SBATCH --time=8:20:00
 #SBATCH -N 1
 #SBATCH --signal=B:USR1@1
 #SBATCH --output=./slurm_logs/{file}{extra}_{unique_circs}/{circ}/{tol}_tol_block_size_6_{jiggle_skew}
@@ -28,10 +28,12 @@ if __name__ == '__main__':
     # file = "get_counts"
     # file = "get_ensemble_expectations"
     # file = "get_shortest_circuits_new"
-    file = "get_ensemble_final_block"
+    # file = "get_ensemble_final_block"
     # file = "get_ensemble_final_block_cliffordt"
     # file = "run_simulations_block"
     # file = "create_block_data_hist"
+    # file = "run_simulations_block"
+    file = "run_on_qc_block"
     
     # Get all circs
     dir_1 = "ensemble_benchmarks"
@@ -64,11 +66,11 @@ if __name__ == '__main__':
     # circs = ["hubbard_4"]
     # circs =  ["shor_12", "qft_10", "vqe_12"]
     # tols = range(1, 7)
-    tols = [5]
+    tols = [0, 1, 5]
     # tols = [6]
     unique_circss = [250] #, 5, 20, 100, 1000, 10000]
     # jiggle_skews = [0, 2]
-    jiggle_skews = [0]
+    jiggle_skews = [1,2,3]
     # extra = "cliffordt"
     # extra = "_clifft"
     extra = "_block"
@@ -90,7 +92,8 @@ if __name__ == '__main__':
                         # # log_file = f"/pscratch/sd/j/jkalloor/bqskit/slurm_logs/run_simulations_new_post_opt_{unique_circs}/{circ}/{tol}_tol_block_size_8"
                         # # utries_file = f"/pscratch/sd/j/jkalloor/bqskit/ensemble_shortest_circuits_{unique_circs}_circ_cliff_t_final/{circ}/{tol}/{circ}.pkl"
                         # hist_file = f"/pscratch/sd/j/jkalloor/bqskit/block_histograms/{circ}_8_3/data.png"
-                        csv_file = f"/pscratch/sd/j/jkalloor/bqskit/block_checkpoints_nisq_{jiggle_skew}/{circ}_{timestep}_{tol}_{unique_circs}/data_try1.csv"
+                        csv_file = f"/pscratch/sd/j/jkalloor/bqskit/block_checkpoints_nisq_0/{circ}_{timestep}_{tol}_{unique_circs}/data_try1.csv"
+                        # qp_file = f"/pscratch/sd/j/jkalloor/bqskit/no_qp_conv_data_noisy/{circ}_{timestep}_{tol}_{unique_circs}.json"
 
                         # # if os.path.exists(utries_file):
                         # #     continue
@@ -102,12 +105,15 @@ if __name__ == '__main__':
                         if not os.path.exists(csv_file):
                             continue
 
+                        # if os.path.exists(qp_file):
+                        #     continue
+
                         to_write = open(file_name, 'w')
                         to_write.write(header.format(file=file, circ=circ, tol=tol, timestep=timestep, extra=extra, unique_circs=unique_circs, jiggle_skew=jiggle_skew))
                         to_write.close()
                         print(f"python {file}.py {circ} {timestep} {tol} {unique_circs} {jiggle_skew} 1")
-                        # os.system(f"python {file}.py {circ} {timestep} {tol} {unique_circs} {jiggle_skew}")
-                        time.sleep(2*sleep_time)
-                        output = subprocess.check_output(['sbatch' , file_name])
-                        print(output)
+                        os.system(f"python {file}.py {circ} {timestep} {tol} {unique_circs} {jiggle_skew} 1")
+                        # time.sleep(2*sleep_time)
+                        # output = subprocess.check_output(['sbatch' , file_name])
+                        # print(output)
                         time.sleep(sleep_time)

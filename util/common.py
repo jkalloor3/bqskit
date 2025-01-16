@@ -82,14 +82,17 @@ def load_compiled_circuits(circ_name: int, tol: int, timestep: int, extra_str=ex
     print(full_path)
     return pickle.load(open(full_path, "rb"))
 
-def load_compiled_block_circuits(circ_name: int, block_num: int,  tol: int, num_unique_circs: int) -> list[tuple[Circuit, float]]:
+def load_compiled_block_circuits(circ_name: int, block_num: int,  tol: int, num_unique_circs: int) -> list[Circuit]:
     full_path = f"/pscratch/sd/j/jkalloor/bqskit/block_checkpoints_nisq_0/{circ_name}_{block_num}_{tol}_{num_unique_circs}/data.data"
     csv_path = f"/pscratch/sd/j/jkalloor/bqskit/block_checkpoints_nisq_0/{circ_name}_{block_num}_{tol}_{num_unique_circs}/data_try1.csv"
+    ens_path = f"/pscratch/sd/j/jkalloor/bqskit/block_checkpoints_nisq_0/adder9_0_1_250/ensemble_final.qasms"
+    if os.path.exists(ens_path):
+        return load_ensemble(ens_path, None, add_floats=False)
     data = pickle.load(open(full_path, "rb"))["ensemble"]
     df = pd.read_csv(csv_path, header=0)
     ind = np.argmin(df["Ratio"])
     print("Selecting ensemble number ", ind, "with a ratio of ", df["Ratio"][ind], "and circ count of ", len(data[ind]), flush=True)
-    return data[ind]
+    return [x for x, _ in data[ind]]
 
 def load_compiled_block_circuits_qp(circ_name: int, block_num: int,  tol: int, num_unique_circs: int) -> list[tuple[Circuit, float]]:
     full_path = f"/pscratch/sd/j/jkalloor/bqskit/block_checkpoints_nisq_0/{circ_name}_{block_num}_{tol}_{num_unique_circs}/data.data"
