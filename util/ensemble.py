@@ -260,7 +260,7 @@ class CreateEnsemblePass(BasePass):
         pts: list[CircuitPoint],
         dists: list[list[float]],
         target: UnitaryMatrix = None
-    ) -> list[list[tuple[Circuit, float]]]:
+    ) -> list[list[Circuit, float]]:
         """Assemble a circuit from a list of block indices."""
         if self.sort_by_t:
             # The fewer parameters the better
@@ -350,8 +350,8 @@ class CreateEnsemblePass(BasePass):
             )
 
             #### Get Valid Circuits with distance < threshold
-            valid_circs_dists: list[tuple[Circuit, float]] = [(circ, dist) for circ, dist in all_circs_dists if dist < self.success_threshold]
-            valid_circs_dists = sorted(valid_circs_dists, key=lambda x: x[0].count(CNOTGate()))
+            valid_circs_dists: list[Circuit] = [circ for circ, dist in all_circs_dists if dist < self.success_threshold]
+            valid_circs_dists = sorted(valid_circs_dists, key=lambda x: x.count(CNOTGate()))
 
             print("Number of Valid Circuits", len(valid_circs_dists), flush=True)
 
@@ -364,9 +364,9 @@ class CreateEnsemblePass(BasePass):
                 valid_circs_dists = [valid_circs_dists[i] for i in final_random_inds]
 
             if self.sort_by_t:
-                final_counts = [circ.num_params for circ, _ in valid_circs_dists]
+                final_counts = [circ.num_params for circ in valid_circs_dists]
             else:
-                final_counts = [circ.count(CNOTGate()) for circ, _ in valid_circs_dists]
+                final_counts = [circ.count(CNOTGate()) for circ in valid_circs_dists]
 
             all_ensembles.append((valid_circs_dists, np.mean(final_counts)))
 
@@ -434,7 +434,7 @@ class CreateEnsemblePass(BasePass):
             # Load the ensemble from the checkpoint
             ensembles = []
             while os.path.exists(file_name):
-                ensembles.append(load_ensemble(file_name, data.target))
+                ensembles.append(load_ensemble(file_name))
                 file_name = f"{checkpoint_dir}/ensemble_{len(ensembles)}_{self.checkpoint_extra_str}.qasms"
             print(f"File Name: {file_name} does not exist", flush=True)
             print("Finished Create Ensemble", flush=True)

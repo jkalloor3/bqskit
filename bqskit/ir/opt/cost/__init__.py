@@ -12,7 +12,11 @@ from __future__ import annotations
 
 from bqskit.ir.opt.cost.function import CostFunction
 from bqskit.ir.opt.cost.functions import HilbertSchmidtCost
-from bqskit.ir.opt.cost.functions import HilbertSchmidtCostGenerator, FrobeniusCostGenerator, FrobeniusCost
+from bqskit.ir.opt.cost.functions import (HilbertSchmidtCostGenerator, 
+                                          NormalizedFrobeniusCostGenerator, 
+                                          NormalizedFrobeniusCost,
+                                          GPNormalizedFrobeniusCostGenerator, 
+                                          GPNormalizedFrobeniusCost)
 from bqskit.ir.opt.cost.functions import HilbertSchmidtResiduals
 from bqskit.ir.opt.cost.functions import HilbertSchmidtResidualsGenerator
 from bqskit.ir.opt.cost.generator import CostFunctionGenerator
@@ -24,6 +28,8 @@ __all__ = [
     'HilbertSchmidtCostGenerator',
     'HilbertSchmidtResiduals',
     'HilbertSchmidtResidualsGenerator',
-    'FrobeniusCost',
-    'FrobeniusCostGenerator'
+    'NormalizedFrobeniusCost',
+    'NormalizedFrobeniusCostGenerator',
+    'GPNormalizedFrobeniusCost',
+    'GPNormalizedFrobeniusCostGenerator'
 ]

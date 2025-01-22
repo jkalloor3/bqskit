@@ -2,6 +2,7 @@ from bqskit.ir.circuit import Circuit
 from bqskit.qis import UnitaryMatrix
 from pathlib import Path
 import pickle
+from itertools import chain
 import numpy as np
 import os
 import pandas as pd
@@ -12,16 +13,42 @@ import multiprocessing as mp
 
 extra = "_qsearch"
 
-def store_ensemble(ensemble: list[Circuit, float], file_name: str, has_float: bool = True):
+def store_jiggled_ensemble(ensemble: list[tuple[Circuit, np.ndarray]], file_name: str, jiggle_file_name: str):
+    # Get circuits
+    circs = [circ for circ, _ in ensemble ]
+    store_ensemble(circs, file_name)
+    params = np.vstack([param for _, param in ensemble])
+    np.save(params, jiggle_file_name)
+
+def create_single_jiggled_ensemble(circ_params: tuple[Circuit, np.ndarray]) -> list[Circuit]:
+    circ, params = circ_params
+    ens = []
+    for param in params:
+        new_circ = circ.copy()
+        new_circ.set_params(param)
+        ens.append(new_circ)
+    return ens
+
+def create_jiggled_ensemble(circ_params: list[tuple[Circuit, np.ndarray]]) -> list[Circuit]:
+    ensemble = []
+    with mp.Pool(processes=128) as pool:
+        ensemble = pool.map(create_single_jiggled_ensemble, circ_params)
+    return list(chain.from_iterable(ensemble))
+
+def load_jiggled_ensemble(file_name: str, jiggle_file_name: str) -> list[Circuit]:
+    circs = load_ensemble(file_name)
+    params = np.load(jiggle_file_name)
+    circ_params = list(zip(circs, params))
+    return create_jiggled_ensemble(circ_params)
+
+
+def store_ensemble(ensemble: list[Circuit], file_name: str):
     # Store as list of qasm strings
-    if has_float:
-        qasms = [circ.to("qasm") for circ, _ in ensemble]
-    else:
-        qasms = [circ.to("qasm") for circ in ensemble]
+    qasms = [circ.to("qasm") for circ in ensemble]
     with open(file_name, "w") as f:
         f.write("\nBREAK\n".join(qasms))
 
-def load_ensemble(file_name: str, target: UnitaryMatrix, add_floats: bool = True) -> list[Circuit]:
+def load_ensemble(file_name: str) -> list[Circuit]:
     with open(file_name, "r") as f:
         qasms = f.read().split("\nBREAK\n")
     lang = get_language("qasm")
@@ -30,10 +57,7 @@ def load_ensemble(file_name: str, target: UnitaryMatrix, add_floats: bool = True
         circs = pool.map(lang.decode, qasms)
     # circs = [lang.decode(qasm) for qasm in qasms]
     print("Decoded", flush=True)
-    if add_floats:
-        return [(circ, frobenius_cost(circ.get_unitary(), target)) for circ in circs]
-    else:
-        return circs
+    return circs
 
 def load_block(circ_name, block_num, good=True) -> str:
     circ_name = f"{circ_name}_{block_num}"

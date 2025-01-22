@@ -9,7 +9,8 @@ from bqskit.ir import Circuit
 from bqskit.qis import UnitaryMatrix
 from bqskit.runtime import get_runtime
 import os
-from util.common import load_ensemble, store_ensemble
+import shutil
+from util.common import load_jiggled_ensemble, store_jiggled_ensemble
 
 from .distance import normalized_frob_cost, frobenius_cost
 
@@ -58,14 +59,14 @@ class CheckEnsembleQualityPass(BasePass):
     async def run(self, circuit: Circuit, data: PassData) -> None:
         # Check Ensemble Quality and output it to a CSV
 
-        ensemble: list[list[tuple[Circuit, float]]] = data["ensemble"]
+        ensemble: list[list[Circuit]] = data["ensemble"]
         checkpoint_dir = data["checkpoint_dir"]
         final_ens_file = f"{checkpoint_dir}/ensemble_final.qasms"
+        final_ens_jiggle_file = f"{checkpoint_dir}/ensemble_final_jiggle.npy"
         
         if os.path.exists(final_ens_file):
             # Load the ensemble from the checkpoint
-            data["final_ensemble"] = load_ensemble(final_ens_file, data.target, 
-                                                   add_floats=False)
+            data["final_ensemble"] = load_jiggled_ensemble(final_ens_file, final_ens_jiggle_file)
             print("Check Ensemble Quality Pass", flush=True)
             return
 
@@ -115,6 +116,9 @@ class CheckEnsembleQualityPass(BasePass):
             writer.writeheader()
             for row in csv_dict:
                 writer.writerow(row)
-            # Save final ensemble to file
-            store_ensemble(best_ensemble, final_ens_file, has_float=False)
-            print("Saved Ensemble to File", flush=True)
+            # Copy best jiggled ensemble file to new file name
+            best_ensemble_file_name = f"{checkpoint_dir}/ensemble_{best_ind}_{self.checkpoint_extra_str}.qasms"
+            best_file_name = f"{checkpoint_dir}/ensemble_{best_ind}_jiggles_{self.checkpoint_extra_str}.npy"
+            shutil.copyfile(best_ensemble_file_name, final_ens_file)
+            shutil.copyfile(best_file_name, final_ens_jiggle_file)
+
