@@ -8,6 +8,7 @@ import pandas as pd
 import numpy as np
 from bqskit.ir.lang import get_language
 from .distance import frobenius_cost
+import multiprocessing as mp
 
 extra = "_qsearch"
 
@@ -24,7 +25,11 @@ def load_ensemble(file_name: str, target: UnitaryMatrix, add_floats: bool = True
     with open(file_name, "r") as f:
         qasms = f.read().split("\nBREAK\n")
     lang = get_language("qasm")
-    circs = [lang.decode(qasm) for qasm in qasms]
+    print("SPlit String", flush=True)
+    with mp.Pool(processes=128) as pool:
+        circs = pool.map(lang.decode, qasms)
+    # circs = [lang.decode(qasm) for qasm in qasms]
+    print("Decoded", flush=True)
     if add_floats:
         return [(circ, frobenius_cost(circ.get_unitary(), target)) for circ in circs]
     else:
@@ -82,17 +87,25 @@ def load_compiled_circuits(circ_name: int, tol: int, timestep: int, extra_str=ex
     print(full_path)
     return pickle.load(open(full_path, "rb"))
 
-def load_compiled_block_circuits(circ_name: int, block_num: int,  tol: int, num_unique_circs: int) -> list[Circuit]:
-    full_path = f"/pscratch/sd/j/jkalloor/bqskit/block_checkpoints_nisq_0/{circ_name}_{block_num}_{tol}_{num_unique_circs}/data.data"
-    csv_path = f"/pscratch/sd/j/jkalloor/bqskit/block_checkpoints_nisq_0/{circ_name}_{block_num}_{tol}_{num_unique_circs}/data_try1.csv"
-    ens_path = f"/pscratch/sd/j/jkalloor/bqskit/block_checkpoints_nisq_0/adder9_0_1_250/ensemble_final.qasms"
-    if os.path.exists(ens_path):
-        return load_ensemble(ens_path, None, add_floats=False)
-    data = pickle.load(open(full_path, "rb"))["ensemble"]
+def load_compiled_block_circuits(circ_name: int, block_num: int,  tol: float, num_unique_circs: int) -> list[Circuit]:
+    circ_dir = f"/pscratch/sd/j/jkalloor/bqskit/block_checkpoints_nisq_0/{circ_name}_{block_num}_{tol}_{num_unique_circs}"
+    full_path = f"{circ_dir}/data.data"
+    if not os.path.exists(full_path):
+        tol_2 = int(tol)
+        circ_dir = f"/pscratch/sd/j/jkalloor/bqskit/block_checkpoints_nisq_0/{circ_name}_{block_num}_{tol_2}_{num_unique_circs}"
+
+    csv_path = f"{circ_dir}/data_try1.csv"
     df = pd.read_csv(csv_path, header=0)
     ind = np.argmin(df["Ratio"])
-    print("Selecting ensemble number ", ind, "with a ratio of ", df["Ratio"][ind], "and circ count of ", len(data[ind]), flush=True)
-    return [x for x, _ in data[ind]]
+    full_path = full_path = f"{circ_dir}/jiggled_ensemble_{ind}__try1.qasms"
+    if os.path.exists(full_path):
+        ens = load_ensemble(full_path, None, False)
+    else:
+        data_file = f"{circ_dir}/data.data"
+        data = pickle.load(open(data_file, "rb"))
+        ens = [x[0] for x in data["ensemble"][ind]]
+    print("Selecting ensemble number ", ind, "with a ratio of ", df["Ratio"][ind], "and circ count of ", len(ens), flush=True)
+    return ens
 
 def load_compiled_block_circuits_qp(circ_name: int, block_num: int,  tol: int, num_unique_circs: int) -> list[tuple[Circuit, float]]:
     full_path = f"/pscratch/sd/j/jkalloor/bqskit/block_checkpoints_nisq_0/{circ_name}_{block_num}_{tol}_{num_unique_circs}/data.data"
