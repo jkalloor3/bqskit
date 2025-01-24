@@ -10,7 +10,7 @@ from bqskit.ir.circuit import Circuit, CircuitPoint, Operation, CircuitLocationL
 from bqskit.runtime import get_runtime
 from typing import Any
 from collections import deque
-from bqskit.ir.opt.cost.functions import FrobeniusCostGenerator
+from bqskit.ir.opt.cost.functions import GPNormalizedFrobeniusCostGenerator
 from bqskit.ir.opt.cost.generator import CostFunctionGenerator
 from bqskit.ir.gates import CircuitGate
 from bqskit.ir.gates import CNOTGate
@@ -23,7 +23,7 @@ from .common import load_ensemble, store_ensemble
 
 _logger = logging.getLogger(__name__)
 
-frob_cost = FrobeniusCostGenerator()
+frob_cost = GPNormalizedFrobeniusCostGenerator()
 
 class CreateEnsemblePass(BasePass):
     """Converts single-qubit general unitary gates to U3 Gates."""
@@ -32,7 +32,7 @@ class CreateEnsemblePass(BasePass):
 
     def __init__(self, success_threshold = 1e-4, 
                  num_circs = 1000,
-                 cost: CostFunctionGenerator = FrobeniusCostGenerator(),
+                 cost: CostFunctionGenerator = GPNormalizedFrobeniusCostGenerator(),
                  use_calculated_error: bool = False,
                  num_random_ensembles: int = 3,
                  solve_exact_dists: bool = False,
@@ -350,25 +350,27 @@ class CreateEnsemblePass(BasePass):
             )
 
             #### Get Valid Circuits with distance < threshold
-            valid_circs_dists: list[Circuit] = [circ for circ, dist in all_circs_dists if dist < self.success_threshold]
-            valid_circs_dists = sorted(valid_circs_dists, key=lambda x: x.count(CNOTGate()))
+            valid_circs: list[Circuit] = [circ for circ, dist in all_circs_dists if dist < self.success_threshold]
+            valid_dists = [dist for _, dist in all_circs_dists if dist < self.success_threshold]
+            valid_circs = sorted(valid_circs, key=lambda x: x.count(CNOTGate()))
 
-            print("Number of Valid Circuits", len(valid_circs_dists), flush=True)
+            print("Number of Valid Circuits", len(valid_circs), flush=True)
+            print("Average Distance: ", np.mean(valid_dists), flush=True)
 
             # Trim down to self.num_circs randomly
-            if len(valid_circs_dists) > self.num_circs:
-                final_random_inds = np.random.choice(len(valid_circs_dists), 
+            if len(valid_circs) > self.num_circs:
+                final_random_inds = np.random.choice(len(valid_circs), 
                                                      size=self.num_circs, 
                                                      replace=False)
                 
-                valid_circs_dists = [valid_circs_dists[i] for i in final_random_inds]
+                valid_circs = [valid_circs[i] for i in final_random_inds]
 
             if self.sort_by_t:
-                final_counts = [circ.num_params for circ in valid_circs_dists]
+                final_counts = [circ.num_params for circ in valid_circs]
             else:
-                final_counts = [circ.count(CNOTGate()) for circ in valid_circs_dists]
+                final_counts = [circ.count(CNOTGate()) for circ in valid_circs]
 
-            all_ensembles.append((valid_circs_dists, np.mean(final_counts)))
+            all_ensembles.append((valid_circs, np.mean(final_counts)))
 
         # Sort by average gate count
         print("Ensemble Sizes", [len(x[0]) for x in all_ensembles], flush=True)
@@ -430,16 +432,25 @@ class CreateEnsemblePass(BasePass):
         print("Running Ensemble Pass on block", data.get("block_num", -1), flush=True)
         checkpoint_dir = data["checkpoint_dir"]
         file_name = f"{checkpoint_dir}/ensemble_0_{self.checkpoint_extra_str}.qasms"
+        jiggle_file_name = f"{checkpoint_dir}/ensemble_0_jiggles_{self.checkpoint_extra_str}.npy"
+
+        if os.path.exists(jiggle_file_name):
+            print("Already Jiggled, skipping loading")
+            return
+        
         if os.path.exists(file_name):
             # Load the ensemble from the checkpoint
             ensembles = []
             while os.path.exists(file_name):
-                ensembles.append(load_ensemble(file_name))
+                ens = load_ensemble(file_name)
+                ensembles.append(ens)
                 file_name = f"{checkpoint_dir}/ensemble_{len(ensembles)}_{self.checkpoint_extra_str}.qasms"
             print(f"File Name: {file_name} does not exist", flush=True)
             print("Finished Create Ensemble", flush=True)
             data["ensemble"] = ensembles
             return
+        
+        print(f"File Name: {file_name} does not exist", flush=True)
 
         # Get scan_sols for each circuit_gate
         block_data = data[ForEachBlockPass.key]

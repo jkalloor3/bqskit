@@ -278,7 +278,8 @@ if __name__ == '__main__':
     out_data["TVD"] = final_tvds
     out_data["Hellinger Fidelity"] = final_fids
     out_data["Frobenius Distance"] = final_frobs
-    file_name = f"{circ_name}_conv_data_noisy_{two_q_err:.1e}__{one_q_err:.1e}/{circ_name}_{block_num}_{tol}_{num_unique_circs}.json"
+    # file_name = f"{circ_name}_conv_data_noisy_{two_q_err:.1e}__{one_q_err:.1e}/{circ_name}_{block_num}_{tol}_{num_unique_circs}.json"
+    file_name = f"no_qp_conv_data/{circ_name}_{block_num}_{tol}_{num_unique_circs}.json"
     Path(file_name).parent.mkdir(parents=True, exist_ok=True)
     json.dump(out_data, open(file_name, "w"))
 

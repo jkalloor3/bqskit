@@ -11,13 +11,14 @@ import matplotlib.pyplot as plt
 two_q_err =1e-2
 one_q_err =1e-4
 csv_folder = "/pscratch/sd/j/jkalloor/bqskit/block_checkpoints_nisq_0/{circ_name}_{block_num}_{tol}_250/data_try1.csv"
-file_name = "{circ_name}_conv_data_noisy_{two_q_err:.1e}_{one_q_err:.1e}/{circ_name}_{block_num}_{tol}_250.json"
+noisy_file_name = "{circ_name}_conv_data_noisy_{two_q_err:.1e}_{one_q_err:.1e}/{circ_name}_{block_num}_{tol}_250.json"
+sim_file_name = "no_qp_conv_data/{circ_name}_{block_num}_{tol}_250.json"
 colors = ["blue", "orange", "green", "red", "purple", "cyan", "pink", "brown"]
 
 def plot_data(circ_name, block_num, tol) -> None:
     fig, axes = plt.subplots(1, 1, figsize=(7, 6))
     
-    data, _ = get_json_data(circ_name, block_num, tol)
+    data, _ = get_json_data(circ_name, block_num, tol, noisy=False)
 
     x_axis = data["Ensemble Size"]
 
@@ -30,8 +31,17 @@ def plot_data(circ_name, block_num, tol) -> None:
         axes.plot(x_axis, y, label=headers[i], color=colors[i])
         axes.plot(x_axis, y, '*', color=colors[i])
 
+    axes.set_yscale('log')
+    axes.legend(fontsize=11)
+    axes.tick_params(axis='both', which='both', labelsize=14)
+    fig.savefig(f'conv_{circ_name}_{block_num}_sim.png', bbox_inches='tight')
 
-def get_json_data(circ_name: str, block_num: str | int, tol: float) -> tuple[dict, pd.DataFrame]:
+
+def get_json_data(circ_name: str, block_num: str | int, tol: float, noisy: bool = True) -> tuple[dict, pd.DataFrame]:
+    if noisy:
+        file_name = noisy_file_name
+    else:
+        file_name = sim_file_name
     file_path = file_name.format(tol=tol, circ_name=circ_name, 
                                      block_num=block_num, one_q_err=one_q_err, 
                                      two_q_err=two_q_err)
@@ -101,10 +111,11 @@ def plot_all_noisy_data(circ_name, block_num) -> None:
     ax.set_yscale('log')
     ax.legend(fontsize=11)
     ax.tick_params(axis='both', which='both', labelsize=14)
-    fig.savefig(f'conv_{circ_name}_{block_num}.png', bbox_inches='tight')
+    fig.savefig(f'conv_{circ_name}_{block_num}_noisy.png', bbox_inches='tight')
 
 
 if __name__ == '__main__':
     circ_name = sys.argv[1]
     block_num = sys.argv[2]
-    plot_all_noisy_data(circ_name, block_num)
+    # plot_all_noisy_data(circ_name, block_num)
+    plot_data(circ_name, block_num, 1.0)

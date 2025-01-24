@@ -6,14 +6,18 @@ from bqskit.compiler.passdata import PassData
 from bqskit.compiler.basepass import BasePass
 from bqskit.ir.gates import CNOTGate, TGate, TdgGate
 from bqskit.ir import Circuit
+from bqskit.ir.opt.cost.functions import GPNormalizedFrobeniusCostGenerator, GPNormalizedFrobeniusCostGenerator
 from bqskit.qis import UnitaryMatrix
 from bqskit.runtime import get_runtime
 import os
 import shutil
 from util.common import load_jiggled_ensemble, store_jiggled_ensemble
 
-from .distance import normalized_frob_cost, frobenius_cost
+from .distance import frobenius_cost, normalized_frob_cost
 
+
+norm_cost = GPNormalizedFrobeniusCostGenerator()
+frob_cost = GPNormalizedFrobeniusCostGenerator()
 class CheckEnsembleQualityPass(BasePass):
     def __init__(self, 
                  count_t: bool = False,
@@ -27,18 +31,21 @@ class CheckEnsembleQualityPass(BasePass):
         self.gate_func = lambda x: x.count(TGate()) + x.count(TdgGate()) + x.num_params * 60 if count_t else x.count(CNOTGate())
         self.checkpoint_extra_str = checkpoint_extra_str
     
-    async def get_ensemble_data(self, ens: list[tuple[Circuit, float]], target: UnitaryMatrix, orig_count: int) -> dict[str, Any]:
+    async def get_ensemble_data(self, ens: list[Circuit], target: UnitaryMatrix, orig_count: int) -> dict[str, Any]:
         ensemble_data = {}
-        unitaries: list[UnitaryMatrix] = [x[0].get_unitary() for x in ens]
-        norm_e1s = [normalized_frob_cost(un, target) for un in unitaries]
-        frob_e1s = [frobenius_cost(un, target) for un in unitaries]
+        unitaries: list[UnitaryMatrix] = [x.get_unitary() for x in ens[:2000]]
+        norm_e1s = [normalized_frob_cost(un, target) for un in unitaries[:2000]]
+        frob_e1s = [frobenius_cost(un, target) for un in unitaries[:2000]]
+        # norm_e1_nogps = [normalized_frob_cost(un, target) for un in unitaries[:2000]]
+        # norm_e1_2s = [norm_cost.calc_cost(c, target)for c in ens[:2000]]
+        # norm_e1_nogp_2s = [frob_cost.calc_cost(c, target)for c in ens[:2000]]
         norm_e1 = np.mean(norm_e1s)
         frob_e1 = np.mean(frob_e1s)
         mean_un = np.mean(unitaries, axis=0)
         norm_bias = normalized_frob_cost(mean_un, target)
         frob_bias = frobenius_cost(mean_un, target)
         
-        final_counts = [self.gate_func(circ) for circ, _ in ens]
+        final_counts = [self.gate_func(circ) for circ in ens]
         ensemble_data["Ensemble Generation Method"] = ""
         ensemble_data["Num Circs"] = len(ens)
         ensemble_data[f"Orig. {self.gate_title}"] = orig_count
@@ -64,11 +71,11 @@ class CheckEnsembleQualityPass(BasePass):
         final_ens_file = f"{checkpoint_dir}/ensemble_final.qasms"
         final_ens_jiggle_file = f"{checkpoint_dir}/ensemble_final_jiggle.npy"
         
-        if os.path.exists(final_ens_file):
-            # Load the ensemble from the checkpoint
-            data["final_ensemble"] = load_jiggled_ensemble(final_ens_file, final_ens_jiggle_file)
-            print("Check Ensemble Quality Pass", flush=True)
-            return
+        # if os.path.exists(final_ens_file):
+        #     # Load the ensemble from the checkpoint
+        #     data["final_ensemble"] = load_jiggled_ensemble(final_ens_file, final_ens_jiggle_file)
+        #     print("Check Ensemble Quality Pass", flush=True)
+        #     return
 
         print("Num Ensembles: ", len(ensemble), flush=True)
         print("Ensemble Lengths: ", [len(x) for x in ensemble], flush=True)
@@ -105,7 +112,7 @@ class CheckEnsembleQualityPass(BasePass):
             best_ensemble = [best_ensemble[i] for i in rand_inds]
             # best_ensemble = np.random.choice(best_ensemble, 2000, replace=False)
 
-        best_ensemble = [x[0] for x in best_ensemble]
+        best_ensemble = [x for x in best_ensemble]
         data["final_ensemble"] = best_ensemble
         
         if "checkpoint_dir" in data:

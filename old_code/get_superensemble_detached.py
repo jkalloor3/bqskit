@@ -127,7 +127,7 @@ if __name__ == '__main__':
     approx_circuits: list[Circuit] = []
 
     generator = HilbertSchmidtCostGenerator()
-    # generator = FrobeniusCostGenerator()
+    # generator = NormalizedFrobeniusCostGenerator()
 
     if method == "gpu":
         num_multistarts = 32

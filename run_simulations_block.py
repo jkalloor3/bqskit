@@ -2,17 +2,19 @@ from bqskit.ir.circuit import Circuit
 from bqskit.ir.gates import CNOTGate
 from sys import argv
 import numpy as np
+import multiprocessing as mp
 import json
 from itertools import chain
 
 from bqskit.ir.gates.parameterized.u3 import U3Gate
 from bqskit.ir.point import CircuitPoint
 
+from bqskit.qis import UnitaryMatrix
 from qiskit import QuantumCircuit, transpile
 from qiskit.quantum_info import Statevector
 
-from util import load_block, load_compiled_block_circuits, load_compiled_block_circuits_qp
-from util.distance import frobenius_cost, tvd, trace_distance, get_density_matrix, get_average_density_matrix
+from util import load_block, load_compiled_block_circuits, load_compiled_block_circuits_qp, get_unitary
+from util.distance import frobenius_cost, tvd, trace_distance, get_density_matrix, get_average_density_matrix, normalized_gp_frob_cost
 
 from bqskit.ext import bqskit_to_qiskit
 
@@ -98,15 +100,16 @@ if __name__ == '__main__':
 
     circ_name = argv[1]
     block_num = argv[2]
-    tol = int(argv[3])
+    tol = float(argv[3])
     num_unique_circs = int(argv[4])
     cliff = False
 
     circ_path = load_block(circ_name, block_num, good=True)
     initial_circ = Circuit.from_file(circ_path)
-    target = initial_circ.get_unitary()
+    target = UnitaryMatrix(initial_circ.get_unitary()) 
     print("Got initial circ", flush=True)
-    circs = load_compiled_block_circuits_qp(circ_name, block_num, tol, num_unique_circs)
+    # circs = load_compiled_block_circuits_qp(circ_name, block_num, tol, num_unique_circs)
+    circs = load_compiled_block_circuits(circ_name, block_num, tol, num_unique_circs)
     print("Num Circs: ", len(circs), flush=True)
 
     if len(circs) == 0:
@@ -114,12 +117,14 @@ if __name__ == '__main__':
         exit(0)
 
     # dists = [target.get_frobenius_distance(c.get_unitary()) for c in circs[:20]]
-    dists = [c[1] for c in circs]
-    bqskit_circs = [c[0] for c in circs]
-    uns = [c.get_unitary() for c in bqskit_circs]
-    frob_dists = [frobenius_cost(target, un) for un in uns]
-    print("Avg Norm. Dist: ", np.mean(dists))
-    print("Avg Dist: ", np.mean(frob_dists))
+    # dists = [c[1] for c in circs]
+    bqskit_circs = [c for c in circs]
+    # uns = [c.get_unitary() for c in bqskit_circs]
+    with mp.Pool(processes=100) as pool:
+        uns = pool.map(get_unitary, bqskit_circs)
+    # frob_dists = [normalized_gp_frob_cost(un, target) for un in uns]
+    # print("Avg Norm. Dist: ", np.mean(dists))
+    # print("Avg Dist: ", np.mean(frob_dists))
     print("Original CX Count: ", initial_circ.count(CNOTGate()))
 
     opt_str = ""
@@ -177,7 +182,7 @@ if __name__ == '__main__':
         mean_tvd = np.mean(tvds)
         final_tds.append(td)
         final_tvds.append(mean_tvd)
-        frob_cost = frobenius_cost(target, mean_un)
+        frob_cost = normalized_gp_frob_cost(mean_un, target)
         final_frobs.append(frob_cost)
         print(f"Ensemble Size: {ens_size},  Trace Distance: {tds}, TVDS: {tvds}")
         # print(f"Mean Trace Distance: {td}, Mean TVD: {mean_tvd}, Frobenius Distance: {frob_cost}")
@@ -188,4 +193,4 @@ if __name__ == '__main__':
     out_data["Trace Distance"] = final_tds
     out_data["TVD"] = final_tvds
     out_data["Frobenius Distance"] = final_frobs
-    json.dump(out_data, open(f"qp_conv_data_2/{circ_name}_{block_num}_{tol}_{num_unique_circs}.json", "w"))
+    json.dump(out_data, open(f"no_qp_conv_data/{circ_name}_{block_num}_{tol}_{num_unique_circs}.json", "w"))

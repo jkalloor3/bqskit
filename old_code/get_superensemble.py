@@ -11,7 +11,7 @@ from bqskit.ir.gates import CNOTGate, GlobalPhaseGate
 from bqskit.passes import *
 from bqskit.runtime import get_runtime
 import pickle
-from bqskit.ir.opt.cost.functions import HilbertSchmidtResidualsGenerator, HilbertSchmidtCostGenerator, FrobeniusCostGenerator
+from bqskit.ir.opt.cost.functions import HilbertSchmidtResidualsGenerator, HilbertSchmidtCostGenerator, GPNormalizedFrobeniusCostGenerator
 from bqskit.ir.opt.minimizers.lbfgs import LBFGSMinimizer
 from bqskit.ir.opt.minimizers.scipy import ScipyMinimizer
 import multiprocessing as mp
@@ -208,7 +208,7 @@ if __name__ == '__main__':
     approx_circuits: list[Circuit] = []
 
     generator = HilbertSchmidtCostGenerator()
-    # generator = FrobeniusCostGenerator()
+    # generator = NormalizedFrobeniusCostGenerator()
 
     # Just use LEAP
     if method == "leap":

@@ -13,34 +13,57 @@ import multiprocessing as mp
 
 extra = "_qsearch"
 
+def stack_padding(it: list[np.ndarray], vertical: bool = True) -> np.ndarray:
+    max_width = max(a.shape[1] for a in it)
+    # Pad each 2D array with zeros to match the maximum width
+    padded_arrays = [np.pad(a, ((0, 0), (0, max_width - a.shape[1])), mode='constant') for a in it]
+    # Vertically stack the padded arrays
+    if vertical:
+        result = np.vstack(padded_arrays)
+    else:
+        result = np.stack(padded_arrays)
+        print("Final Param Arr Shape: ", result.shape, flush=True)
+    return result
+
 def store_jiggled_ensemble(ensemble: list[tuple[Circuit, np.ndarray]], file_name: str, jiggle_file_name: str):
     # Get circuits
     circs = [circ for circ, _ in ensemble ]
     store_ensemble(circs, file_name)
-    params = np.vstack([param for _, param in ensemble])
-    np.save(params, jiggle_file_name)
+    # params = stack_padding([params for _, params in ensemble], vertical=False)
+    params = np.stack([params for _, params in ensemble])
+    np.save(jiggle_file_name, params)
 
 def create_single_jiggled_ensemble(circ_params: tuple[Circuit, np.ndarray]) -> list[Circuit]:
     circ, params = circ_params
     ens = []
-    for param in params:
+    # print("Params Shape: ", params.shape, "Circuit Params: ", circ.num_params, flush=True)
+    for param in params.tolist():
         new_circ = circ.copy()
         new_circ.set_params(param)
         ens.append(new_circ)
     return ens
 
 def create_jiggled_ensemble(circ_params: list[tuple[Circuit, np.ndarray]]) -> list[Circuit]:
-    ensemble = []
+    ensemble = [create_single_jiggled_ensemble(c) for c in circ_params]
+    return list(chain.from_iterable(ensemble))
+
+def create_jiggled_ensemble_mp(circ_params: list[tuple[Circuit, np.ndarray]]) -> list[Circuit]:
+    # ensemble = [create_single_jiggled_ensemble(c) for c in circ_params]
     with mp.Pool(processes=128) as pool:
         ensemble = pool.map(create_single_jiggled_ensemble, circ_params)
     return list(chain.from_iterable(ensemble))
 
-def load_jiggled_ensemble(file_name: str, jiggle_file_name: str) -> list[Circuit]:
+def load_jiggled_ensemble(file_name: str, jiggle_file_name: str, 
+                          use_mp: bool = False) -> list[Circuit]:
     circs = load_ensemble(file_name)
-    params = np.load(jiggle_file_name)
+    print("Num Circs: ", len(circs), flush=True)
+    params: np.ndarray = np.load(jiggle_file_name)
+    print("Params Shape: ", params.shape, flush=True)
     circ_params = list(zip(circs, params))
-    return create_jiggled_ensemble(circ_params)
-
+    if not use_mp:
+        return create_jiggled_ensemble(circ_params)
+    else:
+        return create_jiggled_ensemble_mp(circ_params)
 
 def store_ensemble(ensemble: list[Circuit], file_name: str):
     # Store as list of qasm strings
@@ -53,9 +76,20 @@ def load_ensemble(file_name: str) -> list[Circuit]:
         qasms = f.read().split("\nBREAK\n")
     lang = get_language("qasm")
     print("SPlit String", flush=True)
+    # with mp.Pool(processes=128) as pool:
+    #     circs = pool.map(lang.decode, qasms)
+    circs = [lang.decode(qasm) for qasm in qasms]
+    # circs = [lang.decode(qasm) for qasm in qasms]
+    print("Decoded", flush=True)
+    return circs
+
+def load_ensemble_mp(file_name: str) -> list[Circuit]:
+    with open(file_name, "r") as f:
+        qasms = f.read().split("\nBREAK\n")
+    lang = get_language("qasm")
+    print("SPlit String", flush=True)
     with mp.Pool(processes=128) as pool:
         circs = pool.map(lang.decode, qasms)
-    # circs = [lang.decode(qasm) for qasm in qasms]
     print("Decoded", flush=True)
     return circs
 
@@ -111,19 +145,22 @@ def load_compiled_circuits(circ_name: int, tol: int, timestep: int, extra_str=ex
     print(full_path)
     return pickle.load(open(full_path, "rb"))
 
-def load_compiled_block_circuits(circ_name: int, block_num: int,  tol: float, num_unique_circs: int) -> list[Circuit]:
+def load_compiled_block_circuits(circ_name: int, block_num: int,  tol: int, num_unique_circs: int) -> list[Circuit]:
     circ_dir = f"/pscratch/sd/j/jkalloor/bqskit/block_checkpoints_nisq_0/{circ_name}_{block_num}_{tol}_{num_unique_circs}"
     full_path = f"{circ_dir}/data.data"
     if not os.path.exists(full_path):
+        print("File not found, trying with integer tol", flush=True)
         tol_2 = int(tol)
         circ_dir = f"/pscratch/sd/j/jkalloor/bqskit/block_checkpoints_nisq_0/{circ_name}_{block_num}_{tol_2}_{num_unique_circs}"
 
     csv_path = f"{circ_dir}/data_try1.csv"
     df = pd.read_csv(csv_path, header=0)
     ind = np.argmin(df["Ratio"])
-    full_path = full_path = f"{circ_dir}/jiggled_ensemble_{ind}__try1.qasms"
+    full_path = f"{circ_dir}/ensemble_final_jiggle.npy"
+    full_ens_path = f"{circ_dir}/ensemble_final.qasms"
     if os.path.exists(full_path):
-        ens = load_ensemble(full_path, None, False)
+        # ens = load_ensemble_mp(full_path)
+        ens = load_jiggled_ensemble(full_ens_path, full_path)
     else:
         data_file = f"{circ_dir}/data.data"
         data = pickle.load(open(data_file, "rb"))
