@@ -38,6 +38,10 @@ def load_block(circ_name, block_num, good=True) -> str:
         circ_file = f"bad_blocks/{circ_name}.qasm"
     return circ_file
 
+def load_cliff_circ(circ_name, precision: int = 5) -> str:
+    folder = f"clifft_benchmarks_{precision}"
+    circ_file = f"{folder}/{circ_name}.qasm"
+    return circ_file
 
 def load_circuit(circ_name: str, timestep: int = 0, opt: bool = False) -> Circuit:
     opt_str = "_opt" if opt else ""
@@ -48,12 +52,9 @@ def load_circuit(circ_name: str, timestep: int = 0, opt: bool = False) -> Circui
     ext = ".qasm"
     
     if timestep > 0:
-        file = f"/pscratch/sd/j/jkalloor/bqskit/ensemble_benchmarks{opt_str}/{circ_name}_{timestep}{ext}"
+        file = f"/Users/jkalloor3/BQSKit/bqskit/ensemble_benchmarks{opt_str}/{circ_name}_{timestep}{ext}"
     else:
-        file = f"/pscratch/sd/j/jkalloor/bqskit/ensemble_benchmarks{opt_str}/{circ_name}{ext}"
-    
-    if not os.path.exists(file):
-        file = f"/pscratch/sd/j/jkalloor/bqskit/qce23_qfactor_benchmarks/{circ_name}{ext}"
+        file = f"/Users/jkalloor3/BQSKit/bqskit/ensemble_benchmarks{opt_str}/{circ_name}{ext}"
     
     if ext == ".qasm":
         return Circuit.from_file(file)
