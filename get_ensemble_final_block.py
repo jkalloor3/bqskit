@@ -112,9 +112,9 @@ def get_shortest_circuits(circ_name: str,
         ),
         create_ensemble_pass,
         jiggle_pass,
-        FixGlobalPhasePass(),
+        # FixGlobalPhasePass(),
         CheckEnsembleQualityPass(False, csv_name="_try1", checkpoint_extra_str="_try1"),
-        # GenerateProbabilityPass(success_threshold=err_thresh, size=10000)
+        GenerateProbabilityPass()
     ]
     num_workers = 128
     compiler = Compiler(num_workers=num_workers)

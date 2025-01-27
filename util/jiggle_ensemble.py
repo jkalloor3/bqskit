@@ -27,7 +27,7 @@ from bqskit.utils.math import dot_product
 from bqskit.runtime import get_runtime
 
 import os
-from .common import store_jiggled_ensemble, load_jiggled_ensemble, create_single_jiggled_ensemble, stack_padding
+from .common import store_jiggled_ensemble, load_jiggled_ensemble, create_jiggled_unitaries
 
 _logger = logging.getLogger(__name__)
 
@@ -183,7 +183,6 @@ class  JiggleEnsemblePass(BasePass):
 
         return np.vstack(final_params)
 
-
     def jiggle_params(self, params: list[float], circ: Circuit, dist: float, target: UnitaryMatrix) -> np.ndarray[float]:
             cost_fn = self.cost.gen_cost(circ.copy(), target)
             trials = 0
@@ -249,37 +248,21 @@ class  JiggleEnsemblePass(BasePass):
             ToU3Pass.run_group_circ(circ)
 
         # This ensures that qasm will be decoded the same way later
-        circ =  lang.decode(lang.encode(circ))
+        circ_final =  lang.decode(lang.encode(circ))
+
         num_tasks = ceil(num_circs / 40)
         circs_per_task = ceil(num_circs / num_tasks)
         if self.do_u3_perturbation:
-            in_circs = [circ.copy() for _ in range(num_tasks)]
+            in_circs = [circ_final.copy() for _ in range(num_tasks)]
             params: list[np.ndarray[float]] = await get_runtime().map(self.single_jiggle_ham, in_circs, dist=dist, num=circs_per_task, target=target)
         else:
-            orig_params = circ.params
-            params: list[np.ndarray[float]] = await get_runtime().map(self.single_jiggle, [orig_params] * num_tasks, circ=circ, dist=dist, target=target, num=circs_per_task)
+            orig_params = circ_final.params
+            params: list[np.ndarray[float]] = await get_runtime().map(self.single_jiggle, [orig_params] * num_tasks, circ=circ_final, dist=dist, target=target, num=circs_per_task)
             # print(f"Finished {ceil(num_circs / 20)} Tasks", flush=True)
         
         all_params = np.vstack(params)
         
-        return circ, all_params
-
-    async def jiggle_ensemble(self, scan_sols: list[tuple[Circuit, float]], target: UnitaryMatrix) -> list[tuple[Circuit, float]]:
-            print("Number of SCAN SOLS", len(scan_sols))
-            # For each params come up with nth root of num_circs number of extra params
-            circuits = [psol[0] for psol in scan_sols]
-            dists = [psol[1] for psol in scan_sols]
-
-            circ_dists = list(zip(circuits, dists))
-
-            # print("Initial Distances before jiggle", dists, flush=True)
-            circ_dists = await get_runtime().map(self.jiggle_circ,
-                                                circ_dists,
-                                                target=target,
-                                                num_circs = ceil(self.num_circs / len(circuits)))
-            
-            return list(itertools.chain.from_iterable(circ_dists))
-
+        return circ_final, all_params
 
     async def run(self, circuit: Circuit, data: PassData) -> None:
         """Perform the pass's operation, see :class:`BasePass` for more."""
@@ -291,6 +274,11 @@ class  JiggleEnsemblePass(BasePass):
         checkpoint_dir = data["checkpoint_dir"]
         ensemble_file_name = os.path.join(checkpoint_dir, "ensemble_{ind}_{extra}.qasms")
         jiggle_file_name = os.path.join(checkpoint_dir, "ensemble_{ind}_jiggles_{extra}.npy")
+        final_ens_file = f"{checkpoint_dir}/ensemble_final.qasms"
+
+        if os.path.exists(final_ens_file):
+            print("Already Finished Jiggle", flush=True)
+            return
 
         if self.use_calculated_error:
             # print("OLD", self.success_threshold)
@@ -302,27 +290,30 @@ class  JiggleEnsemblePass(BasePass):
         ens_ind = 0
         ens_file = ensemble_file_name.format(ind=ens_ind, extra=self.checkpoint_extra_str)
         jiggle_file = jiggle_file_name.format(ind=ens_ind, extra=self.checkpoint_extra_str)
+        ensemble_unitaries = []
+
         if os.path.exists(jiggle_file):
             # Load the ensemble from the checkpoint
-            ensembles = []
             while os.path.exists(jiggle_file):
-                jiggled_circs = load_jiggled_ensemble(ens_file, jiggle_file)
-                # dists = [self.cost.calc_cost(circ, data.target) for circ in jiggled_circs]
-                jiggled_circs = [jiggled_circs[i] for i, dist in enumerate(dists) if dist < self.success_threshold]
-                ensembles.append(jiggled_circs)
+                circ_params: list[tuple[Circuit, np.ndarray]] = load_jiggled_ensemble(ens_file, jiggle_file)
+                jiggled_unitaries = await get_runtime().map(create_jiggled_unitaries, circ_params, 
+                                                  target=data.target, 
+                                                  add_cost = True, 
+                                                  fix_phase=True)
+                jiggled_unitaries: list[tuple[UnitaryMatrix, float]] = list(itertools.chain.from_iterable(jiggled_unitaries))
+                dists = [jiggled_unitaries[i][1] for i in range(len(jiggled_unitaries))]
+                ensemble_unitaries.append(jiggled_unitaries)
                 ens_ind += 1
                 ens_file = ensemble_file_name.format(ind=ens_ind, extra=self.checkpoint_extra_str)
                 jiggle_file = jiggle_file_name.format(ind=ens_ind, extra=self.checkpoint_extra_str)
-                # print("Avg Dist Post Jiggle Load: ", np.mean(dists), flush=True)
+                print("Avg Dist Post Jiggle Load: ", np.mean(dists), flush=True)
                 # print("Num Circs: ", len(jiggled_circs), flush=True)
-            print("Ensemble Size", [len(ens) for ens in ensembles], flush=True)
+            print("Ensemble Size", [len(ens) for ens in ensemble_unitaries], flush=True)
             print("Finished Jiggle Ensemble Pass", flush=True)
-            data["ensemble"] = ensembles
+            data["ensemble_unitaries"] = ensemble_unitaries
             return
 
         print("Number of ensembles", len(data["ensemble"]), flush=True)
-
-        ensemble = []
         # all_circ_params = []
 
         for ens_ind, scan_sols in enumerate(data["ensemble"]):
@@ -347,18 +338,20 @@ class  JiggleEnsemblePass(BasePass):
                                                          num_circs = ceil(self.num_circs / len(circuits))
                                                         )
             # all_circ_params.append(circ_params)
-            jiggled_circ_dists: list[list[Circuit]] = await get_runtime().map(create_single_jiggled_ensemble, circ_params)
-            jiggled_circs: list[Circuit] = list(itertools.chain.from_iterable(jiggled_circ_dists))
-            print("Num Circs: ", len(jiggled_circs), flush=True)
-            dists = [self.cost.calc_cost(circ, data.target) for circ in jiggled_circs[:len(jiggled_circs):80]]
-            print("Dists Post Jiggle Combo: ", dists, flush=True)
+            jiggled_unitaries: list[list[tuple[UnitaryMatrix, float]]] = await get_runtime().map(
+                create_jiggled_unitaries, circ_params, target=data.target, add_cost = True, fix_phase=True)
+            jiggled_unitaries = list(itertools.chain.from_iterable(jiggled_unitaries))
+            print("Num Unitaries: ", len(jiggled_unitaries), flush=True)
+            dists = [jiggled_unitaries[i][1] for i in range(len(jiggled_unitaries))]
+            # dists = [self.cost.calc_cost(circ, data.target) for circ in jiggled_circs[:len(jiggled_circs):80]]
+            print("Dists Post Jiggle Combo: ", np.mean(dists), flush=True)
             ens_file = ensemble_file_name.format(ind=ens_ind, extra=self.checkpoint_extra_str)
             jiggle_file = jiggle_file_name.format(ind=ens_ind, extra=self.checkpoint_extra_str)
             store_jiggled_ensemble(circ_params, ens_file, jiggle_file)
-            ensemble.append(jiggled_circs)
+            ensemble_unitaries.append(jiggled_unitaries)
 
-        print("Number of Circs post Jiggle", [len(ens) for ens in ensemble], flush=True)
-        data["ensemble"] = ensemble
+        print("Number of Circs post Jiggle", [len(ens) for ens in ensemble_unitaries], flush=True)
+        data["ensemble_unitaries"] = ensemble_unitaries
         return
 
         

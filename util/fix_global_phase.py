@@ -24,13 +24,13 @@ class FixGlobalPhasePass(BasePass):
         super().__init__()
         self.target = None
 
-    def fix_phase(self, circuit: Circuit) -> tuple[float, float]:
+    @staticmethod
+    def fix_phase(circuit: Circuit, target: UnitaryMatrix) -> tuple[float, float]:
         unitary = circuit.get_unitary()
-        global_phase_correction = self.target.get_target_correction_factor(unitary)
-        old_cost = frob_cost.calc_cost(circuit, self.target)
+        global_phase_correction = target.get_target_correction_factor(unitary)
+        # old_cost = frob_cost.calc_cost(circuit, target)
         circuit.append_gate(GlobalPhaseGate(1, global_phase=global_phase_correction), (0,))
-        new_cost = frob_cost.calc_cost(circuit, self.target)
-        return old_cost, new_cost
+        # new_cost = frob_cost.calc_cost(circuit, target)
 
     async def run(
             self, 

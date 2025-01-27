@@ -1,4 +1,5 @@
 from bqskit.ir.circuit import Circuit
+from .fix_global_phase import FixGlobalPhasePass
 from bqskit.qis import UnitaryMatrix
 from pathlib import Path
 import pickle
@@ -8,8 +9,9 @@ import os
 import pandas as pd
 import numpy as np
 from bqskit.ir.lang import get_language
-from .distance import frobenius_cost
+from .distance import frobenius_cost, normalized_frob_cost
 import multiprocessing as mp
+from bqskit.runtime import get_runtime
 
 extra = "_qsearch"
 
@@ -29,19 +31,48 @@ def store_jiggled_ensemble(ensemble: list[tuple[Circuit, np.ndarray]], file_name
     # Get circuits
     circs = [circ for circ, _ in ensemble ]
     store_ensemble(circs, file_name)
-    # params = stack_padding([params for _, params in ensemble], vertical=False)
-    params = np.stack([params for _, params in ensemble])
+    params = stack_padding([params for _, params in ensemble], vertical=False)
+    # params = np.stack([params for _, params in ensemble])
     np.save(jiggle_file_name, params)
 
-def create_single_jiggled_ensemble(circ_params: tuple[Circuit, np.ndarray]) -> list[Circuit]:
+def create_single_jiggled_ensemble(circ_params: tuple[Circuit, np.ndarray], 
+                                   target: UnitaryMatrix = None, fix_phase: bool = False,
+                                   add_cost: bool = False) -> list[Circuit] | list[tuple[Circuit, UnitaryMatrix, float]]:
     circ, params = circ_params
     ens = []
     # print("Params Shape: ", params.shape, "Circuit Params: ", circ.num_params, flush=True)
     for param in params.tolist():
         new_circ = circ.copy()
         new_circ.set_params(param)
-        ens.append(new_circ)
+        if fix_phase:
+            FixGlobalPhasePass.fix_phase(new_circ, target)
+        if add_cost:
+            un = new_circ.get_unitary()
+            cost_1 = normalized_frob_cost(un, target)
+            ens.append((new_circ, un, cost_1))
+        else:
+            ens.append(new_circ)
     return ens
+
+def create_jiggled_unitaries(circ_params: tuple[Circuit, np.ndarray], 
+                                   target: UnitaryMatrix = None, fix_phase: bool = False,
+                                   add_cost: bool = False) -> list[tuple[UnitaryMatrix]] | list[tuple[UnitaryMatrix, float]]:
+    circ, params = circ_params
+    ens = []
+    # print("Params Shape: ", params.shape, "Circuit Params: ", circ.num_params, flush=True)
+    for param in params.tolist():
+        utry = circ.get_unitary(param)
+        if fix_phase:
+            gp_correction = target.get_target_correction_factor(utry)
+            utry = utry * gp_correction
+        if add_cost:
+            cost_1 = normalized_frob_cost(utry, target)
+            ens.append((utry, cost_1))
+        else:
+            ens.append(utry)
+    return ens
+
+
 
 def create_jiggled_ensemble(circ_params: list[tuple[Circuit, np.ndarray]]) -> list[Circuit]:
     ensemble = [create_single_jiggled_ensemble(c) for c in circ_params]
@@ -53,21 +84,22 @@ def create_jiggled_ensemble_mp(circ_params: list[tuple[Circuit, np.ndarray]]) ->
         ensemble = pool.map(create_single_jiggled_ensemble, circ_params)
     return list(chain.from_iterable(ensemble))
 
-def load_jiggled_ensemble(file_name: str, jiggle_file_name: str, 
-                          use_mp: bool = False) -> list[Circuit]:
+def load_jiggled_ensemble(file_name: str, jiggle_file_name: str) -> list[tuple[Circuit, np.ndarray]]:
     circs = load_ensemble(file_name)
     print("Num Circs: ", len(circs), flush=True)
     params: np.ndarray = np.load(jiggle_file_name)
     print("Params Shape: ", params.shape, flush=True)
     circ_params = list(zip(circs, params))
-    if not use_mp:
-        return create_jiggled_ensemble(circ_params)
-    else:
-        return create_jiggled_ensemble_mp(circ_params)
+    return circ_params
+    # if not use_mp:
+    #     return create_jiggled_ensemble(circ_params)
+    # else:
+    #     return create_jiggled_ensemble_mp(circ_params)
 
 def store_ensemble(ensemble: list[Circuit], file_name: str):
     # Store as list of qasm strings
-    qasms = [circ.to("qasm") for circ in ensemble]
+    lang = get_language("qasm")
+    qasms = [lang.encode(circ) for circ in ensemble]
     with open(file_name, "w") as f:
         f.write("\nBREAK\n".join(qasms))
 
@@ -145,28 +177,43 @@ def load_compiled_circuits(circ_name: int, tol: int, timestep: int, extra_str=ex
     print(full_path)
     return pickle.load(open(full_path, "rb"))
 
-def load_compiled_block_circuits(circ_name: int, block_num: int,  tol: int, num_unique_circs: int) -> list[Circuit]:
+def get_circ_dir(circ_name: int, block_num: int, tol: int, num_unique_circs: int) -> str:
     circ_dir = f"/pscratch/sd/j/jkalloor/bqskit/block_checkpoints_nisq_0/{circ_name}_{block_num}_{tol}_{num_unique_circs}"
     full_path = f"{circ_dir}/data.data"
     if not os.path.exists(full_path):
         print("File not found, trying with integer tol", flush=True)
         tol_2 = int(tol)
         circ_dir = f"/pscratch/sd/j/jkalloor/bqskit/block_checkpoints_nisq_0/{circ_name}_{block_num}_{tol_2}_{num_unique_circs}"
+    return circ_dir
 
-    csv_path = f"{circ_dir}/data_try1.csv"
-    df = pd.read_csv(csv_path, header=0)
-    ind = np.argmin(df["Ratio"])
+def load_compiled_block_circuits(circ_name: int, 
+                                 block_num: int,  
+                                 tol: int, 
+                                 num_unique_circs: int,
+                                 target: UnitaryMatrix = None) -> list[tuple[Circuit, 
+                                                                             UnitaryMatrix, 
+                                                                             float]]:
+    circ_dir = get_circ_dir(circ_name, block_num, tol, num_unique_circs)
     full_path = f"{circ_dir}/ensemble_final_jiggle.npy"
     full_ens_path = f"{circ_dir}/ensemble_final.qasms"
-    if os.path.exists(full_path):
-        # ens = load_ensemble_mp(full_path)
-        ens = load_jiggled_ensemble(full_ens_path, full_path)
-    else:
-        data_file = f"{circ_dir}/data.data"
-        data = pickle.load(open(data_file, "rb"))
-        ens = [x[0] for x in data["ensemble"][ind]]
-    print("Selecting ensemble number ", ind, "with a ratio of ", df["Ratio"][ind], "and circ count of ", len(ens), flush=True)
+    circ_params = load_jiggled_ensemble(full_ens_path, full_path)
+    with mp.Pool(processes=128) as pool:
+        params = list(zip(circ_params, [target] * len(circ_params), [True] * len(circ_params), [True] * len(circ_params)))
+        ens: list[list[tuple[Circuit, UnitaryMatrix, float]]] = pool.starmap(create_single_jiggled_ensemble, 
+                                                                              params)
+    ens = list(chain.from_iterable(ens))
     return ens
+
+def load_compiled_block_circuits_qp_inds(circ_name: int, 
+                                         block_num: int,  
+                                         tol: int, 
+                                         num_unique_circs: int) -> tuple[np.ndarray, np.ndarray]:
+    circ_dir = get_circ_dir(circ_name, block_num, tol, num_unique_circs)
+    inds_file = f"{circ_dir}/ensemble_final_rand_inds.npy"
+    circ_inds = np.load(inds_file)
+    probs_file = f"{circ_dir}/ensemble_final_probs.npy"
+    circ_probs = np.load(probs_file)
+    return circ_inds, circ_probs
 
 def load_compiled_block_circuits_qp(circ_name: int, block_num: int,  tol: int, num_unique_circs: int) -> list[tuple[Circuit, float]]:
     full_path = f"/pscratch/sd/j/jkalloor/bqskit/block_checkpoints_nisq_0/{circ_name}_{block_num}_{tol}_{num_unique_circs}/data.data"
