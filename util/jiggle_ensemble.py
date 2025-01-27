@@ -9,15 +9,15 @@ from bqskit.passes import ToU3Pass
 from bqskit.ir.circuit import Circuit, CircuitPoint
 from bqskit.runtime import get_runtime
 from typing import Any
-from bqskit.ir.opt.cost.functions import FrobeniusCostGenerator
+from bqskit.ir.lang import get_language
+from bqskit.ir.opt.cost.functions import GPNormalizedFrobeniusCostGenerator, GPNormalizedFrobeniusCostGenerator
 from bqskit.ir.opt.minimizers.lbfgs import LBFGSMinimizer
 from bqskit.ir.opt.cost.generator import CostFunctionGenerator
 from bqskit.ir.gates import U3Gate, CNOTGate, GlobalPhaseGate
 from bqskit.qis import UnitaryMatrix
 import numpy as np
 from math import ceil
-from itertools import chain
-import pickle 
+import itertools
 
 from bqskit.qis.pauli import PauliMatrices
 from bqskit.ir import Circuit
@@ -27,9 +27,13 @@ from bqskit.utils.math import dot_product
 from bqskit.runtime import get_runtime
 
 import os
-from .common import store_ensemble, load_ensemble
+from .common import store_jiggled_ensemble, load_jiggled_ensemble, create_jiggled_unitaries
 
 _logger = logging.getLogger(__name__)
+
+frob_cost = GPNormalizedFrobeniusCostGenerator()
+
+lang = get_language("qasm")
 
 class  JiggleEnsemblePass(BasePass):
     """Converts single-qubit general unitary gates to U3 Gates."""
@@ -39,7 +43,7 @@ class  JiggleEnsemblePass(BasePass):
 
     def __init__(self, success_threshold = 1e-4, 
                  num_circs = 1000,
-                 cost: CostFunctionGenerator = FrobeniusCostGenerator(),
+                 cost: CostFunctionGenerator = GPNormalizedFrobeniusCostGenerator(),
                  use_ensemble: bool = True,
                  use_calculated_error: bool = True,
                  count_t: bool = False,
@@ -109,7 +113,7 @@ class  JiggleEnsemblePass(BasePass):
         final_params = [U3Gate().calc_params(mat) for mat in final_matrices]
         return final_params
 
-    async def single_jiggle_ham(self, circ: Circuit, dist: float, num: int, target: UnitaryMatrix) -> list[tuple[Circuit, float]]:
+    async def single_jiggle_ham(self, circ: Circuit, dist: float, num: int, target: UnitaryMatrix) -> np.ndarray[float]:
         # For each U3 gate, calculate do a Hamiltonian perturbation
         num_u3s = circ.count(U3Gate())
         # For each u3, come up with 16 param perturbations
@@ -122,14 +126,16 @@ class  JiggleEnsemblePass(BasePass):
                 u3_param_options.append(self.get_ham_perturbations(cur_u3_utry, perturb_dist, num_options * 2))
         
         # Now randomly pick num combinations of these options
-        final_circs = []
+        final_params = []
+        # dists = []
+        # frob_dists = []
         for _ in range(num):
             rand_inds = np.random.choice(num_options, num_u3s, replace=True)
             # Positive perturbation
             full_params_1: list[list[float]] = [u3_param_options[i][ind * 2] for i, ind in enumerate(rand_inds)]
             # Negative perturbation
             full_params_2: list[list[float]] = [u3_param_options[i][ind * 2 + 1] for i, ind in enumerate(rand_inds)]
-            # full_params_1 = list(chain.from_iterable(full_params_1))
+            # full_params_1 = list(itertools.chain.from_iterable(full_params_1))
             new_circ_1 = circ.copy()
             ind = 0
             for op in new_circ_1.operations():
@@ -143,12 +149,12 @@ class  JiggleEnsemblePass(BasePass):
                 if isinstance(op.gate, U3Gate):
                     op.params = full_params_2[ind]
                     ind += 1
-
-            global_phase_correction = target.get_target_correction_factor(new_circ_1.get_unitary())
-            new_circ_1.append_gate(GlobalPhaseGate(1, global_phase=global_phase_correction), (0,))
-            global_phase_correction = target.get_target_correction_factor(new_circ_2.get_unitary())
-            new_circ_2.append_gate(GlobalPhaseGate(1, global_phase=global_phase_correction), (0,))
             
+            
+            dist_1 = self.cost.calc_cost(new_circ_1, target)
+            dist_2 = self.cost.calc_cost(new_circ_2, target)
+
+
             dist_1 = self.cost.calc_cost(new_circ_1, target)
             dist_2 = self.cost.calc_cost(new_circ_2, target)
 
@@ -156,14 +162,28 @@ class  JiggleEnsemblePass(BasePass):
 
             full_params_1 = new_circ_1.params
             full_params_2 = new_circ_2.params
-            new_c_1 = self.jiggle_params(full_params_1, new_circ_1, dist_1, target)
-            new_c_2 = self.jiggle_params(full_params_2, new_circ_2, dist_2, target)
-            final_circs.append(new_c_1)
-            final_circs.append(new_c_2)
-        return final_circs
 
+            dist_1 = self.cost.calc_cost(new_circ_1, target)
+            dist_2 = self.cost.calc_cost(new_circ_2, target)
+            full_params_1 = self.jiggle_params(full_params_1, new_circ_1, dist_1, target)
+            full_params_2= self.jiggle_params(full_params_2, new_circ_2, dist_2, target)
+            final_params.append(full_params_1)
+            final_params.append(full_params_2)
+            new_circ_1.set_params(full_params_1)
+            new_circ_2.set_params(full_params_2)
+            dist_1 = self.cost.calc_cost(new_circ_1, target)
+            dist_2 = self.cost.calc_cost(new_circ_2, target)
+            # frob_dists.append(frob_cost.calc_cost(new_circ_1, target))
+            # frob_dists.append(frob_cost.calc_cost(new_circ_2, target))
+            # dists.append(dist_1)
+            # dists.append(dist_2)
 
-    def jiggle_params(self, params: list[float], circ: Circuit, dist: float, target: UnitaryMatrix) -> tuple[Circuit, float]:
+        # print("Avg. Dist Post Jiggle: ", np.mean(dists), flush=True)
+        # print("Avg. Frob Dist Post Jiggle: ", np.mean(frob_dists), flush=True)
+
+        return np.vstack(final_params)
+
+    def jiggle_params(self, params: list[float], circ: Circuit, dist: float, target: UnitaryMatrix) -> np.ndarray[float]:
             cost_fn = self.cost.gen_cost(circ.copy(), target)
             trials = 0
             best_params = np.array(params.copy(), dtype=np.float64)
@@ -174,7 +194,6 @@ class  JiggleEnsemblePass(BasePass):
                     num_params_to_jiggle = ceil(len(params) / 2)
                 else:
                     num_params_to_jiggle = int(np.random.uniform() * len(params) / 2) + ceil(len(params) / 10)
-                    # num_params_to_jiggle = min(num_params_to_jiggle, len(params))
                 # num_params_to_jiggle = len(params)
                 # Vary probability proportional to param location
                 p = (np.arange(len(params)) + 1) ** self.jiggle_skew
@@ -185,7 +204,6 @@ class  JiggleEnsemblePass(BasePass):
                 next_params = best_params.copy()
                 next_params[params_to_jiggle] = next_params[params_to_jiggle] + jiggle_amounts
                 circ_cost = cost_fn.get_cost(next_params)
-                # circ_cost = normalized_frob_cost(circ.get_unitary(), target)
                 trial_costs.append(circ_cost)
                 if (circ_cost < self.success_threshold):
                     extra_diff = extra_diff * 1.5
@@ -196,30 +214,21 @@ class  JiggleEnsemblePass(BasePass):
                 else:
                     extra_diff = extra_diff / 10
                 trials += 1
-            
-            circ_copy = circ.copy()
-            circ_copy.set_params(best_params)
-            circ_cost = cost_fn.get_cost(best_params)
 
-            return circ_copy, circ_cost
+            return best_params
 
-    async def single_jiggle(self, params: list[float], circ: Circuit, dist: float, target: UnitaryMatrix, num: int) -> list[tuple[Circuit, float]]:
+    async def single_jiggle(self, params: list[float], circ: Circuit, dist: float, target: UnitaryMatrix, num: int) -> np.ndarray[float]:
         # print("Starting Jiggle", flush=True)
         # start = time.time()
-        circs = []
+        params = []
         for _ in range(num):
-            c = self.jiggle_params(params, circ, dist, target)
-            if c:
-                circs.append(c)
-        JiggleEnsemblePass.num_jiggles += 1
-        return circs
+            p = self.jiggle_params(params, circ, dist, target)
+            if p:
+                params.append(p)
+        return np.vstack(params)
 
-    async def jiggle_circ(self, circ_dist: tuple[Circuit, float], target: UnitaryMatrix, num_circs: int) -> list[tuple[Circuit, float]]:
+    async def jiggle_circ(self, circ_dist: tuple[Circuit, float], target: UnitaryMatrix, num_circs: int) -> tuple[Circuit, np.ndarray[float]]:
         circ, dist = circ_dist
-        
-        params = circ.params
-
-        orig_gate_counts =  circ.gate_counts
 
         # assert than each circ has U3 gates after their CNOTs
         if self.flood_circ:
@@ -237,40 +246,23 @@ class  JiggleEnsemblePass(BasePass):
                     circ.replace_with_circuit(op_pt, flooded_cnot.copy(), as_circuit_gate=True)
             circ.unfold_all()
             ToU3Pass.run_group_circ(circ)
-        
-        all_circs = []
 
-        # print(f"Awaiting All {num_circs // 50} Jiggles")
-        # print(f"Launching {ceil(num_circs / 20)} Tasks", flush=True)
+        # This ensures that qasm will be decoded the same way later
+        circ_final =  lang.decode(lang.encode(circ))
+
         num_tasks = ceil(num_circs / 40)
         circs_per_task = ceil(num_circs / num_tasks)
         if self.do_u3_perturbation:
-            in_circs = [circ.copy() for _ in range(num_tasks)]
-            all_circs: list[list[tuple[Circuit, float]]] = await get_runtime().map(self.single_jiggle_ham, in_circs, dist=dist, num=circs_per_task, target=target)
+            in_circs = [circ_final.copy() for _ in range(num_tasks)]
+            params: list[np.ndarray[float]] = await get_runtime().map(self.single_jiggle_ham, in_circs, dist=dist, num=circs_per_task, target=target)
         else:
-            all_circs: list[list[tuple[Circuit, float]]] = await get_runtime().map(self.single_jiggle, [params] * num_tasks, circ=circ, dist=dist, target=target, num=circs_per_task)
+            orig_params = circ_final.params
+            params: list[np.ndarray[float]] = await get_runtime().map(self.single_jiggle, [orig_params] * num_tasks, circ=circ_final, dist=dist, target=target, num=circs_per_task)
             # print(f"Finished {ceil(num_circs / 20)} Tasks", flush=True)
         
-        all_circs: list[tuple[Circuit, float]] = list(chain.from_iterable(all_circs))
+        all_params = np.vstack(params)
         
-        return all_circs
-
-    async def jiggle_ensemble(self, scan_sols: list[tuple[Circuit, float]], target: UnitaryMatrix) -> list[tuple[Circuit, float]]:
-            print("Number of SCAN SOLS", len(scan_sols))
-            # For each params come up with nth root of num_circs number of extra params
-            circuits = [psol[0] for psol in scan_sols]
-            dists = [psol[1] for psol in scan_sols]
-
-            circ_dists = list(zip(circuits, dists))
-
-            # print("Initial Distances before jiggle", dists, flush=True)
-            circ_dists = await get_runtime().map(self.jiggle_circ,
-                                                circ_dists,
-                                                target=target,
-                                                num_circs = ceil(self.num_circs / len(circuits)))
-            
-            return list(chain.from_iterable(circ_dists))
-
+        return circ_final, all_params
 
     async def run(self, circuit: Circuit, data: PassData) -> None:
         """Perform the pass's operation, see :class:`BasePass` for more."""
@@ -280,57 +272,86 @@ class  JiggleEnsemblePass(BasePass):
         print("Starting JIGGLE ENSEMBLE", flush=True)
 
         checkpoint_dir = data["checkpoint_dir"]
-        file_name = f"{checkpoint_dir}/jiggled_ensemble_0_{self.checkpoint_extra_str}.qasms"
-        
-        if os.path.exists(file_name):
-            # Load the ensemble from the checkpoint
-            ensembles = []
-            while os.path.exists(file_name):
-                ensembles.append(load_ensemble(file_name, data.target))
-                file_name = f"{checkpoint_dir}/jiggled_ensemble_{len(ensembles)}_{self.checkpoint_extra_str}.qasms"
-            print("Finished Jiggle Ensemble Pass", flush=True)
-            data["ensemble"] = ensembles
-            return
+        ensemble_file_name = os.path.join(checkpoint_dir, "ensemble_{ind}_{extra}.qasms")
+        jiggle_file_name = os.path.join(checkpoint_dir, "ensemble_{ind}_jiggles_{extra}.npy")
+        final_ens_file = f"{checkpoint_dir}/ensemble_final.qasms"
 
-        print("Number of ensembles", len(data["ensemble"]), flush=True)
+        if os.path.exists(final_ens_file):
+            print("Already Finished Jiggle", flush=True)
+            return
 
         if self.use_calculated_error:
             # print("OLD", self.success_threshold)
             self.success_threshold = self.success_threshold * data.get("error_percentage_allocated", 1)
             # print("NEW", self.success_threshold)
+        
+        print("Success Threshold", self.success_threshold, flush=True)
+        
+        ens_ind = 0
+        ens_file = ensemble_file_name.format(ind=ens_ind, extra=self.checkpoint_extra_str)
+        jiggle_file = jiggle_file_name.format(ind=ens_ind, extra=self.checkpoint_extra_str)
+        ensemble_unitaries = []
 
-        ensemble = []
+        if os.path.exists(jiggle_file):
+            # Load the ensemble from the checkpoint
+            while os.path.exists(jiggle_file):
+                circ_params: list[tuple[Circuit, np.ndarray]] = load_jiggled_ensemble(ens_file, jiggle_file)
+                jiggled_unitaries = await get_runtime().map(create_jiggled_unitaries, circ_params, 
+                                                  target=data.target, 
+                                                  add_cost = True, 
+                                                  fix_phase=True)
+                jiggled_unitaries: list[tuple[UnitaryMatrix, float]] = list(itertools.chain.from_iterable(jiggled_unitaries))
+                dists = [jiggled_unitaries[i][1] for i in range(len(jiggled_unitaries))]
+                ensemble_unitaries.append(jiggled_unitaries)
+                ens_ind += 1
+                ens_file = ensemble_file_name.format(ind=ens_ind, extra=self.checkpoint_extra_str)
+                jiggle_file = jiggle_file_name.format(ind=ens_ind, extra=self.checkpoint_extra_str)
+                print("Avg Dist Post Jiggle Load: ", np.mean(dists), flush=True)
+                # print("Num Circs: ", len(jiggled_circs), flush=True)
+            print("Ensemble Size", [len(ens) for ens in ensemble_unitaries], flush=True)
+            print("Finished Jiggle Ensemble Pass", flush=True)
+            data["ensemble_unitaries"] = ensemble_unitaries
+            return
 
-        for scan_sols in data["ensemble"]:
+        print("Number of ensembles", len(data["ensemble"]), flush=True)
+        # all_circ_params = []
+
+        for ens_ind, scan_sols in enumerate(data["ensemble"]):
             print("Number of SCAN SOLS", len(scan_sols), flush=True)
             # For each params come up with nth root of num_circs number of extra params
             if self.use_ensemble:
-                circuits = [psol[0] for psol in scan_sols]
-                dists = [psol[1] for psol in scan_sols]
+                circuits = scan_sols
+                dists = [self.cost.calc_cost(circ, data.target) for circ in circuits]
             else:
                 circuits = [circuit]
                 dists = [self.cost.calc_cost(circuit, data.target)]
 
+            print("Avg Dist", np.mean(dists), flush=True)
 
             if len(circuits) == 0:
                 continue
             circ_dists = list(zip(circuits, dists))
 
-            jiggled_circ_dists = await get_runtime().map(self.jiggle_circ, 
+            circ_params: list[tuple[Circuit, np.ndarray]] = await get_runtime().map(self.jiggle_circ, 
                                                          circ_dists, 
                                                          target=data.target, 
                                                          num_circs = ceil(self.num_circs / len(circuits))
                                                         )
-            ensemble.append(list(chain.from_iterable(jiggled_circ_dists)))
+            # all_circ_params.append(circ_params)
+            jiggled_unitaries: list[list[tuple[UnitaryMatrix, float]]] = await get_runtime().map(
+                create_jiggled_unitaries, circ_params, target=data.target, add_cost = True, fix_phase=True)
+            jiggled_unitaries = list(itertools.chain.from_iterable(jiggled_unitaries))
+            print("Num Unitaries: ", len(jiggled_unitaries), flush=True)
+            dists = [jiggled_unitaries[i][1] for i in range(len(jiggled_unitaries))]
+            # dists = [self.cost.calc_cost(circ, data.target) for circ in jiggled_circs[:len(jiggled_circs):80]]
+            print("Dists Post Jiggle Combo: ", np.mean(dists), flush=True)
+            ens_file = ensemble_file_name.format(ind=ens_ind, extra=self.checkpoint_extra_str)
+            jiggle_file = jiggle_file_name.format(ind=ens_ind, extra=self.checkpoint_extra_str)
+            store_jiggled_ensemble(circ_params, ens_file, jiggle_file)
+            ensemble_unitaries.append(jiggled_unitaries)
 
-        print("Number of Circs post Jiggle", [len(ens) for ens in ensemble], flush=True)
-
-        data["ensemble"] = ensemble
-
-        if "checkpoint_dir" in data:
-            checkpoint_dir = data["checkpoint_dir"]
-            for i, ens in enumerate(data["ensemble"]):
-                store_ensemble(ens, f"{checkpoint_dir}/jiggled_ensemble_{i}_{self.checkpoint_extra_str}.qasms")
+        print("Number of Circs post Jiggle", [len(ens) for ens in ensemble_unitaries], flush=True)
+        data["ensemble_unitaries"] = ensemble_unitaries
         return
 
         

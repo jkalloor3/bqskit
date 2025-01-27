@@ -40,6 +40,7 @@ def get_shortest_circuits(circ_name: str,
     small_block_size = 3
     checkpoint_dir = f"block_checkpoints_nisq_{jiggle_skew}/{circ_name}_{tol}_{num_unique_circs}/"
     print("Checkpoint Dir: ", checkpoint_dir, flush=True)
+    print("Error Threshold: ", err_thresh, flush=True)
 
     good_instantiation_options = {
         'multistarts': 8,
@@ -75,7 +76,7 @@ def get_shortest_circuits(circ_name: str,
     synthesis_pass = LEAPSynthesisPass2(
         store_partial_solutions=True,
         success_threshold = extra_err_thresh,
-        partial_success_threshold=err_thresh / 2,
+        partial_success_threshold=err_thresh,
         instantiate_options=instantiation_options,
         max_layer=14,
         max_psols=10
@@ -83,7 +84,7 @@ def get_shortest_circuits(circ_name: str,
 
     second_synthesis_pass = SecondLEAPSynthesisPass(
         success_threshold = extra_err_thresh,
-        partial_success_threshold=err_thresh / 2,
+        partial_success_threshold=err_thresh,
         instantiate_options=instantiation_options,
         max_layer=14,
         max_psols=5
@@ -97,11 +98,6 @@ def get_shortest_circuits(circ_name: str,
                                   jiggle_skew=jiggle_skew,
                                   do_u3_perturbation=ham_perturb,
                                   flood_circ=True)
-    
-    scan_pass = EnsembleScanningGateRemovalPass(
-        success_threshold=err_thresh,
-        instantiate_options=instantiation_options,
-    )
 
     leap_workflow = [
         CheckpointRestartPass(checkpoint_dir, 
@@ -116,8 +112,9 @@ def get_shortest_circuits(circ_name: str,
         ),
         create_ensemble_pass,
         jiggle_pass,
+        # FixGlobalPhasePass(),
         CheckEnsembleQualityPass(False, csv_name="_try1", checkpoint_extra_str="_try1"),
-        # GenerateProbabilityPass(success_threshold=err_thresh, size=10000)
+        GenerateProbabilityPass()
     ]
     num_workers = 128
     compiler = Compiler(num_workers=num_workers)
@@ -134,4 +131,6 @@ if __name__ == '__main__':
     circ_name = f"{circ_name}_{block_num}"
     circ_file = f"good_blocks/{circ_name}.qasm"
     # print("OPT STR", opt_str, opt, argv[5])
-    get_shortest_circuits(circ_name, circ_file, tol, num_unique_circs=num_unique_circs, jiggle_skew=jiggle_skew, ham_perturb=ham_perturb)
+    get_shortest_circuits(circ_name, circ_file, tol, 
+                          num_unique_circs=num_unique_circs, 
+                          jiggle_skew=jiggle_skew, ham_perturb=ham_perturb)

@@ -126,7 +126,7 @@ class Unitary(metaclass=UnitaryMeta):
                 % type(params[fail_idx]),
             )
 
-        if len(params) != self.num_params:
+        if len(params) < self.num_params:
             raise ValueError(
                 'Expected %d params, got %d.'
                 % (self.num_params, len(params)),
