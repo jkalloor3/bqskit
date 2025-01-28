@@ -12,7 +12,7 @@ from bqskit.passes import *
 from bqskit.runtime import get_runtime
 from bqskit.ir.gates import GlobalPhaseGate
 import pickle
-from bqskit.ir.opt.cost.functions import HilbertSchmidtResidualsGenerator, HilbertSchmidtCostGenerator, FrobeniusCostGenerator
+from bqskit.ir.opt.cost.functions import HilbertSchmidtResidualsGenerator, HilbertSchmidtCostGenerator, NormalizedFrobeniusCostGenerator
 from bqskit.ir.opt.minimizers.lbfgs import LBFGSMinimizer
 from bqskit.ir.opt.minimizers.scipy import ScipyMinimizer
 import multiprocessing as mp
@@ -108,7 +108,7 @@ if __name__ == '__main__':
     approx_circuits: list[Circuit] = []
 
     generator = HilbertSchmidtCostGenerator()
-    # generator = FrobeniusCostGenerator()
+    # generator = NormalizedFrobeniusCostGenerator()
 
     if method == "scan":
         base_checkpoint_dir = "checkpoints"

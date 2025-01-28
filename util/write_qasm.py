@@ -8,6 +8,9 @@ from bqskit.compiler.passdata import PassData
 from bqskit.passes import ScanPartitioner
 
 class WriteQasmPass(BasePass):
+    def __init__(self, checkpoint_dir: str = None):
+        self.default_dir = checkpoint_dir
+
     async def run(
             self, 
             circuit : Circuit, 
@@ -20,12 +23,15 @@ class WriteQasmPass(BasePass):
             else:
                 checkpoint_dir = data["checkpoint_dir"]
                 file_name = f"{checkpoint_dir}/circuit.qasm"
+        else:
+            block_num = data.get("block_num", "-1")
+            file_name = f"{self.default_dir}/block_{block_num}.qasm"
             
-            cc = circuit.copy()
-            cc.unfold_all()
-            qasm_str = cc.to("qasm")
-            with open(file_name, "w") as f:
-                f.write(qasm_str)
+        cc = circuit.copy()
+        cc.unfold_all()
+        qasm_str = cc.to("qasm")
+        with open(file_name, "w") as f:
+            f.write(qasm_str)
 
 class ReplaceWithQasmPass(BasePass):
 

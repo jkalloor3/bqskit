@@ -2,20 +2,37 @@
 from __future__ import annotations
 
 import logging
+import numpy as np
 from typing import Any
 
+from bqskit.qis import UnitaryMatrix
 from bqskit.ir import Gate, Circuit
 from bqskit.compiler.basepass import BasePass
 from bqskit.compiler.passdata import PassData
 from bqskit.ir.gates import GlobalPhaseGate
+from bqskit.runtime import get_runtime
 
-from bqskit.ir.opt.cost.functions import  FrobeniusCostGenerator, HilbertSchmidtResidualsGenerator
+from bqskit.ir.opt.cost.functions import NormalizedFrobeniusCostGenerator
+from bqskit.ir.opt.cost.functions import HilbertSchmidtResidualsGenerator
 
 hs_cost = HilbertSchmidtResidualsGenerator()
-frob_cost = FrobeniusCostGenerator()
+frob_cost = NormalizedFrobeniusCostGenerator()
 
 class FixGlobalPhasePass(BasePass):
-     
+    
+    def __init__(self):
+        super().__init__()
+        self.target = None
+
+    @staticmethod
+    def fix_phase(circuit: Circuit, target: UnitaryMatrix) -> float:
+        unitary = circuit.get_unitary()
+        global_phase_correction = target.get_target_correction_factor(unitary)
+        # old_cost = frob_cost.calc_cost(circuit, target)
+        circuit.append_gate(GlobalPhaseGate(1, global_phase=global_phase_correction), (0,))
+        new_cost = hs_cost.calc_cost(circuit, target)
+        return new_cost
+
     async def run(
             self, 
             circuit : Circuit, 
@@ -25,14 +42,7 @@ class FixGlobalPhasePass(BasePass):
         new_scan_sols = []
         distances = []
         for psol in data["scan_sols"]:
-            unitary = psol[0].get_unitary()
-            old = frob_cost.calc_cost(psol[0], target)
-            global_phase_correction = target.get_target_correction_factor(unitary)
-            psol[0].append_gate(GlobalPhaseGate(1, global_phase=global_phase_correction), (0,))
-            new = frob_cost.calc_cost(psol[0], target)
-            hs = hs_cost.calc_cost(psol[0], target)
-            distances.append((new, hs))
+            new = FixGlobalPhasePass.fix_phase(psol[0], target)
             new_scan_sols.append((psol[0], new))
-            # print("Old cost: ", old, "New cost: ", new, flush=True)
         print("After GP Distances: ", distances, flush=True)
         data["scan_sols"] = new_scan_sols

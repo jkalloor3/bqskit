@@ -6,6 +6,7 @@ from typing import Any
 from bqskit.ir import Circuit
 from bqskit.qis import UnitaryMatrix
 from bqskit.ir.gates import CNOTGate
+from bqskit.runtime import get_runtime
 from bqskit.compiler.basepass import BasePass
 from bqskit.compiler.passdata import PassData
 import numpy as np
@@ -19,74 +20,34 @@ class GenerateProbabilityPass(BasePass):
     
     def __init__(
         self,
-        success_threshold: float,
-        size: int,
-        min_chi_1: float = 0.3,
-        min_chi_2: float = 0.5
     ) -> None:
         """
         Construct a Instantiate Count pass and then 
 
         """
-        self.success_threshold = success_threshold
-        self.size = size
-        self.min_chi_1 = min_chi_1
-        self.min_chi_2 = min_chi_2
-        self.target = None
         return
     
-    # async def calculate_chi_1_chi_2(self, ensemble: np.ndarray):
-    #     num_reps = 50
-    #     chi_1 = 0
-    #     chi_2 = 0
-    #     mean = np.mean(ensemble, axis=0)
-    #     mean_epsi = 0
-
-    #     for un in ensemble:
-    #         diff = un - mean
-    #         mean_epsi += np.abs(np.sum(np.einsum("ij,ij->", diff.conj(), diff)))
-        
-    #     mean_epsi /= len(ensemble)
-
-
-    #     for _ in range(num_reps):
-    #         if self.size > len(ensemble):
-    #             print(f"How tf is this possible {len(ensemble)}")
-    #             # print(ensemble[0])
-    #             size = len(ensemble)
-    #         else:
-    #             size = self.size
-    #         sub_ensemble_inds = np.random.choice(len(ensemble), size, replace=False)
-    #         sub_ensemble = ensemble[sub_ensemble_inds]
-    #         c_1, c_2 = get_chi_1_chi_2(sub_ensemble, mean=mean, mean_epsi=mean_epsi)
-    #         chi_1 += c_1
-    #         chi_2 += c_2
-
-    #     return (chi_1 / num_reps, chi_2 / num_reps)
-    
-    def calculate_bias(self, ensemble: list[UnitaryMatrix], target: UnitaryMatrix):
-        mean_un = np.mean(ensemble, axis=0)
-        return normalized_frob_cost(mean_un, target)
-    
-    def calculate_e1(self, ensemble: list[UnitaryMatrix], target: UnitaryMatrix):
-        e1s = [normalized_frob_cost(un, target) for un in ensemble]
-        return np.mean(e1s)
-
     @staticmethod
-    async def calculate_probs(ensemble: np.ndarray, target: np.ndarray):
+    def calculate_probs(ensemble: np.ndarray, target: np.ndarray) -> np.ndarray:
         M = len(ensemble)
 
-        tr_V_Us = np.zeros(M, dtype=np.complex128)
-        tr_Us = np.zeros((M, M), dtype=np.complex128)
+        # tr_V_Us = np.zeros(M, dtype=np.complex128)
+        # tr_Us = np.zeros((M, M), dtype=np.complex128)
 
-        print(ensemble.shape)
+        print(ensemble.shape, flush=True)
 
-        for jj in range(M):
-            tr_V_Us[jj] = np.trace(target.conj().T @ ensemble[jj])
-            for kk in range(jj, M):
-                a = np.trace(ensemble[jj].conj().T @ ensemble[kk])
-                tr_Us[jj, kk] = a
-                tr_Us[kk, jj] = a
+        tr_V_Us = np.einsum("mij,ij->m", ensemble, target.conj())
+        tr_Us = np.einsum("aij,bij->ab", ensemble.conj(), ensemble)
+
+        # for jj in range(M):
+        #     utry = ensemble[jj]
+        #     for kk in range(jj, M):
+        #         a = np.einsum("ij,ij->", ensemble[kk].conj(), utry)
+        #         tr_Us[jj, kk] = a
+        #         tr_Us[kk, jj] = a
+
+        print("Finished Calculating Ensemble Vectors", flush=True)
+        print(tr_V_Us.shape, tr_Us.shape, flush=True)
 
         # Create f and H matrices
         f = -2 * np.real(tr_V_Us)
@@ -130,25 +91,28 @@ class GenerateProbabilityPass(BasePass):
 
         print("Running Generate Probability Pass", flush=True)
         checkpoint_dir = data["checkpoint_dir"]
-        probs_file = f"{checkpoint_dir}/probs.data"
+        probs_file = f"{checkpoint_dir}/ensemble_final_probs.npy"
 
-        if os.path.exists(probs_file):
-            print("Already Generated Probs", flush=True)
-            data["final_ensemble_probs"] = pickle.load(open(probs_file, "rb"))
-            return
+        # if os.path.exists(probs_file):
+        #     print("Already Generated Probs", flush=True)
+        #     data["final_ensemble_probs"] = np.load(probs_file)
+        #     return
         
-        best_ensemble: list[Circuit] = data["final_ensemble"]
-        best_ensemble_unitaries: list[UnitaryMatrix] = np.array([circ.get_unitary() for circ in best_ensemble])
+        best_ensemble_unitaries: list[UnitaryMatrix] = data["final_ensemble_unitaries"]
+        best_ensemble_unitaries = np.stack([x.numpy for x in best_ensemble_unitaries])
+        # best_ensemble_unitaries: list[UnitaryMatrix] = np.array([circ.get_unitary() for circ in best_ensemble])
 
-        if len(best_ensemble) < 5:
-            data["final_ensemble_probs"] = [1 / len(best_ensemble) for _ in best_ensemble]
+        print(f"Calculating Probs on {len(best_ensemble_unitaries)} unitaries", flush=True)
+
+        if len(best_ensemble_unitaries) < 5:
+            data["final_ensemble_probs"] = [1 / len(best_ensemble_unitaries) for _ in best_ensemble_unitaries]
         else:
             # Now calculate the probability for this ensemble
-            data["final_ensemble_probs"] = await GenerateProbabilityPass.calculate_probs(best_ensemble_unitaries, data.target)
+            data["final_ensemble_probs"] = GenerateProbabilityPass.calculate_probs(best_ensemble_unitaries, data.target)
 
         print("Calculated Probabilities", flush=True)
 
         if "checkpoint_dir" in data:
-            pickle.dump(data["final_ensemble_probs"], open(probs_file, "wb"))
+            np.save(probs_file, data["final_ensemble_probs"])
         return
 

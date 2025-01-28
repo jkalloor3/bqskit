@@ -6,7 +6,7 @@ from bqskit.compiler.passdata import PassData
 from bqskit.ir.circuit import Circuit
 from bqskit.ir.gates import GlobalPhaseGate
 from bqskit.passes import ForEachBlockPass
-from bqskit.ir.opt.cost.functions import HilbertSchmidtCostGenerator, HilbertSchmidtResidualsGenerator, FrobeniusCostGenerator, FrobeniusNoPhaseCostGenerator
+from bqskit.ir.opt.cost.functions import HilbertSchmidtCostGenerator, HilbertSchmidtResidualsGenerator, GPNormalizedFrobeniusCostGenerator, FrobeniusNoPhaseCostGenerator
 from bqskit.qis import UnitaryMatrix
 import numpy as np
 
@@ -17,7 +17,7 @@ def cost_1(circuit: Circuit, unitary_2: UnitaryMatrix) -> float:
     cost_inside = min((np.abs(inside) / N) ** 2, 1)
     return np.sqrt(1 - cost_inside)
 
-cost_2 = FrobeniusCostGenerator().calc_cost
+cost_2 = GPNormalizedFrobeniusCostGenerator().calc_cost
 
 cost_3 = HilbertSchmidtResidualsGenerator().calc_cost
 
