@@ -24,7 +24,7 @@ class CheckEnsembleQualityPass(BasePass):
         self.count_t = count_t
         self.csv_name = csv_name
         self.ensemble_names = ["Least CNOTs", "Medium CNOTs", "Valid CNOTs"]
-        self.gate_title = "T Count" if count_t else "CNOT Count"
+        self.gate_title = "Num Params" if count_t else "CNOT Count"
         self.gate_func = lambda x: x.count(TGate()) + x.count(TdgGate()) + x.num_params * 60 if count_t else x.count(CNOTGate())
         self.checkpoint_extra_str = checkpoint_extra_str
     
@@ -65,12 +65,6 @@ class CheckEnsembleQualityPass(BasePass):
 
     async def run(self, circuit: Circuit, data: PassData) -> None:
         # Check Ensemble Quality and output it to a CSV
-
-        data.pop(ForEachBlockPass.key, None)
-
-        print("Popped ForEachBlockPass key", flush=True)
-        print(data.keys(), flush=True)
-
         if "checkpoint_dir" in data:
             checkpoint_data_file = data["checkpoint_data_file"]
             pickle.dump(data, open(checkpoint_data_file, "wb"))

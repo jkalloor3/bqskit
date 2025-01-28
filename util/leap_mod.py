@@ -8,7 +8,6 @@ import numpy as np
 from scipy.stats import linregress
 from os.path import join, exists
 import pickle
-import time
 
 from bqskit.compiler.passdata import PassData
 from bqskit.ir.circuit import Circuit
@@ -200,8 +199,8 @@ class LEAPSynthesisPass2(BasePass):
             instantiate_options['seed'] = data.seed
 
         block_id = f"Block {data.get('super_block_num', -1)}_{data.get('block_num', -1)}:"
-        print(f"{block_id} Partial Success Threshold: ", partial_success_threshold, flush=True)
-        print(f"{block_id} Gate Counts: ", default_circuit.gate_counts, flush=True)
+        # print(f"{block_id} Partial Success Threshold: ", partial_success_threshold, flush=True)
+        # print(f"{block_id} Gate Counts: ", default_circuit.gate_counts, flush=True)
         # Get layer generator for search
         layer_gen = self._get_layer_gen(data)
 
@@ -443,9 +442,11 @@ class LEAPSynthesisPass2(BasePass):
 
     async def run(self, circuit: Circuit, data: PassData) -> None:
         """Perform the pass's operation, see :class:`BasePass` for more."""
-        print(f"Starting LEAP for block {data.get('super_block_num', -1)} : {data.get('block_num', -1)}", flush=True)
+        # print(f"Starting LEAP for block {data.get('super_block_num', -1)} : {data.get('block_num', -1)}", flush=True)
+        orig_num_params = circuit.num_params
+        # print(f"LEAP 1: Initial Number of Params for block {data.get('block_num', -1)}: ",   circuit.num_params, flush=True)
         if "leap_finished" in data and data["leap_finished"]:
-            print("LEAP is already finished!", flush=True)
+            # print("LEAP is already finished!", flush=True)
             return
 
         frontier = None
@@ -462,5 +463,13 @@ class LEAPSynthesisPass2(BasePass):
                 _logger.debug('Block is already finished!')
                 return
             data['leap_finished'] = False
-    
+
+
         await self.synthesize_circ(data.target, data, default_circuit=circuit, frontier=frontier, save_data_file=save_data_file)
+
+        scan_sols: list[tuple[Circuit, float]] = data['scan_sols']
+
+        avg_num_params = np.mean([x[0].num_params for x in scan_sols])
+        param_increase = avg_num_params - orig_num_params
+        print(f"LEAP 1: Param Increase for {data.get('block_num', -1)}: ", param_increase, flush=True)
+        print(f"LEAP 1: Final Number of Params for {data.get('block_num', -1)}: ",   [x[0].num_params for x in scan_sols], flush=True)

@@ -10,7 +10,7 @@ from bqskit.passes import ForEachBlockPass, ScanPartitioner
 from util import JiggleEnsemblePass, CreateEnsemblePass
 from ntro import NumericalTReductionPass
 from bqskit import enable_logging
-from util import LEAPSynthesisPass2
+from util import LEAPSynthesisPass2, GenerateProbabilityPass, FixAnglesPass
 from util import CheckEnsembleQualityPass, FixGlobalPhasePass, ConvertToZXZXZSimple
 
 # enable_logging(True)
@@ -70,7 +70,7 @@ def get_shortest_circuits(circ_name: str, circ_file: str, tol: int, num_unique_c
             success_threshold=err_thresh, 
             use_calculated_error=False, 
             num_circs=num_unique_circs,
-            num_random_ensembles=4,
+            num_random_ensembles=2,
             solve_exact_dists=True,
             sort_by_t=True,
             checkpoint_extra_str="_try"
@@ -82,7 +82,7 @@ def get_shortest_circuits(circ_name: str, circ_file: str, tol: int, num_unique_c
         partial_success_threshold=err_thresh / 2,
         instantiate_options=instantiation_options,
         max_layer=14,
-        max_psols=10
+        max_psols=4
     )
 
     jiggle_pass = JiggleEnsemblePass(success_threshold=err_thresh, 
@@ -95,36 +95,34 @@ def get_shortest_circuits(circ_name: str, circ_file: str, tol: int, num_unique_c
                                   do_u3_perturbation=True)
 
     leap_workflow = [
+        FixAnglesPass(10),
         CheckpointRestartPass(checkpoint_dir, 
                                 default_passes=partitioner_passes),
-        # ForEachBlockPass(
-        #     [
-        #         synthesis_pass,
-        #         # JiggleScansPass(success_threshold=err_thresh / 2),
-        #         ConvertToZXZXZSimple(),
-        #         NumericalTReductionPass(
-        #             full_loops=5,
-        #             success_threshold=err_thresh / 5,
-        #             use_calculated_error=True),
-        #         ToU3Pass(ensemble=True, group=True),
-        #         FixGlobalPhasePass(),
-        #         # scan_pass,
-        #     ],
-        #     allocate_error=True,
-        # ),
-        # create_ensemble_pass,
+        ForEachBlockPass(
+            [
+                synthesis_pass,
+                # JiggleScansPass(success_threshold=err_thresh / 2),
+                ConvertToZXZXZSimple(),
+                NumericalTReductionPass(
+                    full_loops=5,
+                    success_threshold=err_thresh / 10,
+                    use_calculated_error=True),
+                ToU3Pass(ensemble=True, group=True),
+                FixGlobalPhasePass(),
+                # scan_pass,
+            ],
+            allocate_error=True,
+        ),
+        create_ensemble_pass,
         # jiggle_pass,
-        CheckEnsembleQualityPass(True, csv_name="_try1"),
+        # CheckEnsembleQualityPass(True, csv_name="_try1"),
+        # GenerateProbabilityPass(err_thresh, 1000),
     ]
     num_workers = mp.cpu_count()
     print("Num Workers: ", num_workers)
     compiler = Compiler(num_workers=num_workers)
     # target = circ.get_unitary()
     out_circ, data = compiler.compile(circ, workflow=leap_workflow, request_data=True)
-    # print("Initial Gate Counts: ", circ.gate_counts)
-    # print("Final Gate Counts: ", out_circ.gate_counts)
-    # final_dist = normalized_gp_frob_cost(out_circ.get_unitary(), circ.get_unitary())
-    # print("Final Distance: ", final_dist)
     return
 
 if __name__ == '__main__':

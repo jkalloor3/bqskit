@@ -10,13 +10,16 @@ from bqskit.ir.circuit import Circuit, CircuitPoint, Operation, CircuitLocationL
 from bqskit.runtime import get_runtime
 from typing import Any
 from collections import deque
-from bqskit.ir.opt.cost.functions import FrobeniusCostGenerator
+from bqskit.ir.opt.cost.functions import FrobeniusCostGenerator, HilbertSchmidtResidualsGenerator
 from bqskit.ir.opt.cost.generator import CostFunctionGenerator
 from bqskit.ir.gates import CircuitGate
 from bqskit.ir.gates import CNOTGate
 from bqskit.qis import UnitaryMatrix
 import numpy as np
 import os
+import pickle
+
+from util import normalized_gp_frob_cost
 
 from .common import load_ensemble, store_ensemble
 
@@ -49,6 +52,7 @@ class CreateEnsemblePass(BasePass):
         self.success_threshold = success_threshold
         self.num_circs = num_circs
         self.cost = cost
+        self.hs_cost = HilbertSchmidtResidualsGenerator()
         self.solve_exact_dists = solve_exact_dists
         self.use_calculated_error = use_calculated_error
         self.num_random_ensembles = num_random_ensembles
@@ -70,7 +74,7 @@ class CreateEnsemblePass(BasePass):
             locations: list[CircuitLocationLike], 
             target: UnitaryMatrix = None) -> tuple[Circuit, float]:
         
-        config, dist = config_dist
+        config, pred_dist = config_dist
         operations = [
             Operation(cg, loc, cg._circuit.params)
             for cg, loc
@@ -80,8 +84,9 @@ class CreateEnsemblePass(BasePass):
         copied_circuit.batch_replace(pts, operations)
         copied_circuit.unfold_all()
 
-        dist = frob_cost.calc_cost(copied_circuit, target)
-
+        # dist = frob_cost.calc_cost(copied_circuit, target)
+        dist = normalized_gp_frob_cost(copied_circuit.get_unitary(), target)
+        # print("Unfolded Circuit Distance: ", dist, pred_dist, flush=True)
         return copied_circuit, dist
 
     def get_random_inds(self, dists: list[list[float]], num_circs: int) -> list[list[int]]:
@@ -140,22 +145,9 @@ class CreateEnsemblePass(BasePass):
                                      size=(len(gate_count_diffs)),
                                      p=weight,
                                      replace=False)
-        
-        # print("Inds we are looking at: ", orig_inds)
-        # print("Number of psols per block: ", [len(psol_diffs[i]) for i in orig_inds], flush=True)
-        # print("Avg CNOT diffs per block: ", [np.mean(psol_diffs[i]) for i in orig_inds], flush=True)
-        # print("Avg Dists per block: ", [np.mean(psol_dists[i]) for i in orig_inds], flush=True)
-        # print("Avg Total Dist: ", sum([np.mean(psol_dists[i]) for i in orig_inds]), flush=True)
-        # print("Max Total Dist: ", sum([np.max(psol_dists[i]) for i in orig_inds]), flush=True)
-        # print("Distance Threshold: ", total_dist, flush=True)
 
         # Get all possible solutions along with their CNOT count differences
         all_valid_inds = self.BFS(orig_inds, psol_diffs, dists, total_dist)
-
-        # print("INDS: ", flush=True)
-        # print(["-".join([str(y) for y in x[0]]) for x in all_valid_inds], flush=True)
-
-        # print("NUM VALID INDS", len(all_valid_inds), flush=True)
 
         # Sort the solutions by the number of CNOTs saved
         sorted_inds = sorted(all_valid_inds, key=lambda x: x[1])
@@ -178,6 +170,7 @@ class CreateEnsemblePass(BasePass):
         # Return a list with 2 things:
         # 1. List of indices to pick (psol index for each block)
         # 2. Total distance
+        # print("Knapsakck Distances", [sorted_inds[i][2] for i in random_inds], flush=True)
         return [(sorted_inds[i][0]) for i in random_inds]
 
 
@@ -434,12 +427,17 @@ class CreateEnsemblePass(BasePass):
             # Load the ensemble from the checkpoint
             ensembles = []
             while os.path.exists(file_name):
+                new_ens = load_ensemble(file_name, data.target)
+                avg_count = np.mean([circ.num_params for circ, _ in new_ens])
+                print("Avg Count", avg_count, flush=True)
                 ensembles.append(load_ensemble(file_name, data.target))
                 file_name = f"{checkpoint_dir}/ensemble_{len(ensembles)}_{self.checkpoint_extra_str}.qasms"
             print(f"File Name: {file_name} does not exist", flush=True)
             print("Finished Create Ensemble", flush=True)
             data["ensemble"] = ensembles
             return
+        
+        print(list(data.keys()), flush=True)
         
         # Check this for old data
         if "ensemble" in data:

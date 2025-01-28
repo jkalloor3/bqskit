@@ -304,7 +304,7 @@ class ForEachBlockPass(BasePass):
         if self.allocate_error:
             for i in range(len(block_datas)):
                 # Percentage is proportional to skew function
-                print("Error Percentage for Block: ", i, " is: ", block_gates[i] / total_gates * data.get("error_percentage_allocated", 1), flush=True)
+                # print("Error Percentage for Block: ", i, " is: ", block_gates[i] / total_gates * data.get("error_percentage_allocated", 1), flush=True)
                 block_datas[i]["error_percentage_allocated"] = block_gates[i] * data.get("error_percentage_allocated", 1) / total_gates 
 
         # Do the work
