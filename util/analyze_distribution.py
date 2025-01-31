@@ -9,7 +9,7 @@ from bqskit.compiler.basepass import BasePass
 from bqskit.compiler.passdata import PassData
 import numpy as np
 import matplotlib.pyplot as plt
-from util import get_upperbound_error_mean_vec, load_circuit, load_compiled_circuits, get_unitary_vec, get_average_distance_vec
+from .stats import get_upperbound_error_mean_vec, get_average_distance_vec
 
 
 class AnalyzeDistributionPass(BasePass):

@@ -46,8 +46,8 @@ def get_shortest_circuits(circ_name: str, circ_file: str, tol: int, num_unique_c
         err_thresh = 10 ** (-1 * tol)
 
     extra_err_thresh = err_thresh * 0.01
-    small_block_size = 3
-    checkpoint_dir = f"block_checkpoints_clifft_final/{circ_name}_{tol}_{num_unique_circs}/"
+    small_block_size = 4
+    checkpoint_dir = f"block_checkpoints_clifft_final_4/{circ_name}_{tol}_{num_unique_circs}/"
 
     good_instantiation_options = {
         'multistarts': 8,
@@ -73,7 +73,7 @@ def get_shortest_circuits(circ_name: str, circ_file: str, tol: int, num_unique_c
             num_random_ensembles=2,
             solve_exact_dists=True,
             sort_by_t=True,
-            checkpoint_extra_str="_try"
+            checkpoint_extra_str=""
     )
 
     synthesis_pass = LEAPSynthesisPass2(
@@ -89,7 +89,7 @@ def get_shortest_circuits(circ_name: str, circ_file: str, tol: int, num_unique_c
                                   num_circs=10000, 
                                   use_ensemble=True,
                                   use_calculated_error=False,
-                                  checkpoint_extra_str="_try1",
+                                  checkpoint_extra_str="",
                                   count_t=True,
                                   flood_circ=False,
                                   do_u3_perturbation=True)
@@ -114,9 +114,9 @@ def get_shortest_circuits(circ_name: str, circ_file: str, tol: int, num_unique_c
             allocate_error=True,
         ),
         create_ensemble_pass,
-        # jiggle_pass,
-        # CheckEnsembleQualityPass(True, csv_name="_try1"),
-        # GenerateProbabilityPass(err_thresh, 1000),
+        jiggle_pass,
+        CheckEnsembleQualityPass(True, csv_name=""),
+        GenerateProbabilityPass(),
     ]
     num_workers = mp.cpu_count()
     print("Num Workers: ", num_workers)
@@ -128,7 +128,7 @@ def get_shortest_circuits(circ_name: str, circ_file: str, tol: int, num_unique_c
 if __name__ == '__main__':
     circ_name = argv[1]
     block_num = argv[2]
-    tol = int(argv[3])
+    tol = float(argv[3])
     num_unique_circs = int(argv[4])
     circ_name = f"{circ_name}_{block_num}"
     circ_file = f"good_blocks/{circ_name}.qasm"

@@ -29,19 +29,21 @@ if __name__ == '__main__':
     # file = "get_ensemble_expectations"
     # file = "get_shortest_circuits_new"
     # file = "get_ensemble_final_block"
-    # file = "get_ensemble_final_block_cliffordt"
+    file = "get_ensemble_final_block_cliffordt"
     # file = "run_simulations_block"
     # file = "create_block_data_hist"
     # file = "run_simulations_block"
-    file = "run_on_qc_block"
+    # file = "run_on_qc_block"
     
     # Get all circs
-    dir_1 = "ensemble_benchmarks"
-    dir_2 = "qce23_qfactor_benchmarks"
-    files = glob.glob(f"{dir_1}/*.qasm")
-    circs = [file.split('/')[-1].split(".")[0] for file in files]
-    files = glob.glob(f"{dir_2}/*.qasm")
-    circs.extend([file.split('/')[-1].split(".")[0] for file in files])
+    # dir_1 = "ensemble_benchmarks"
+    # dir_2 = "qce23_qfactor_benchmarks"
+    # files = glob.glob(f"{dir_1}/*.qasm")
+    # circs = [file.split('/')[-1].split(".")[0] for file in files]
+    # files = glob.glob(f"{dir_2}/*.qasm")
+    # circs.extend([file.split('/')[-1].split(".")[0] for file in files])
+    # circs = ["shor_12"]
+    circs = ["qpe_14"]
 
     # file = "test_hamiltonian_perturbation"
     # file = "get_ensemble_final_cliffordt"
@@ -66,15 +68,15 @@ if __name__ == '__main__':
     # circs = ["hubbard_4"]
     # circs =  ["shor_12", "qft_10", "vqe_12"]
     # tols = range(1, 7)
-    tols = [0, 1, 5]
+    tols = [3]
     # tols = [6]
     unique_circss = [250] #, 5, 20, 100, 1000, 10000]
     # jiggle_skews = [0, 2]
-    jiggle_skews = [1,2,3]
+    jiggle_skews = [0]
     # extra = "cliffordt"
     # extra = "_clifft"
     extra = "_block"
-    skips = ["qft", "qml", "vqe", "shor"]
+    # skips = ["qft", "qml", "vqe", "shor"]
     print(circs)
     for circ in circs:
         # Get all files of form good_blocks/{circ}_{block_num}.qasm
@@ -89,22 +91,18 @@ if __name__ == '__main__':
             for tol in tols:
                 for unique_circs in unique_circss:
                     for jiggle_skew in jiggle_skews:
-                        # utries_file = f"/pscratch/sd/j/jkalloor/bqskit/ensemble_shortest_circuits_{unique_circs}_circ_final_min_post_calc_bias/{circ}/{tol}/{circ}.pkl"
-                        # # log_file = f"/pscratch/sd/j/jkalloor/bqskit/slurm_logs/run_simulations_new_post_opt_{unique_circs}/{circ}/{tol}_tol_block_size_8"
-                        # # utries_file = f"/pscratch/sd/j/jkalloor/bqskit/ensemble_shortest_circuits_{unique_circs}_circ_cliff_t_final/{circ}/{tol}/{circ}.pkl"
-                        # hist_file = f"/pscratch/sd/j/jkalloor/bqskit/block_histograms/{circ}_8_3/data.png"
-                        csv_file = f"/pscratch/sd/j/jkalloor/bqskit/block_checkpoints_nisq_0/{circ}_{timestep}_{tol}_{unique_circs}/data_try1.csv"
+                        csv_file = f"/home/jkalloor/bqskit/block_checkpoints_clifft_final/{circ}_{timestep}_{tol}_{unique_circs}/data_try1.csv"
                         # qp_file = f"/pscratch/sd/j/jkalloor/bqskit/no_qp_conv_data_noisy/{circ}_{timestep}_{tol}_{unique_circs}.json"
 
                         # # if os.path.exists(utries_file):
                         # #     continue
 
-                        data_file = f"/home/jkalloor/bqskit/block_checkpoints_clifft/{circ}_08_{tol}_{unique_circs}/data.csv"
+                        # data_file = f"/home/jkalloor/bqskit/block_checkpoints_clifft/{circ}_08_{tol}_{unique_circs}/data.csv"
 
-                        if os.path.exists(data_file):
-                            continue
+                        # if os.path.exists(data_file):
+                        #     continue
 
-                        if not os.path.exists(csv_file):
+                        if os.path.exists(csv_file):
                             continue
 
                         # if os.path.exists(qp_file):

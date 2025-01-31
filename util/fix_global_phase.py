@@ -13,9 +13,9 @@ from bqskit.ir.gates import GlobalPhaseGate
 from bqskit.runtime import get_runtime
 
 from bqskit.ir.opt.cost.functions import NormalizedFrobeniusCostGenerator
-from bqskit.ir.opt.cost.functions import HilbertSchmidtResidualsGenerator
+# from bqskit.ir.opt.cost.functions import HilbertSchmidtResidualsGenerator
 
-hs_cost = HilbertSchmidtResidualsGenerator()
+# hs_cost = HilbertSchmidtResidualsGenerator()
 frob_cost = NormalizedFrobeniusCostGenerator()
 
 class FixGlobalPhasePass(BasePass):
@@ -30,7 +30,7 @@ class FixGlobalPhasePass(BasePass):
         global_phase_correction = target.get_target_correction_factor(unitary)
         # old_cost = frob_cost.calc_cost(circuit, target)
         circuit.append_gate(GlobalPhaseGate(1, global_phase=global_phase_correction), (0,))
-        new_cost = hs_cost.calc_cost(circuit, target)
+        new_cost = frob_cost.calc_cost(circuit, target)
         return new_cost
 
     async def run(

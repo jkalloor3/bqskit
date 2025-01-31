@@ -18,15 +18,6 @@ import os
 
 class GenerateProbabilityPass(BasePass):
     
-    def __init__(
-        self,
-    ) -> None:
-        """
-        Construct a Instantiate Count pass and then 
-
-        """
-        return
-    
     @staticmethod
     def calculate_probs(ensemble: np.ndarray, target: np.ndarray) -> np.ndarray:
         M = len(ensemble)

@@ -52,7 +52,7 @@ class CreateEnsemblePass(BasePass):
         self.success_threshold = success_threshold
         self.num_circs = num_circs
         self.cost = cost
-        self.hs_cost = HilbertSchmidtResidualsGenerator()
+        self.hs_cost = GPNormalizedFrobeniusCostGenerator()
         self.solve_exact_dists = solve_exact_dists
         self.use_calculated_error = use_calculated_error
         self.num_random_ensembles = num_random_ensembles

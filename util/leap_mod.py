@@ -17,7 +17,7 @@ from bqskit.ir.opt.cost.generator import CostFunctionGenerator
 from bqskit.passes.search.frontier import Frontier
 from bqskit.passes.search.generator import LayerGenerator
 from bqskit.passes.search.generators.seed import SeedLayerGenerator
-from bqskit.passes.search.generators.simple import SimpleLayerGenerator
+from bqskit.passes.search.generators.fourparam import FourParamGenerator
 from bqskit.passes.search.heuristic import HeuristicFunction
 from bqskit.passes.search.heuristics import DijkstraHeuristic
 from bqskit.compiler.basepass import BasePass
@@ -431,8 +431,9 @@ class LEAPSynthesisPass2(BasePass):
         wrap the previously selected layer generator.
         """
         # TODO: Deduplicate this code with qsearch synthesis
-        layer_gen = SimpleLayerGenerator(CNOTGate(), single_qudit_gate_1=U3Gate())
-        # layer_gen = self.layer_gen or data.gate_set.build_mq_layer_generator()
+        # layer_gen = SimpleLayerGenerator(CNOTGate(), single_qudit_gate_1=U3Gate())
+        # layer_gen = data.gate_set.build_mq_layer_generator()
+        layer_gen = FourParamGenerator()
 
         # Priority given to seeded synthesis
         if 'seed_circuits' in data:
@@ -469,7 +470,12 @@ class LEAPSynthesisPass2(BasePass):
 
         scan_sols: list[tuple[Circuit, float]] = data['scan_sols']
 
+        # Remove large increases
+
         avg_num_params = np.mean([x[0].num_params for x in scan_sols])
         param_increase = avg_num_params - orig_num_params
         print(f"LEAP 1: Param Increase for {data.get('block_num', -1)}: ", param_increase, flush=True)
+        print("Removing large param increases", flush=True)
+        scan_sols = [x for x in scan_sols if x[0].num_params < (orig_num_params * 2)]
+        data['scan_sols'] = scan_sols
         print(f"LEAP 1: Final Number of Params for {data.get('block_num', -1)}: ",   [x[0].num_params for x in scan_sols], flush=True)

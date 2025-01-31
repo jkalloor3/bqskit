@@ -14,6 +14,7 @@ import multiprocessing as mp
 from bqskit.runtime import get_runtime
 
 extra = "_qsearch"
+base_dir = "/home/jkalloor/bqskit/block_checkpoints_clifft_final_4"
 
 def stack_padding(it: list[np.ndarray], vertical: bool = True) -> np.ndarray:
     max_width = max(a.shape[1] for a in it)
@@ -134,65 +135,71 @@ def load_block(circ_name, block_num, good=True) -> str:
     return circ_file
 
 
-def load_circuit(circ_name: str, timestep: int = 0, opt: bool = False) -> Circuit:
-    opt_str = "_opt" if opt else ""
+# def load_circuit(circ_name: str, timestep: int = 0, opt: bool = False) -> Circuit:
+#     opt_str = "_opt" if opt else ""
     
-    if "JW" in circ_name:
-        circ_name = f"JWCircs/{circ_name}"
+#     if "JW" in circ_name:
+#         circ_name = f"JWCircs/{circ_name}"
     
-    ext = ".qasm"
+#     ext = ".qasm"
     
-    if timestep > 0:
-        return Circuit.from_file(f"/home/jkalloor/bqskit/ensemble_benchmarks/{circ_name}_{timestep}.qasm")
-    else:
-        return Circuit.from_file(f"/home/jkalloor/bqskit/ensemble_benchmarks/{circ_name}.qasm")
+#     if timestep > 0:
+#         return Circuit.from_file(f"/home/jkalloor/bqskit/ensemble_benchmarks/{circ_name}_{timestep}.qasm")
+#     else:
+#         return Circuit.from_file(f"/home/jkalloor/bqskit/ensemble_benchmarks/{circ_name}.qasm")
 
 
-def save_circuits(circs: list[Circuit], circ_name: str, tol: int, timestep: int, ignore_timestep: bool = False, extra_str=extra) -> None:
-    if ignore_timestep:
-        full_path = Path(f"/home/jkalloor/bqskit/ensemble_shortest_circuits{extra_str}/{circ_name}/{tol}/{circ_name}.pkl")
-    else:
-        full_path = Path(f"/home/jkalloor/bqskit/ensemble_shortest_circuits{extra_str}/{circ_name}/{tol}/{timestep}/{circ_name}.pkl")
-    full_path.parent.mkdir(parents=True, exist_ok=True)
-    print(full_path)
-    pickle.dump(circs, open(full_path, "wb"))
+# def save_circuits(circs: list[Circuit], circ_name: str, tol: int, timestep: int, ignore_timestep: bool = False, extra_str=extra) -> None:
+#     if ignore_timestep:
+#         full_path = Path(f"/home/jkalloor/bqskit/ensemble_shortest_circuits{extra_str}/{circ_name}/{tol}/{circ_name}.pkl")
+#     else:
+#         full_path = Path(f"/home/jkalloor/bqskit/ensemble_shortest_circuits{extra_str}/{circ_name}/{tol}/{timestep}/{circ_name}.pkl")
+#     full_path.parent.mkdir(parents=True, exist_ok=True)
+#     print(full_path)
+#     pickle.dump(circs, open(full_path, "wb"))
 
-def save_unitaries(utries: list[UnitaryMatrix], circ_name: str, tol: int, timestep: int) -> None:
-    full_path = Path(f"/home/jkalloor/bqskit/ensemble_shortest_circuits{extra}/{circ_name}/{tol}/{timestep}/{circ_name}_utries.pkl")
-    full_path.parent.mkdir(parents=True, exist_ok=True)
-    pickle.dump(utries, open(full_path, "wb"))
+# def save_unitaries(utries: list[UnitaryMatrix], circ_name: str, tol: int, timestep: int) -> None:
+#     full_path = Path(f"/home/jkalloor/bqskit/ensemble_shortest_circuits{extra}/{circ_name}/{tol}/{timestep}/{circ_name}_utries.pkl")
+#     full_path.parent.mkdir(parents=True, exist_ok=True)
+#     pickle.dump(utries, open(full_path, "wb"))
 
-def load_compiled_circuits(circ_name: int, tol: int, timestep: int, extra_str=extra, ignore_timestep: bool = False) -> list[Circuit]:
-    full_path = f"/home/jkalloor/bqskit/ensemble_shortest_circuits{extra_str}/{circ_name}/{tol}/{timestep}/{circ_name}.pkl"
-    if ignore_timestep:
-        full_path = f"/home/jkalloor/bqskit/ensemble_shortest_circuits{extra_str}/{circ_name}/{tol}/{circ_name}.pkl"
-    print(full_path)
-    return pickle.load(open(full_path, "rb"))
+# def load_compiled_circuits(circ_name: int, tol: int, timestep: int, extra_str=extra, ignore_timestep: bool = False) -> list[Circuit]:
+#     full_path = f"/home/jkalloor/bqskit/ensemble_shortest_circuits{extra_str}/{circ_name}/{tol}/{timestep}/{circ_name}.pkl"
+#     if ignore_timestep:
+#         full_path = f"/home/jkalloor/bqskit/ensemble_shortest_circuits{extra_str}/{circ_name}/{tol}/{circ_name}.pkl"
+#     print(full_path)
+#     return pickle.load(open(full_path, "rb"))
 
 def get_circ_dir(circ_name: int, block_num: int, tol: int, num_unique_circs: int) -> str:
-    circ_dir = f"/pscratch/sd/j/jkalloor/bqskit/block_checkpoints_nisq_0/{circ_name}_{block_num}_{tol}_{num_unique_circs}"
+    circ_dir = f"{base_dir}/{circ_name}_{block_num}_{tol}_{num_unique_circs}"
     full_path = f"{circ_dir}/data.data"
     if not os.path.exists(full_path):
         print("File not found, trying with integer tol", flush=True)
         tol_2 = int(tol)
-        circ_dir = f"/pscratch/sd/j/jkalloor/bqskit/block_checkpoints_nisq_0/{circ_name}_{block_num}_{tol_2}_{num_unique_circs}"
+        circ_dir = f"{base_dir}/{circ_name}_{block_num}_{tol_2}_{num_unique_circs}"
     return circ_dir
 
 def load_compiled_block_circuits(circ_name: int, 
                                  block_num: int,  
                                  tol: int, 
                                  num_unique_circs: int,
-                                 target: UnitaryMatrix = None) -> list[tuple[Circuit, 
+                                 target: UnitaryMatrix = None) -> list[Circuit] | list[tuple[Circuit, 
                                                                              UnitaryMatrix, 
                                                                              float]]:
     circ_dir = get_circ_dir(circ_name, block_num, tol, num_unique_circs)
     full_path = f"{circ_dir}/ensemble_final_jiggle.npy"
     full_ens_path = f"{circ_dir}/ensemble_final.qasms"
     circ_params = load_jiggled_ensemble(full_ens_path, full_path)
-    with mp.Pool(processes=128) as pool:
-        params = list(zip(circ_params, [target] * len(circ_params), [True] * len(circ_params), [True] * len(circ_params)))
-        ens: list[list[tuple[Circuit, UnitaryMatrix, float]]] = pool.starmap(create_single_jiggled_ensemble, 
-                                                                              params)
+
+    if target is None:
+        print("Returning just Circuits", flush=True)
+        with mp.Pool(processes=128) as pool:
+            ens: list[list[Circuit]] = pool.map(create_single_jiggled_ensemble, circ_params)
+    else:
+        with mp.Pool(processes=128) as pool:
+            params = list(zip(circ_params, [target] * len(circ_params), [True] * len(circ_params), [True] * len(circ_params)))
+            ens: list[list[tuple[Circuit, UnitaryMatrix, float]]] = pool.starmap(create_single_jiggled_ensemble, 
+                                                                                params)
     ens = list(chain.from_iterable(ens))
     return ens
 
@@ -208,7 +215,8 @@ def load_compiled_block_circuits_qp_inds(circ_name: int,
     return circ_inds, circ_probs
 
 def load_compiled_block_circuits_qp(circ_name: int, block_num: int,  tol: int, num_unique_circs: int) -> list[tuple[Circuit, float]]:
-    full_path = f"/pscratch/sd/j/jkalloor/bqskit/block_checkpoints_nisq_0/{circ_name}_{block_num}_{tol}_{num_unique_circs}/data.data"
+    circ_dir = get_circ_dir(circ_name, block_num, tol, num_unique_circs)
+    full_path = f"{circ_dir}/data.data"
     data = pickle.load(open(full_path, "rb"))
     if "final_ensemble_probs" not in data:
         return []

@@ -47,8 +47,10 @@ def process_files(circ_name: str, input_folder, good_output_folder, bad_output_f
 
 
 # circ_name = argv[1]
-circ_names = ["pricingcall_indep_qiskit_13", "pricingput_indep_qiskit_13", "qaoa_indep_qiskit_11", "qwalk-noancilla_indep_qiskit_8"]
-input_folder = f"/pscratch/sd/j/jkalloor/bqskit/MQTBench"
+circ_names = ["qpe_14"]
+# circ_names = ["pricingcall_indep_qiskit_13", "pricingput_indep_qiskit_13", "qaoa_indep_qiskit_11", "qwalk-noancilla_indep_qiskit_8"]
+# input_folder = f"/pscratch/sd/j/jkalloor/bqskit/MQTBench"
+input_folder = "ensemble_benchmarks"
 good_output_folder = 'good_blocks'
 bad_output_folder = 'bad_blocks'
 for circ_name in circ_names:
