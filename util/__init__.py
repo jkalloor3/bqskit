@@ -24,3 +24,4 @@ from .jiggle_scans import JiggleScansPass
 from .jiggle_ensemble import JiggleEnsemblePass
 from .ensemble import CreateEnsemblePass
 from .fix_angles import FixAnglesPass
+from .convert_to_clifft import *

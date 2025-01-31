@@ -13,6 +13,8 @@ from .distance import frobenius_cost, normalized_frob_cost
 import multiprocessing as mp
 from bqskit.runtime import get_runtime
 
+base_dir = "cliff_t_checkpoints"
+
 extra = "_qsearch"
 base_dir = "/home/jkalloor/bqskit/block_checkpoints_clifft_final_4"
 
@@ -81,7 +83,7 @@ def create_jiggled_ensemble(circ_params: list[tuple[Circuit, np.ndarray]]) -> li
 
 def create_jiggled_ensemble_mp(circ_params: list[tuple[Circuit, np.ndarray]]) -> list[Circuit]:
     # ensemble = [create_single_jiggled_ensemble(c) for c in circ_params]
-    with mp.Pool(processes=128) as pool:
+    with mp.Pool(processes=5) as pool:
         ensemble = pool.map(create_single_jiggled_ensemble, circ_params)
     return list(chain.from_iterable(ensemble))
 
@@ -109,10 +111,7 @@ def load_ensemble(file_name: str) -> list[Circuit]:
         qasms = f.read().split("\nBREAK\n")
     lang = get_language("qasm")
     print("SPlit String", flush=True)
-    # with mp.Pool(processes=128) as pool:
-    #     circs = pool.map(lang.decode, qasms)
     circs = [lang.decode(qasm) for qasm in qasms]
-    # circs = [lang.decode(qasm) for qasm in qasms]
     print("Decoded", flush=True)
     return circs
 
@@ -121,7 +120,7 @@ def load_ensemble_mp(file_name: str) -> list[Circuit]:
         qasms = f.read().split("\nBREAK\n")
     lang = get_language("qasm")
     print("SPlit String", flush=True)
-    with mp.Pool(processes=128) as pool:
+    with mp.Pool(processes=16) as pool:
         circs = pool.map(lang.decode, qasms)
     print("Decoded", flush=True)
     return circs
@@ -134,6 +133,10 @@ def load_block(circ_name, block_num, good=True) -> str:
         circ_file = f"bad_blocks/{circ_name}.qasm"
     return circ_file
 
+def load_cliff_circ(circ_name, precision: int = 5) -> str:
+    folder = f"clifft_benchmarks_{precision}"
+    circ_file = f"{folder}/{circ_name}.qasm"
+    return circ_file
 
 # def load_circuit(circ_name: str, timestep: int = 0, opt: bool = False) -> Circuit:
 #     opt_str = "_opt" if opt else ""
@@ -226,7 +229,6 @@ def load_compiled_block_circuits_qp(circ_name: int, block_num: int,  tol: int, n
     ens_inds = np.random.choice(len(orig_ensemble), size=10000, p=probs)
     ens = [orig_ensemble[i] for i in ens_inds]
     return ens
-
 
 def load_compiled_circuits_varied(circ_name: int, tol: int, vary: int) -> list[Circuit]:
     full_path = f"/home/jkalloor/bqskit/ensemble_circ_varied/ensemble_shortest_circuits_{vary}_circ/{circ_name}/{tol}/{circ_name}.pkl"
