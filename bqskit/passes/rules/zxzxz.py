@@ -51,6 +51,32 @@ class ZXZXZDecomposition(BasePass):
 
 
     @staticmethod
+    def get_zxzxz_decomp_params(utry: UnitaryMatrix) -> tuple[float, float, float]:
+        utry = np.linalg.det(utry) ** (-0.5) * utry
+        i1 = cmath.phase(utry[1, 1])
+        i2 = cmath.phase(utry[1, 0])
+        t = 2 * np.arctan2(abs(utry[1, 0]), abs(utry[0, 0])) + np.pi
+        p = i1 + i2 + np.pi
+        l = i1 - i2
+
+        # Move angles into [-pi, pi)
+        t = (t + np.pi) % (2 * np.pi) - np.pi
+        p = (p + np.pi) % (2 * np.pi) - np.pi
+        l = (l + np.pi) % (2 * np.pi) - np.pi
+        return l, t, p
+    
+
+    @staticmethod 
+    def get_zxzxz_circ_structure() -> Circuit:
+        circ = Circuit(1)
+        circ.append_gate(RZGate(), 0, [0])
+        circ.append_gate(SqrtXGate(), 0)
+        circ.append_gate(RZGate(), 0, [0])
+        circ.append_gate(SqrtXGate(), 0)
+        circ.append_gate(RZGate(), 0, [0])
+        return circ
+
+    @staticmethod
     def run_zxzxz_decomp_circ(utry: UnitaryMatrix, 
                          use_u1: bool = False,
                          use_rx: bool = False) -> Circuit:
@@ -64,17 +90,7 @@ class ZXZXZDecomposition(BasePass):
             Circuit: The ZXZXZ sequence.
         """
         # Calculate params
-        utry = np.linalg.det(utry) ** (-0.5) * utry
-        i1 = cmath.phase(utry[1, 1])
-        i2 = cmath.phase(utry[1, 0])
-        t = 2 * np.arctan2(abs(utry[1, 0]), abs(utry[0, 0])) + np.pi
-        p = i1 + i2 + np.pi
-        l = i1 - i2
-
-        # Move angles into [-pi, pi)
-        t = (t + np.pi) % (2 * np.pi) - np.pi
-        p = (p + np.pi) % (2 * np.pi) - np.pi
-        l = (l + np.pi) % (2 * np.pi) - np.pi
+        l, t, p = ZXZXZDecomposition.get_zxzxz_decomp_params(utry)
 
         new_circuit = Circuit(1)
 

@@ -9,7 +9,8 @@ from bqskit.compiler.basepass import BasePass
 from bqskit.compiler.passdata import PassData
 import numpy as np
 import matplotlib.pyplot as plt
-from util import get_upperbound_error_mean_vec, load_circuit, load_compiled_circuits, get_unitary_vec, get_average_distance_vec
+
+from .stats import get_upperbound_error_mean_vec, get_average_distance_vec 
 
 
 class AnalyzeDistributionPass(BasePass):
@@ -40,7 +41,7 @@ class AnalyzeDistributionPass(BasePass):
         proc_circs: list[Circuit] = data["ensemble"]
         print("Got Circuits")
 
-        all_utries_vec = np.array([circ.get_unitar().get_flat_vector() for circ in orig_circs])
+        all_utries_vec = np.array([circ.get_unitary().get_flat_vector() for circ in orig_circs])
         
         print("------------------")
         print(len(all_utries_vec))

@@ -13,6 +13,8 @@ from .distance import frobenius_cost, normalized_frob_cost
 import multiprocessing as mp
 from bqskit.runtime import get_runtime
 
+base_dir = "cliff_t_checkpoints"
+
 extra = "_qsearch"
 
 def stack_padding(it: list[np.ndarray], vertical: bool = True) -> np.ndarray:
@@ -80,7 +82,7 @@ def create_jiggled_ensemble(circ_params: list[tuple[Circuit, np.ndarray]]) -> li
 
 def create_jiggled_ensemble_mp(circ_params: list[tuple[Circuit, np.ndarray]]) -> list[Circuit]:
     # ensemble = [create_single_jiggled_ensemble(c) for c in circ_params]
-    with mp.Pool(processes=128) as pool:
+    with mp.Pool(processes=5) as pool:
         ensemble = pool.map(create_single_jiggled_ensemble, circ_params)
     return list(chain.from_iterable(ensemble))
 
@@ -108,10 +110,7 @@ def load_ensemble(file_name: str) -> list[Circuit]:
         qasms = f.read().split("\nBREAK\n")
     lang = get_language("qasm")
     print("SPlit String", flush=True)
-    # with mp.Pool(processes=128) as pool:
-    #     circs = pool.map(lang.decode, qasms)
     circs = [lang.decode(qasm) for qasm in qasms]
-    # circs = [lang.decode(qasm) for qasm in qasms]
     print("Decoded", flush=True)
     return circs
 
@@ -120,7 +119,7 @@ def load_ensemble_mp(file_name: str) -> list[Circuit]:
         qasms = f.read().split("\nBREAK\n")
     lang = get_language("qasm")
     print("SPlit String", flush=True)
-    with mp.Pool(processes=128) as pool:
+    with mp.Pool(processes=16) as pool:
         circs = pool.map(lang.decode, qasms)
     print("Decoded", flush=True)
     return circs
@@ -157,51 +156,51 @@ def load_circuit(circ_name: str, timestep: int = 0, opt: bool = False) -> Circui
         return pickle.load(open(file, "rb"))
 
 
-def save_circuits(circs: list[Circuit], circ_name: str, tol: int, timestep: int, ignore_timestep: bool = False, extra_str=extra) -> None:
-    if ignore_timestep:
-        full_path = Path(f"/pscratch/sd/j/jkalloor/bqskit/ensemble_shortest_circuits{extra_str}/{circ_name}/{tol}/{circ_name}.pkl")
-    else:
-        full_path = Path(f"/pscratch/sd/j/jkalloor/bqskit/ensemble_shortest_circuits{extra_str}/{circ_name}/{tol}/{timestep}/{circ_name}.pkl")
-    full_path.parent.mkdir(parents=True, exist_ok=True)
-    print(full_path)
-    pickle.dump(circs, open(full_path, "wb"))
+# def save_circuits(circs: list[Circuit], circ_name: str, tol: int, timestep: int, ignore_timestep: bool = False, extra_str=extra) -> None:
+#     if ignore_timestep:
+#         full_path = Path(f"/pscratch/sd/j/jkalloor/bqskit/ensemble_shortest_circuits{extra_str}/{circ_name}/{tol}/{circ_name}.pkl")
+#     else:
+#         full_path = Path(f"/pscratch/sd/j/jkalloor/bqskit/ensemble_shortest_circuits{extra_str}/{circ_name}/{tol}/{timestep}/{circ_name}.pkl")
+#     full_path.parent.mkdir(parents=True, exist_ok=True)
+#     print(full_path)
+#     pickle.dump(circs, open(full_path, "wb"))
 
-def save_unitaries(utries: list[UnitaryMatrix], circ_name: str, tol: int, timestep: int) -> None:
-    full_path = Path(f"/pscratch/sd/j/jkalloor/bqskit/ensemble_shortest_circuits{extra}/{circ_name}/{tol}/{timestep}/{circ_name}_utries.pkl")
-    full_path.parent.mkdir(parents=True, exist_ok=True)
-    pickle.dump(utries, open(full_path, "wb"))
+# def save_unitaries(utries: list[UnitaryMatrix], circ_name: str, tol: int, timestep: int) -> None:
+#     full_path = Path(f"/pscratch/sd/j/jkalloor/bqskit/ensemble_shortest_circuits{extra}/{circ_name}/{tol}/{timestep}/{circ_name}_utries.pkl")
+#     full_path.parent.mkdir(parents=True, exist_ok=True)
+#     pickle.dump(utries, open(full_path, "wb"))
 
-def load_compiled_circuits(circ_name: int, tol: int, timestep: int, extra_str=extra, ignore_timestep: bool = False) -> list[Circuit]:
-    full_path = f"/pscratch/sd/j/jkalloor/bqskit/ensemble_shortest_circuits{extra_str}/{circ_name}/{tol}/{timestep}/{circ_name}.pkl"
-    if ignore_timestep:
-        full_path = f"/pscratch/sd/j/jkalloor/bqskit/ensemble_shortest_circuits{extra_str}/{circ_name}/{tol}/{circ_name}.pkl"
-    print(full_path)
-    return pickle.load(open(full_path, "rb"))
+# def load_compiled_circuits(circ_name: int, tol: int, timestep: int, extra_str=extra, ignore_timestep: bool = False) -> list[Circuit]:
+#     full_path = f"/pscratch/sd/j/jkalloor/bqskit/ensemble_shortest_circuits{extra_str}/{circ_name}/{tol}/{timestep}/{circ_name}.pkl"
+#     if ignore_timestep:
+#         full_path = f"/pscratch/sd/j/jkalloor/bqskit/ensemble_shortest_circuits{extra_str}/{circ_name}/{tol}/{circ_name}.pkl"
+#     print(full_path)
+#     return pickle.load(open(full_path, "rb"))
 
 def get_circ_dir(circ_name: int, block_num: int, tol: int, num_unique_circs: int) -> str:
-    circ_dir = f"/pscratch/sd/j/jkalloor/bqskit/block_checkpoints_nisq_0/{circ_name}_{block_num}_{tol}_{num_unique_circs}"
+    circ_dir = f"{base_dir}/{circ_name}_{block_num}_{tol}_{num_unique_circs}"
     full_path = f"{circ_dir}/data.data"
     if not os.path.exists(full_path):
         print("File not found, trying with integer tol", flush=True)
         tol_2 = int(tol)
-        circ_dir = f"/pscratch/sd/j/jkalloor/bqskit/block_checkpoints_nisq_0/{circ_name}_{block_num}_{tol_2}_{num_unique_circs}"
+        circ_dir = f"{base_dir}/{circ_name}_{block_num}_{tol_2}_{num_unique_circs}"
     return circ_dir
 
 def load_compiled_block_circuits(circ_name: int, 
                                  block_num: int,  
                                  tol: int, 
                                  num_unique_circs: int,
-                                 target: UnitaryMatrix = None) -> list[tuple[Circuit, 
+                                 target: UnitaryMatrix = None,
+                                 add_unitaries: bool = True) -> list[tuple[Circuit, 
                                                                              UnitaryMatrix, 
                                                                              float]]:
     circ_dir = get_circ_dir(circ_name, block_num, tol, num_unique_circs)
     full_path = f"{circ_dir}/ensemble_final_jiggle.npy"
     full_ens_path = f"{circ_dir}/ensemble_final.qasms"
     circ_params = load_jiggled_ensemble(full_ens_path, full_path)
-    with mp.Pool(processes=128) as pool:
-        params = list(zip(circ_params, [target] * len(circ_params), [True] * len(circ_params), [True] * len(circ_params)))
-        ens: list[list[tuple[Circuit, UnitaryMatrix, float]]] = pool.starmap(create_single_jiggled_ensemble, 
-                                                                              params)
+    with mp.Pool(processes=5) as pool:
+        # params = list(zip(circ_params, [target] * len(circ_params), [False] * len(circ_params), [add_unitaries] * len(circ_params)))
+        ens: list[list[Circuit]] = pool.map(create_single_jiggled_ensemble, circ_params)
     ens = list(chain.from_iterable(ens))
     return ens
 
@@ -217,7 +216,8 @@ def load_compiled_block_circuits_qp_inds(circ_name: int,
     return circ_inds, circ_probs
 
 def load_compiled_block_circuits_qp(circ_name: int, block_num: int,  tol: int, num_unique_circs: int) -> list[tuple[Circuit, float]]:
-    full_path = f"/pscratch/sd/j/jkalloor/bqskit/block_checkpoints_nisq_0/{circ_name}_{block_num}_{tol}_{num_unique_circs}/data.data"
+    circ_dir = get_circ_dir(circ_name, block_num, tol, num_unique_circs)
+    full_path = f"{circ_dir}/data.data"
     data = pickle.load(open(full_path, "rb"))
     if "final_ensemble_probs" not in data:
         return []
@@ -229,35 +229,35 @@ def load_compiled_block_circuits_qp(circ_name: int, block_num: int,  tol: int, n
     return ens
 
 
-def load_compiled_circuits_varied(circ_name: int, tol: int, vary: int) -> list[Circuit]:
-    full_path = f"/pscratch/sd/j/jkalloor/bqskit/ensemble_circ_varied/ensemble_shortest_circuits_{vary}_circ/{circ_name}/{tol}/{circ_name}.pkl"
-    print(full_path)
-    return pickle.load(open(full_path, "rb"))
+# def load_compiled_circuits_varied(circ_name: int, tol: int, vary: int) -> list[Circuit]:
+#     full_path = f"/pscratch/sd/j/jkalloor/bqskit/ensemble_circ_varied/ensemble_shortest_circuits_{vary}_circ/{circ_name}/{tol}/{circ_name}.pkl"
+#     print(full_path)
+#     return pickle.load(open(full_path, "rb"))
 
-def save_compiled_unitaries_varied(unitaries, circ_name: int, tol: int, vary: int) -> list[Circuit]:
-    full_path = Path(f"/pscratch/sd/j/jkalloor/bqskit/ensemble_unitaries_varied/{vary}_circ/{circ_name}/{tol}/{circ_name}.pkl")
-    full_path.parent.mkdir(parents=True, exist_ok=True)
-    print(full_path)
-    return pickle.dump(unitaries, open(full_path, "wb"))
+# def save_compiled_unitaries_varied(unitaries, circ_name: int, tol: int, vary: int) -> list[Circuit]:
+#     full_path = Path(f"/pscratch/sd/j/jkalloor/bqskit/ensemble_unitaries_varied/{vary}_circ/{circ_name}/{tol}/{circ_name}.pkl")
+#     full_path.parent.mkdir(parents=True, exist_ok=True)
+#     print(full_path)
+#     return pickle.dump(unitaries, open(full_path, "wb"))
 
-def load_unitaries(circ_name: int, tol: int, timestep: int) -> list[UnitaryMatrix]:
-    full_path = f"/pscratch/sd/j/jkalloor/bqskit/ensemble_shortest_circuits{extra}/{circ_name}/{tol}/{timestep}/{circ_name}_utries.pkl"
-    print(full_path)
-    return pickle.load(open(full_path, "rb"))
+# def load_unitaries(circ_name: int, tol: int, timestep: int) -> list[UnitaryMatrix]:
+#     full_path = f"/pscratch/sd/j/jkalloor/bqskit/ensemble_shortest_circuits{extra}/{circ_name}/{tol}/{timestep}/{circ_name}_utries.pkl"
+#     print(full_path)
+#     return pickle.load(open(full_path, "rb"))
 
-def save_send_unitaries(unitaries: list[np.ndarray], circ_name: int, tol: int) -> None:
-    full_path = f"/pscratch/sd/j/jkalloor/bqskit/unitaries_to_send_fix/{tol}/{circ_name}/utries.pkl"
-    Path(full_path).parent.mkdir(parents=True, exist_ok=True)
-    return pickle.dump(unitaries, open(full_path, "wb"))
+# def save_send_unitaries(unitaries: list[np.ndarray], circ_name: int, tol: int) -> None:
+#     full_path = f"/pscratch/sd/j/jkalloor/bqskit/unitaries_to_send_fix/{tol}/{circ_name}/utries.pkl"
+#     Path(full_path).parent.mkdir(parents=True, exist_ok=True)
+#     return pickle.dump(unitaries, open(full_path, "wb"))
 
-def load_sent_unitaries(circ_name: int, tol: int) -> list[np.ndarray]:
-    full_path = f"/pscratch/sd/j/jkalloor/bqskit/unitaries_to_send/{tol}/{circ_name}/{circ_name}_utries.pkl"
-    print(full_path)
-    return pickle.load(open(full_path, "rb"))
+# def load_sent_unitaries(circ_name: int, tol: int) -> list[np.ndarray]:
+#     full_path = f"/pscratch/sd/j/jkalloor/bqskit/unitaries_to_send/{tol}/{circ_name}/{circ_name}_utries.pkl"
+#     print(full_path)
+#     return pickle.load(open(full_path, "rb"))
 
-def save_target(target: UnitaryMatrix, circ_name: int) -> None:
-    full_path = f"/pscratch/sd/j/jkalloor/bqskit/unitaries/{circ_name}.pkl"
-    return pickle.dump(target.numpy, open(full_path, "wb"))
+# def save_target(target: UnitaryMatrix, circ_name: int) -> None:
+#     full_path = f"/pscratch/sd/j/jkalloor/bqskit/unitaries/{circ_name}.pkl"
+#     return pickle.dump(target.numpy, open(full_path, "wb"))
 
 def get_unitary(circ: Circuit):
     return circ.get_unitary()

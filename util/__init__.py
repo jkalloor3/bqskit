@@ -23,3 +23,4 @@ from .check_ensemble_quality import CheckEnsembleQualityPass
 from .jiggle_scans import JiggleScansPass
 from .jiggle_ensemble import JiggleEnsemblePass
 from .ensemble import CreateEnsemblePass
+from .convert_to_clifft import *

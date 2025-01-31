@@ -9,86 +9,61 @@ import json
 from qiskit_aer import AerSimulator
 
 import matplotlib.pyplot as plt
-from bqskit.ir.gates.parameterized import U3Gate, VariableUnitaryGate
-from bqskit.ir.point import CircuitPoint
-from bqskit.compiler.passdata import PassData
+from bqskit.ir.gates import TGate, TdgGate
 
 from itertools import chain
 from qiskit import QuantumCircuit, transpile
 from qiskit_aer.noise import NoiseModel, depolarizing_error
 import multiprocessing as mp
+import pickle
 
 from bqskit.ext import bqskit_to_qiskit, qiskit_to_bqskit
 
-from util import load_cliff_circ, frobenius_cost, load_circuit, gp_frob_cost, tvd_dict
+from util import load_cliff_circ, load_block, load_compiled_block_circuits, load_compiled_block_circuits_qp_inds
+from util import convert_to_clifft, tvd_dict, convert_to_clifft_tbudget
 
-
+qcircs = []
+pickle_file = "debug_circs_qpe_14.pkl"
+ensemble_circs = pickle.load(open(pickle_file, "rb"))
 num_random_states = 16
 
-# def run_circuits(all_circs: list[list[QuantumCircuit]], shots: int, backend: IBMBackend = None) -> list[dict[str, int]]:
-#     '''
-#     Run a set of noisy circuits on a given backend
-#     '''
-#     if backend is None:
-#         sampler = Sampler()
-#     else:
-#         sampler = BackendSampler(backend=backend)
-#     # Return aggregated results for each random circuit
-#     all_results = []
-#     for circs in all_circs:
-#         job = sampler.run(circs, shots=shots)
-#         # print(f">>> Job ID: {job.job_id()}")
-#         # print(f">>> Job Status: {job.status()}")
-#         result = job.result()
-#         if len(all_results) == 0:
-#             all_results = [result[j].data.meas.get_counts() for j in range(len(circs))]
-#         else:
-#             results = [result[j].data.meas.get_counts() for j in range(len(circs))]
-#             all_results = [aggregate_results([all_results[i], results[i]]) for i in range(len(circs))]
-#     return all_results
+def run_ensembles(ens_size: int,shots: int, backend: AerSimulator, precisions: list[int]) -> list[dict[str, int]]:
+    '''
+    Run a set of noisy circuits on a given backend over a set of precisions.
+    Returns a final count for each precision.
+    '''
+    global ensemble_circs
 
-# def run_noisy_ensemble(ens_size, shots: int = 1, random_states: list[np.ndarray] = None, backend: IBMBackend = None) -> tuple[list[dict[str, int]], np.ndarray]:
-#     '''
-#     Run an ensemble of size `ens_size` on a noisy backend.
+    ensemble_inds: list[int] = np.random.choice(len(ensemble_circs), ens_size)
+    # Conver to cliff_t for each precision
+    # ensemble = [[convert_to_clifft(ensemble_circs[i], prec) for i in ensemble_inds] for prec in precisions]
+    ensemble = []
+    for prec in precisions:
+        with mp.Pool(4) as pool:
+            prec_ens = pool.starmap(convert_to_clifft, [(ensemble_circs[i], prec) for i in ensemble_inds])
+        ensemble.append(prec_ens)
 
-#     Returns a list of list of TVDs with shape (ens_size, num_random_states)
+    print("Converted Ensemble Circuits", len(ensemble), flush=True)
+    # Get the qiskit circuits
+    q_ensemble = [[get_qcirc(circ) for circ in ens] for ens in ensemble]
 
-#     Also, if the number of qubits is less than 10, returns the mean unitary of the ensemble.
-#     '''
-#     global all_qcircs
-#     global uns
-
-#     ensemble_inds: list[int] = np.random.choice(len(all_qcircs), ens_size)
-#     ensemble: list[QuantumCircuit] = [all_qcircs[i] for i in ensemble_inds]
-#     ensemble_uns = [uns[i] for i in ensemble_inds]
-#     mean_un = np.mean(np.array(ensemble_uns), axis=0)
-#     print("Avg CNOT count: ", np.mean([c.count_ops()['cx'] for c in ensemble]))
-#     all_circs = [get_random_init_state_circuits(c, random_states, backend=backend) for c in ensemble]
-#     final_svs = run_circuits(all_circs, shots=shots, backend=backend)
-#     return final_svs, mean_un
+    all_results = []
+    for i, qcircs in enumerate(q_ensemble):
+        prec = precisions[i]
+        print(f"Running Ensemble with Precision {prec}", flush=True)
+        results = backend.run(qcircs, shots=shots).result()
+        prec_results = []
+        for i in range(len(qcircs)):
+            prec_results.append(results.get_counts(i))
+        # Aggregate the results
+        agg_results = aggregate_results(prec_results)
+        all_results.append(agg_results)
+    return all_results
 
 def get_qcirc(circ: Circuit):
     q_circ = bqskit_to_qiskit(circ)
     q_circ.measure_all()
     return q_circ
-
-def get_random_states(num_qubits: int, num_random_states: int = 4) -> list[np.ndarray]:
-    states = []
-    for i in range(num_random_states):
-        state = np.random.randint(0, 2, num_qubits)
-        states.append(state)
-    return states
-
-def get_random_init_state_circuits(qcirc: QuantumCircuit, random_states: list[np.ndarray]) -> list[QuantumCircuit]:
-    circs = []
-    for state in random_states:
-        init_circ = QuantumCircuit(qcirc.num_qubits)
-        for i in range(init_circ.num_qubits):
-            if state[i] == 1:
-                init_circ.h(i)
-        init_circ.compose(qcirc, inplace=True)
-        circs.append(init_circ)
-    return circs
 
 def aggregate_results(results: list[dict[str, int]]) -> dict[str, int]:
     total_dict = {}
@@ -121,13 +96,13 @@ def get_sim_backend(circ: QuantumCircuit, t_err: float, logical_err: float):
     print("One Q Gates: ", one_q_gates)
     return AerSimulator(noise_model=create_noise_model(t_err, logical_err, one_q_gates))
 
-def get_all_circuits(circ_name: str, precision: int, rand_states: list[np.ndarray]) -> list[Circuit]:
-    circ_path = load_cliff_circ(circ_name, precision)
-    circ = Circuit.from_file(circ_path)
-    qcirc = QuantumCircuit.from_qasm_file(circ_path)
-    qcirc.measure_all()
-    return circ, circ.get_unitary(), get_random_init_state_circuits(qcirc, rand_states)
+def get_t_count(circ: Circuit):
+    return circ.count(TGate()) + circ.count(TdgGate())
 
+
+def get_all_clifft_circs(t_budget: int) -> list[Circuit]:
+    print("Len Ensemble Circs: ", len(ensemble_circs), flush=True)
+    return [convert_to_clifft_tbudget(circ, t_budget) for circ in ensemble_circs]
 
 def run_circuits(shots: int, backend: AerSimulator) -> list[dict[str, int]]:
     global qcircs
@@ -135,102 +110,104 @@ def run_circuits(shots: int, backend: AerSimulator) -> list[dict[str, int]]:
     circs_to_run = list(chain.from_iterable(qcircs))
     print(f"Running {len(circs_to_run)} Circuits", flush=True)
     results = backend.run(circs_to_run, shots=shots).result()
-    all_counts = [[] for _ in range(len(qcircs))]
+    all_counts = []
     for i in range(len(circs_to_run)):
-        ind = i // num_random_states
-        all_counts[ind].append(results.get_counts(i))
+        all_counts.append(results.get_counts(i))
     return all_counts
 
 if __name__ == '__main__':
-    global qcircs
     np.set_printoptions(precision=2, threshold=np.inf, linewidth=np.inf)
 
-    circ_name = argv[1]
+    # circ_name = argv[1]
+    # block_num = int(argv[2])
+    circ_name = "qpe_14"
+    block_num = 3
     # tol = int(argv[3])
     # num_unique_circs = int(argv[4])
-    precisions = range(1, 10)
+    t_budgets = [3000, 5000, 10000]
     t_errs = [10 ** (-i) for i in range(1, 6)]
     logical_err = 10 ** (-8)
     cliff = False
 
+    ens_sizes = [1, 16, 64, 128, 256]
+    shot_ratio = max(ens_sizes)
     shots = 1024
 
-    orig_circ = load_circuit(circ_name)
-    rand_states = get_random_states(orig_circ.num_qudits, num_random_states)
-    
-    backend = AerSimulator()
-    target = orig_circ.get_unitary()
-    orig_qcirc = bqskit_to_qiskit(orig_circ)
-    orig_qcirc.measure_all()
+    # # Get backend and target
+    # backend = AerSimulator()
 
-    orig_qcircs = get_random_init_state_circuits(orig_qcirc, rand_states)
+    # # Get orig circ and unitary
+    # orig_circ = load_block(circ_name, block_num)
+    # orig_circ = Circuit.from_file(orig_circ)
+    # target = orig_circ.get_unitary()
 
-    print("Got Random States", flush=True)
 
-    qcircs = [orig_qcircs]
+    # # Run Simulator of circuit with continuos angles
+    # orig_counts = backend.run(get_qcirc(orig_circ), shots=shots * shot_ratio).result().get_counts(0)
+    # orig_circs = [convert_to_clifft_tbudget(orig_circ, budget) for budget in t_budgets]
+    # orig_t_counts = [get_t_count(circ) for circ in orig_circs]
+    # print("Original T Counts: ", orig_t_counts)
 
-    orig_statevectors = run_circuits(shots, backend)[0]
-    # with mp.Pool(num_random_states) as pool:
-    #     orig_statevectors = pool.starmap(backend.run, [(qc, shots) for qc in orig_qcircs])
-    #     orig_statevectors = [result.result().get_counts() for result in orig_statevectors]
+    # qcircs: list[QuantumCircuit] = [[get_qcirc(circ) for circ in orig_circs]]
 
-    print("Got Original Statevectors", flush=True)
+    # orig_statevectors = run_circuits(shots * shot_ratio, backend)
+    # start_tvds = [tvd_dict(orig_counts, statevector) for statevector in orig_statevectors]
+    # print("Got Original Statevectors", flush=True)
+    # print("Got Original TVDs", flush=True)
+    # print(start_tvds)
 
-    qcircs = []
-    bqskit_circs = []
-    uns = []
+    # # Get Ensemble of Circuits
+    # ensemble_circs: list[Circuit] = load_compiled_block_circuits(circ_name, block_num, 3.0, 250, target=target, add_unitaries=False)
+    # qp_inds, qp_probs = load_compiled_block_circuits_qp_inds(circ_name, block_num, 3.0, 250)
+    # # Randomly pick 500 circuits
+    # ensemble_circs = [ensemble_circs[i] for i in qp_inds[:500]]
+    # # # Save these circuits for debugging
+    pickle_file = "debug_circs_qpe_14.pkl"
+    # # pickle.dump(ensemble_circs, open(pickle_file, "wb"))
+    ensemble_circs = pickle.load(open(pickle_file, "rb"))
+    print("Loaded Ensemble Circuits", flush=True)
 
-    with mp.Pool(num_random_states) as pool:
-        circ_data =  pool.starmap(get_all_circuits, [(circ_name, prec, rand_states) for prec in precisions])
-        bqskit_circs = [circ_data[0] for circ_data in circ_data]
-        uns = [circ_data[1] for circ_data in circ_data]
-        qcircs = [circ_data[2] for circ_data in circ_data]
+    with mp.Pool(4) as pool:
+        cliff_t_circs = pool.map(get_all_clifft_circs, t_budgets)
 
-    print("Loaded All Circuits", flush=True)
+    cliff_pickle_file = "debug_clifft_circs_qpe_14.pkl"
+    pickle.dump(cliff_t_circs, open(cliff_pickle_file, "wb"))
+    print("Saved Ensemble Circuits", flush=True)
+    exit(0)
 
-    # frob_dists = [gp_frob_cost(target, un) for un in uns]
+    # # exit(0)
 
-    # with mp.Pool(len(qcircs)) as pool:
-    #     perfect_statevectors = pool.starmap(run_circuits, [(qc, shots, backend) for qc in qcircs])
+    # print("Loaded Ensemble Circuits", flush=True)
 
-    perfect_statevectors = run_circuits(shots, backend)
+    # all_tvds = []
+    # for ens_size in ens_sizes:
+    #     shot_per_circ = (shot_ratio // ens_size) * shots
+    #     counts = run_ensembles(ens_size, shot_per_circ, backend, precisions)
+    #     tvds = [tvd_dict(orig_counts, count) for count in counts]
+    #     all_tvds.append(tvds)
 
-    print("Ran Perfect Circuits", flush=True)
 
-    tvds = []
-    for statevector in perfect_statevectors:
-        tvds.append([tvd_dict(orig_statevectors[i], statevector, shots=shots) for i, statevector in enumerate(statevector)])
+    # pickle.dump(all_tvds, open("ens_err_analysis.pkl", "wb"))
+    all_tvds = pickle.load(open("ens_err_analysis.pkl", "rb"))
 
-    print("TVDs: ", tvds)
+    headers = [f"Prec: {prec}" for prec in precisions]
 
-    all_t_data = []
-    for t_err in t_errs:
-        with mp.Pool(len(qcircs)) as pool:
-            # statevectors = pool.starmap(run_circuits, [(qc, shots, get_sim_backend(qc[0], t_err, logical_err)) for qc in qcircs])
-            statevectors = run_circuits(shots, get_sim_backend(qcircs[0][0], t_err, logical_err))
-        t_data = []
-        for statevector in statevectors:
-            t_data.append([tvd_dict(orig_statevectors[i], sv, shots=shots) for i, sv in enumerate(statevector)])
-        
-        all_t_data.append(t_data)
+    # Transpose the data
+    tvds = np.array(all_tvds).T
+    print(tvds.shape)
 
-    final_data = {}
-    final_data["No Error"] = tvds
-    for t_err, t_data in zip(t_errs, all_t_data):
-        final_data[f"T Err: {t_err}"] = t_data
+    # Now it is in the form [pre 
 
-    # Plot all data onto one graph
-    fig, ax = plt.subplots()
+    # Create a plot with lines for each precision
+    fig, axes = plt.subplots(1, len(precisions), figsize=(5 * len(precisions), 5))
+    colors = ['b', 'g', 'r', 'c', 'm', 'y', 'k']
+    for i, tvd in enumerate(tvds):
+        prec = precisions[i]
+        ax: plt.Axes = axes[i]
+        ax.plot(ens_sizes, tvd, label=headers[i], color=colors[i])
+        ax.hlines(start_tvds[i], min(ens_sizes), max(ens_sizes), label="Original", linestyles='dashed', colors=[colors[i]])
 
-    for key, data in final_data.items():
-        plot_data = [np.mean(d) for d in data]
-        ax.plot(precisions, plot_data, label=key)
+    # ax.hlines(start_tvds, min(ens_sizes), max(ens_sizes), label="Original", linestyles='dashed')
 
-    ax.set_xlabel("Precision")
-    ax.set_ylabel("TVD")
-
-    ax.legend()
-    fig.savefig(f"tvd_vs_t_error_{num_random_states}.png")
-
-    json.dump(final_data, open(f"tvd_vs_t_error_{num_random_states}.json", "w"))
+    fig.savefig(f"ens_err_analysis.png")
 
