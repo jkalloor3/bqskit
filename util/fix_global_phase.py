@@ -44,5 +44,6 @@ class FixGlobalPhasePass(BasePass):
         for psol in data["scan_sols"]:
             new = FixGlobalPhasePass.fix_phase(psol[0], target)
             new_scan_sols.append((psol[0], new))
+            distances.append(new)
         print("After GP Distances: ", distances, flush=True)
         data["scan_sols"] = new_scan_sols

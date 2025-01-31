@@ -81,3 +81,26 @@ class RYGate(
         theta = 2 * np.arccos(a / np.sqrt(a ** 2 + b ** 2))
         theta *= -1 if b > 0 else 1
         return [theta]
+
+    @staticmethod
+    def is_ry(unitary: UnitaryMatrix) -> float:
+        
+        top_left = unitary[0, 0]
+        if np.allclose(top_left, 0 + 0j):
+            # Assert that off-diagonal elements are 1
+            a = np.abs(unitary[0, 1])
+            b = np.abs(unitary[1, 0])
+            sign = np.real(unitary[1, 0]) * np.real(unitary[0, 1])
+            return np.allclose(a, 1) and np.allclose(b, 1) and sign < 0
+        else:
+            # global phase removes complex part of top-left
+            global_phase = top_left / np.abs(top_left)
+            # Calculate theta 
+            theta = np.arccos(np.abs(top_left)) * 2
+            # Check rest of unitary
+            cos = np.cos(theta / 2) * global_phase
+            sin = -1j * np.sin(theta / 2) * global_phase
+            top_right = np.allclose(unitary[0, 1], -sin)
+            bottom_left = np.allclose(unitary[1, 0], sin)
+            bottom_right = np.allclose(unitary[1, 1], cos)
+            return top_right and bottom_left and bottom_right

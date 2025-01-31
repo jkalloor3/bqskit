@@ -54,12 +54,34 @@ class FixAnglesPass(BasePass):
 
     async def run(self, circuit: Circuit, data: PassData) -> None:
         for cycle, op in circuit.operations_with_cycles():
-            if op.num_qudits == 1 and RZGate.is_rz(op.get_unitary()):
-                angle = RZGate.calc_params(op.get_unitary())
-                # Either fix gate or replace with RZ gate
-                zxzxz_circ = get_rz_gate_circ(angle, self.precision)
-                pt = CircuitPoint(cycle, op.location[0])
-                circuit.replace_with_circuit(pt, zxzxz_circ,as_circuit_gate=True)
+            if op.num_qudits == 1:
+                if RZGate.is_rz(op.get_unitary()):
+                    angle = RZGate.calc_params(op.get_unitary())
+                    # Either fix gate or replace with RZ gate
+                    zxzxz_circ = get_rz_gate_circ(angle, self.precision)
+                    pt = CircuitPoint(cycle, op.location[0])
+                    circuit.replace_with_circuit(pt, zxzxz_circ,as_circuit_gate=True)
+                if RXGate.is_rx(op.get_unitary()):
+                    rz_unitary = HGate().get_unitary() @ op.get_unitary() @ HGate().get_unitary()
+                    angle = RZGate.calc_params(rz_unitary)
+                    zxzxz_circ = get_rz_gate_circ(angle, self.precision)
+                    # Add hadamards on both sides
+                    zxzxz_circ.insert_gate(0, HGate(), (0,))
+                    zxzxz_circ.append_gate(HGate(), (0,))
+                    pt = CircuitPoint(cycle, op.location[0])
+                    circuit.replace_with_circuit(pt, zxzxz_circ,as_circuit_gate=True)
+                if RYGate.is_ry(op.get_unitary()):
+                    hy_unitary = SGate().get_unitary() @ HGate().get_unitary()
+                    rz_unitary = hy_unitary @ op.get_unitary() @ hy_unitary.conj().T
+                    angle = RZGate.calc_params(rz_unitary)
+                    zxzxz_circ = get_rz_gate_circ(angle, self.precision)
+                    # Add SH gate on both sides
+                    zxzxz_circ.insert_gate(0, HGate(), (0,))
+                    zxzxz_circ.insert_gate(0, SdgGate(), (0,))
+                    zxzxz_circ.append_gate(HGate(), (0,))
+                    zxzxz_circ.append_gate(SGate(), (0,))
+                    pt = CircuitPoint(cycle, op.location[0])
+                    circuit.replace_with_circuit(pt, zxzxz_circ,as_circuit_gate=True)
 
         circuit.unfold_all()
 
