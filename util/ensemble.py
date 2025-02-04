@@ -40,7 +40,8 @@ class CreateEnsemblePass(BasePass):
                  num_random_ensembles: int = 3,
                  solve_exact_dists: bool = False,
                  sort_by_t: bool = False,
-                 checkpoint_extra_str: str = "") -> None:
+                 checkpoint_extra_str: str = "",
+                 save_as_scan: bool = False) -> None:
         """
         Construct a ToU3Pass.
 
@@ -66,6 +67,7 @@ class CreateEnsemblePass(BasePass):
         }
         self.sort_by_t = sort_by_t
         self.checkpoint_extra_str = checkpoint_extra_str
+        self.save_as_scan = save_as_scan
 
     async def unfold_circ(
             config_dist: tuple[list[CircuitGate], float], 
@@ -278,7 +280,7 @@ class CreateEnsemblePass(BasePass):
                 locations=locations,
                 target=target
             )
-            return [[all_circs_dists]]
+            return [[all_circs_dists[0]]]
 
         # Try to fill a knapsack with a combo of the block
         # psols that minimizes the number of CNOTs while
@@ -456,18 +458,32 @@ class CreateEnsemblePass(BasePass):
         data["scan_sols"] = []
         data["ensemble"] = []
             
-        approx_circs, pts, dists, targets, thresholds = self.parse_data(circuit, block_data)        
-        all_ensembles = await self.assemble_circuits(circuit, approx_circs, pts, dists=dists, target=data.target)
+        approx_circs, pts, dists, _, _ = self.parse_data(circuit, block_data)        
+        all_ensembles: list[list[Circuit]] = await self.assemble_circuits(circuit, approx_circs, pts, dists=dists, target=data.target)
 
-        for all_circs in all_ensembles:
-            all_circs = sorted(all_circs, key=lambda x: x[0].count(CNOTGate()))
-            if len(data["scan_sols"]) == 0 and all_circs is not None:
-                data["scan_sols"].extend(all_circs)
+        min_params = np.inf
+        min_ind = 0
+
+        for i, all_circs in enumerate(all_ensembles):
+            all_circs = sorted(all_circs, key=lambda x: x.num_params)
+            avg_params = np.mean([circ.num_params for circ in all_circs])
+            if avg_params < min_params:
+                min_ind = i
             if all_circs is not None:
                 data["ensemble"].append(all_circs)
-
+        
         if len(all_ensembles) == 0:
             _logger.error("No ensembles found!!!!")
+            return
+        
+        if self.save_as_scan:
+            # Pick the 30 circuits with the lowest number of parameters
+            all_circs = all_ensembles[min_ind]
+            all_circs = all_circs[:30]
+            dists = [normalized_gp_frob_cost(circ.get_unitary(), data.target) for circ in all_circs]
+            scan_sols = list(zip(all_circs, dists))
+            data["scan_sols"] = scan_sols
+            data.pop("ensemble")
             return
 
         if "checkpoint_dir" in data:

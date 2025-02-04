@@ -296,7 +296,7 @@ class ForEachBlockPass(BasePass):
             unfolded_circ = subcircuit.copy()
             unfolded_circ.unfold_all()
             # If skew factor is negative, then we are giving more error budget to blocks with fewer CNOT gates
-            skewed_gates = max(unfolded_circ.count(self.allocate_error_gate), 1) ** self.allocate_skew_factor
+            skewed_gates = max(unfolded_circ.num_params, 1) ** self.allocate_skew_factor
             block_gates.append(skewed_gates)
 
         # Assign error as percentage of block

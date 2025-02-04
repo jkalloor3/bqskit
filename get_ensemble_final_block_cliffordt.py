@@ -7,10 +7,10 @@ from bqskit.ir.gates import CNOTGate, RZGate, U3Gate
 # Generate a super ensemble for some error bounds
 from bqskit.passes import CheckpointRestartPass, ToU3Pass
 from bqskit.passes import ForEachBlockPass, ScanPartitioner
-from util import JiggleEnsemblePass, CreateEnsemblePass
+from util import JiggleEnsemblePass, CreateEnsemblePass, WriteQasmPass
 from ntro import NumericalTReductionPass
 from bqskit import enable_logging
-from util import LEAPSynthesisPass2, GenerateProbabilityPass, FixAnglesPass
+from util import LEAPSynthesisPass2, GenerateProbabilityPass, FixAnglesPass, UnFixTPass
 from util import CheckEnsembleQualityPass, FixGlobalPhasePass, ConvertToZXZXZSimple
 
 # enable_logging(True)
@@ -46,8 +46,9 @@ def get_shortest_circuits(circ_name: str, circ_file: str, tol: int, num_unique_c
         err_thresh = 10 ** (-1 * tol)
 
     extra_err_thresh = err_thresh * 0.01
-    small_block_size = 4
-    checkpoint_dir = f"block_checkpoints_clifft_final_4/{circ_name}_{tol}_{num_unique_circs}/"
+    small_block_size = 3
+    block_size = 6
+    checkpoint_dir = f"block_checkpoints_clifft_final_long_2/{circ_name}_{tol}_{num_unique_circs}/"
 
     good_instantiation_options = {
         'multistarts': 8,
@@ -61,6 +62,7 @@ def get_shortest_circuits(circ_name: str, circ_file: str, tol: int, num_unique_c
 
     slow_partitioner_passes = [
         ScanPartitioner(block_size=small_block_size),
+        ScanPartitioner(block_size=block_size),
         # ScanPartitioner(block_size=(small_block_size + 2)),
     ]
     partitioner_passes = slow_partitioner_passes
@@ -74,6 +76,17 @@ def get_shortest_circuits(circ_name: str, circ_file: str, tol: int, num_unique_c
             solve_exact_dists=True,
             sort_by_t=True,
             checkpoint_extra_str=""
+    )
+
+    create_ensemble_pass_2 = CreateEnsemblePass(
+            success_threshold=err_thresh, 
+            use_calculated_error=False, 
+            num_circs=num_unique_circs,
+            num_random_ensembles=0,
+            solve_exact_dists=True,
+            sort_by_t=True,
+            checkpoint_extra_str="",
+            save_as_scan=True
     )
 
     synthesis_pass = LEAPSynthesisPass2(
@@ -96,20 +109,27 @@ def get_shortest_circuits(circ_name: str, circ_file: str, tol: int, num_unique_c
 
     leap_workflow = [
         FixAnglesPass(10),
+        UnFixTPass(),
         CheckpointRestartPass(checkpoint_dir, 
                                 default_passes=partitioner_passes),
         ForEachBlockPass(
             [
-                synthesis_pass,
-                # JiggleScansPass(success_threshold=err_thresh / 2),
-                ConvertToZXZXZSimple(),
+                ForEachBlockPass(
+                    [
+                        synthesis_pass,
+                        FixAnglesPass(10, run_scan_sols=True),
+                        ConvertToZXZXZSimple(),
+                        WriteQasmPass()
+                    ],
+                    allocate_error=True,
+                ),
+                create_ensemble_pass_2,
                 NumericalTReductionPass(
-                    full_loops=5,
-                    success_threshold=err_thresh / 10,
+                    full_loops=2,
+                    success_threshold=err_thresh,
                     use_calculated_error=True),
                 ToU3Pass(ensemble=True, group=True),
                 FixGlobalPhasePass(),
-                # scan_pass,
             ],
             allocate_error=True,
         ),

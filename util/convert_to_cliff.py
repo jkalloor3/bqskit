@@ -185,13 +185,15 @@ class ConvertToZXZXZSimple(BasePass):
         for cycle, op in circuit.operations_with_cycles(reverse=True):
             if isinstance(op.gate, CircuitGate):
                 circ = op.gate._circuit
-                circ = ZXZXZDecomposition.run_zxzxz_decomp(circ)
+                if op.num_params >= 3:
+                    circ = ZXZXZDecomposition.run_zxzxz_decomp(circ)
                 cg_ops.append(Operation(CircuitGate(circ), op.location, circ.params))
                 pts.append(CircuitPoint(cycle, op.location[0]))
 
         circuit.batch_replace(pts, cg_ops)
         # Unfold the circuit
         circuit.unfold_all()
+        print(circuit.gate_counts)
 
     async def run(
             self, 
@@ -201,7 +203,9 @@ class ConvertToZXZXZSimple(BasePass):
         # For every circuit in data["scan_sols"], run the circuit
         scan_sols: list[tuple[Circuit, float]] = data["scan_sols"]
         for circ, _ in scan_sols:
+            # orig_gate_count = circ.gate_counts
             self.run_circuit(circ)
+            # print("ZXZXZPass: ", orig_gate_count, circ.gate_counts, flush=True)
             # global_phase_correction = target.get_target_correction_factor(circ.get_unitary())
             # final_dist = cost.calc_cost(circ, data.target)
             # circ_copy = circ.copy()

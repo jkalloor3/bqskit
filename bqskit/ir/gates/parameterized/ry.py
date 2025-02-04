@@ -83,24 +83,33 @@ class RYGate(
         return [theta]
 
     @staticmethod
-    def is_ry(unitary: UnitaryMatrix) -> float:
+    def is_ry(unitary: UnitaryMatrix, verbose: bool = False) -> float:
         
         top_left = unitary[0, 0]
         if np.allclose(top_left, 0 + 0j):
-            # Assert that off-diagonal elements are 1
-            a = np.abs(unitary[0, 1])
-            b = np.abs(unitary[1, 0])
-            sign = np.real(unitary[1, 0]) * np.real(unitary[0, 1])
-            return np.allclose(a, 1) and np.allclose(b, 1) and sign < 0
+            # Assert that off-diagonal elements are 1 or -1 and opposite
+            a = np.allclose(unitary[0, 1], 1) or np.allclose(unitary[0, 1], -1)
+            b = np.allclose(unitary[1, 0], -1 * unitary[0, 1])
+            if verbose:
+                print("A: ", a)
+                print("B: ", b)
+            return a and b
         else:
             # global phase removes complex part of top-left
             global_phase = top_left / np.abs(top_left)
-            # Calculate theta 
+            # Calculate potential thetas
             theta = np.arccos(np.abs(top_left)) * 2
             # Check rest of unitary
             cos = np.cos(theta / 2) * global_phase
-            sin = -1j * np.sin(theta / 2) * global_phase
-            top_right = np.allclose(unitary[0, 1], -sin)
-            bottom_left = np.allclose(unitary[1, 0], sin)
+            sin_1 = np.sin(theta / 2) * global_phase
+            sin_2 = -1 * sin_1 # Same theta could be represented by -sin
+            if verbose:
+                print("Global Phase: ", global_phase)
+                print("Theta: ", theta)
+                print("Cos: ", cos)
+                print("Sin: ", sin_1)
+                print("Sin_2: ", sin_2)
+            top_right = np.allclose(unitary[0, 1], sin_1) or np.allclose(unitary[0, 1], sin_2)
+            bottom_left = np.allclose(unitary[1, 0], -1 * unitary[0, 1])
             bottom_right = np.allclose(unitary[1, 1], cos)
             return top_right and bottom_left and bottom_right

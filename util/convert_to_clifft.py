@@ -51,7 +51,7 @@ def get_clifft_str(angle: float, precision: int = 5) -> tuple[str, int]:
         else:
             count = 0
     else:
-        command = f'~/Downloads/gridsynth -d {precision} {angle_str}'
+        command = f'/home/jkalloor/bqskit/gridsynth -d {precision} {angle_str}'
         result = os.popen(command).read().strip()
         # Go through gates character by character
         gates = result

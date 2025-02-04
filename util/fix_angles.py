@@ -1,6 +1,6 @@
 from bqskit.compiler.passdata import PassData
 from bqskit.compiler.basepass import BasePass
-from bqskit.ir import Circuit, CircuitPoint
+from bqskit.ir import Circuit, CircuitPoint, Operation
 from bqskit.ir.gates import *
 from bqskit.passes import ZXZXZDecomposition, ToU3Pass
 import numpy as np
@@ -48,23 +48,37 @@ def get_rz_gate_circ(angle, precision):
     return circ
 
 class FixAnglesPass(BasePass):
-    def __init__(self, precision=5):
+    def __init__(self, precision=5, run_scan_sols: bool = False):
         self.precision = precision
+        self.run_scan_sols = run_scan_sols
 
 
-    async def run(self, circuit: Circuit, data: PassData) -> None:
+    def run_circ(circuit: Circuit, precision: int) -> None:
         for cycle, op in circuit.operations_with_cycles():
             if op.num_qudits == 1:
+                if isinstance(op.gate, RXGate):
+                    if not RXGate.is_rx(op.get_unitary()):
+                        RXGate.is_rx(op.get_unitary(), verbose=True)
+                        print("RX Gate not RX")
+                        print(op.get_unitary())
+                        exit(1)
+                if isinstance(op.gate, RYGate):
+                    if not RYGate.is_ry(op.get_unitary()):
+                        RYGate.is_ry(op.get_unitary(), verbose=True)
+                        print("RY Gate not RY")
+                        print(op.get_unitary())
+                        exit(1)
+
                 if RZGate.is_rz(op.get_unitary()):
                     angle = RZGate.calc_params(op.get_unitary())
                     # Either fix gate or replace with RZ gate
-                    zxzxz_circ = get_rz_gate_circ(angle, self.precision)
+                    zxzxz_circ = get_rz_gate_circ(angle, precision)
                     pt = CircuitPoint(cycle, op.location[0])
                     circuit.replace_with_circuit(pt, zxzxz_circ,as_circuit_gate=True)
                 if RXGate.is_rx(op.get_unitary()):
                     rz_unitary = HGate().get_unitary() @ op.get_unitary() @ HGate().get_unitary()
                     angle = RZGate.calc_params(rz_unitary)
-                    zxzxz_circ = get_rz_gate_circ(angle, self.precision)
+                    zxzxz_circ = get_rz_gate_circ(angle, precision)
                     # Add hadamards on both sides
                     zxzxz_circ.insert_gate(0, HGate(), (0,))
                     zxzxz_circ.append_gate(HGate(), (0,))
@@ -74,7 +88,7 @@ class FixAnglesPass(BasePass):
                     hy_unitary = SGate().get_unitary() @ HGate().get_unitary()
                     rz_unitary = hy_unitary @ op.get_unitary() @ hy_unitary.conj().T
                     angle = RZGate.calc_params(rz_unitary)
-                    zxzxz_circ = get_rz_gate_circ(angle, self.precision)
+                    zxzxz_circ = get_rz_gate_circ(angle, precision)
                     # Add SH gate on both sides
                     zxzxz_circ.insert_gate(0, HGate(), (0,))
                     zxzxz_circ.insert_gate(0, SdgGate(), (0,))
@@ -85,6 +99,36 @@ class FixAnglesPass(BasePass):
 
         circuit.unfold_all()
 
-        print("Num Params after fixing angles: ", circuit.num_params)
+    async def run(self, circuit: Circuit, data: PassData) -> None:
+        if self.run_scan_sols:
+            for circ, _ in data["scan_sols"]:
+                orig_counts = circ.gate_counts
+                FixAnglesPass.run_circ(circ, self.precision)
+                # print(orig_counts, circ.gate_counts)
+        else:
+            FixAnglesPass.run_circ(circuit, self.precision)
+            print(circuit.gate_counts)
+            print("Num Params after fixing angles: ", circuit.num_params)
+            print("Distance from target: ", normalized_gp_frob_cost(circuit.get_unitary(), data.target))
+
+class UnFixTPass(BasePass):
+
+    async def run(self, circuit: Circuit, data: PassData) -> None:
+        pts = []
+        new_ops = []
+        for cycle, op in circuit.operations_with_cycles():
+            if op.num_qudits == 1:
+                pt = CircuitPoint(cycle, op.location[0])
+                if isinstance(op.gate, TGate) or isinstance(op.gate, TdgGate):
+                    if isinstance(op.gate, TdgGate):
+                        angle = -np.pi / 4
+                    angle = np.pi / 4
+                    gate = RZGate()
+                    new_ops.append(Operation(gate, op.location, [angle]))
+                    pts.append(pt)
+        
+        circuit.batch_replace(pts, new_ops)
+        circuit.unfold_all()
+        print("Unfixing Params: ", circuit.num_params, flush=True)
         print("Distance from target: ", normalized_gp_frob_cost(circuit.get_unitary(), data.target))
-        return circuit
+        return

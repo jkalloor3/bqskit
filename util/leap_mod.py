@@ -445,6 +445,13 @@ class LEAPSynthesisPass2(BasePass):
         """Perform the pass's operation, see :class:`BasePass` for more."""
         # print(f"Starting LEAP for block {data.get('super_block_num', -1)} : {data.get('block_num', -1)}", flush=True)
         orig_num_params = circuit.num_params
+
+        if orig_num_params == 0:
+            block_id = f"Block {data.get('super_block_num', -1)}_{data.get('block_num', -1)}:"
+            print(f"No Params to optimize for {block_id}!", flush=True)
+            data['scan_sols'] = [(circuit.copy(), 0)]
+            return
+
         # print(f"LEAP 1: Initial Number of Params for block {data.get('block_num', -1)}: ",   circuit.num_params, flush=True)
         if "leap_finished" in data and data["leap_finished"]:
             # print("LEAP is already finished!", flush=True)
@@ -471,11 +478,12 @@ class LEAPSynthesisPass2(BasePass):
         scan_sols: list[tuple[Circuit, float]] = data['scan_sols']
 
         # Remove large increases
-
-        avg_num_params = np.mean([x[0].num_params for x in scan_sols])
-        param_increase = avg_num_params - orig_num_params
-        print(f"LEAP 1: Param Increase for {data.get('block_num', -1)}: ", param_increase, flush=True)
-        print("Removing large param increases", flush=True)
-        scan_sols = [x for x in scan_sols if x[0].num_params < (orig_num_params * 2)]
+        avg_num_params_orig = np.mean([x[0].num_params for x in scan_sols])
+        # param_increase = avg_num_params - orig_num_params
+        # print(f"LEAP 1: Original Param Increase for {data.get('block_num', -1)}: ", param_increase, flush=True)
+        # print("Removing large param increases", flush=True)
+        scan_sols = [x for x in scan_sols if x[0].num_params <= (orig_num_params * 2)]
         data['scan_sols'] = scan_sols
-        print(f"LEAP 1: Final Number of Params for {data.get('block_num', -1)}: ",   [x[0].num_params for x in scan_sols], flush=True)
+        # print(f"LEAP 1: Final Number of Params for {data.get('block_num', -1)}: ",   [x[0].num_params for x in scan_sols], flush=True)
+        avg_num_params = np.mean([x[0].num_params for x in scan_sols])
+        # print(f"LEAP 1: Final Param Counts for {data.get('block_num', -1)} with len {len(scan_sols)}: ", orig_num_params, avg_num_params_orig, avg_num_params, flush=True)
