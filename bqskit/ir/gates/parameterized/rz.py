@@ -62,3 +62,8 @@ class RZGate(QubitGate, DifferentiableUnitary, CachedClass):
                 ],
             ], dtype=np.complex128,
         )
+    
+    @staticmethod
+    def calc_params(unitary: UnitaryMatrix) -> np.float128:
+        param = np.real(-1j * np.log(unitary[1, 1] / unitary[0, 0]))
+        return param

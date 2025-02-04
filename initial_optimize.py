@@ -9,21 +9,24 @@ from pathlib import Path
 
 import glob
 from bqskit.ir.gates import GlobalPhaseGate
+from collections import Counter
 
 
 
 # Run TKET Optimization on initial circuit to get shorter circuits
 if __name__ == '__main__':
     
-    unoptimized_circ_files = glob.glob("/pscratch/sd/j/jkalloor/bqskit/qce23_qfactor_benchmarks/adder9.qasm")
+    unoptimized_circ_files = glob.glob("ensemble_benchmarks/JWCircs/JWCirc_*.qasm")
 
     for circ_file in unoptimized_circ_files:
         circ = circuit_from_qasm(circ_file)
-        print("Original CX Count: ", circ.n_gates_of_type(OpType.CX))
+        print("Original CX Count: ", circ.n_gates_of_type(OpType.CX), flush=True)
         if circ.n_qubits <= 10:
             un = pytket_to_bqskit(circ).get_unitary()
         FullPeepholeOptimise().apply(circ)
-        print("Optimized CX Count: ", circ.n_gates_of_type(OpType.CX))
+        print("Optimized CX Count: ", circ.n_gates_of_type(OpType.CX), flush=True)
+        gate_counts = Counter(command.op.type for command in circ.get_commands())
+        print("Gate Counts: ", gate_counts, flush=True)
 
         if circ.n_qubits <= 10:
             opt_circ = pytket_to_bqskit(circ)
@@ -35,7 +38,7 @@ if __name__ == '__main__':
             print("Normalized Distance: ", un.get_distance_from(opt_un))
 
         
-        circ_file = circ_file.replace("qce23_qfactor_benchmarks", "ensemble_benchmarks_opt")
+        circ_file = circ_file.replace("ensemble_benchmarks", "ensemble_benchmarks_opt")
         Path(circ_file).parent.mkdir(parents=True, exist_ok=True)
         circuit_to_qasm(circ, circ_file)
-        print(f"Optimized {circ_file}")
+        print(f"Optimized {circ_file}", flush=True)

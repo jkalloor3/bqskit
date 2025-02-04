@@ -1,6 +1,7 @@
 import os
 import json
 import sys
+import numpy as np
 import pandas as pd
 from util import load_block
 from bqskit.ir import Circuit
@@ -22,14 +23,30 @@ def plot_data(circ_name, block_num, tol) -> None:
 
     x_axis = data["Ensemble Size"]
 
-    headers = ["TVD", "Trace Distance", "Frobenius Distance"]
+    # headers = ["TVD", "Trace Distance", "Frobenius Distance"]
+    headers = ["Frobenius Distance"]
     for i, header in enumerate(headers):
         if header not in data:
             print(f"Header {header} not found in data")
             continue
-        y = data[header]
-        axes.plot(x_axis, y, label=headers[i], color=colors[i])
-        axes.plot(x_axis, y, '*', color=colors[i])
+        y: list[list[float]] = data[header]
+        # Each row in y is a group of data, plot mean and std. dev of row as error bar
+        mean_ys = np.mean(y, axis=1)
+        std_ys = np.std(y, axis=1)
+        axes.errorbar(x_axis, mean_ys, yerr=std_ys, label=header, color=colors[2*i])
+        axes.plot(x_axis, mean_ys, '*', color=colors[2*i])
+
+        header_2 = header + " w/ QP"
+        if header_2 not in data:
+            print(f"Header {header_2} not found in data")
+            continue
+        y: list[list[float]] = data[header_2]
+        # Each row in y is a group of data, plot mean and std. dev of row as error bar
+        mean_ys = np.mean(y, axis=1)
+        std_ys = np.std(y, axis=1)
+        axes.errorbar(x_axis, mean_ys, yerr=std_ys, label=header_2, color=colors[2*i + 1], linestyle="--")
+        axes.plot(x_axis, mean_ys, 'o', color=colors[2*i + 1])
+        # axes.errorbar()
 
     axes.set_yscale('log')
     axes.legend(fontsize=11)
@@ -118,4 +135,4 @@ if __name__ == '__main__':
     circ_name = sys.argv[1]
     block_num = sys.argv[2]
     # plot_all_noisy_data(circ_name, block_num)
-    plot_data(circ_name, block_num, 1.0)
+    plot_data(circ_name, block_num, 3.0)

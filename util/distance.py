@@ -104,6 +104,12 @@ def normalized_frob_cost(utry: UnitaryMatrix, target: UnitaryMatrix):
     # Quest Paper 
     return cost
 
+    # indices = [i for i, c in enumerate(grid_str) if c == 'T']
+    # if len(indices) == 0:
+    #     return grid_str  # No 'T' to remove
+    # remove_idx = random.choice(indices)
+    # return grid_str[:remove_idx] + grid_str[remove_idx + 1:]
+
 def normalized_gp_frob_cost(utry: UnitaryMatrix, target: UnitaryMatrix):
     '''
     Calculates the normalized Frobenius distance between two unitaries
