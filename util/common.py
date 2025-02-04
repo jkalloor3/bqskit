@@ -6,17 +6,20 @@ import pickle
 from itertools import chain
 import numpy as np
 import os
-import pandas as pd
+import glob
 import numpy as np
 from bqskit.ir.lang import get_language
 from .distance import frobenius_cost, normalized_frob_cost
 import multiprocessing as mp
-from bqskit.runtime import get_runtime
 
 base_dir = "cliff_t_checkpoints"
 
 extra = "_qsearch"
 base_dir = "/home/jkalloor/bqskit/block_checkpoints_clifft_final_4"
+
+good_block_dir = "/pscratch/sd/j/jkalloor/bqskit/good_blocks"
+bad_block_dir = "/pscratch/sd/j/jkalloor/bqskit/bad_blocks"
+base_checkpoint_dir = "/pscratch/sd/j/jkalloor/bqskit/block_checkpoints_final_paper"
 
 def stack_padding(it: list[np.ndarray], vertical: bool = True) -> np.ndarray:
     max_width = max(a.shape[1] for a in it)
@@ -173,13 +176,8 @@ def load_cliff_circ(circ_name, precision: int = 5) -> str:
 #     print(full_path)
 #     return pickle.load(open(full_path, "rb"))
 
-def get_circ_dir(circ_name: int, block_num: int, tol: int, num_unique_circs: int) -> str:
-    circ_dir = f"{base_dir}/{circ_name}_{block_num}_{tol}_{num_unique_circs}"
-    full_path = f"{circ_dir}/data.data"
-    if not os.path.exists(full_path):
-        print("File not found, trying with integer tol", flush=True)
-        tol_2 = int(tol)
-        circ_dir = f"{base_dir}/{circ_name}_{block_num}_{tol_2}_{num_unique_circs}"
+def get_circ_dir(circ_name: int, block_num: int, tol: float) -> str:
+    circ_dir = f"{base_checkpoint_dir}/{circ_name}_{block_num}_{tol}"
     return circ_dir
 
 def load_compiled_block_circuits(circ_name: int, 
@@ -265,3 +263,35 @@ def get_unitary(circ: Circuit):
 
 def get_unitary_vec(circ: Circuit) -> np.ndarray[np.float128]:
     return circ.get_unitary().get_flat_vector()
+
+def check_if_finished(circ_name: str, tol: float) -> tuple[bool, bool]:
+    '''
+    Returns if all blocks have been processed for a circ_name, tol.
+
+    return_1 - True if all blocks have been processed and QP has been run
+    return_2  - True if all blocks have been processed minus QP and Check Ensemble
+    Quality
+
+    Note: If blocks do not exist, return_1 and return_2 will both be True
+    '''
+    # Get all block nums for a circ_name
+    good_circ_files = glob.glob(f"{good_block_dir}/{circ_name}_*.qasm")
+    bad_circ_files = glob.glob(f"{bad_block_dir}/{circ_name}_*.qasm")
+    all_circ_files = good_circ_files + bad_circ_files
+
+    if len(all_circ_files) == 0:
+        print("No blocks found for circ", circ_name, flush=True)
+        return True, True
+    block_nums = [file.split('_')[-1].split('.')[0] for file in all_circ_files]
+    # Check if all blocks have been processed
+    ret_1 = True
+    ret_2 = True
+    for block_num in block_nums:
+        circ_dir = get_circ_dir(circ_name, block_num, tol)
+        full_path = f"{circ_dir}/ensemble_final_rand_ind*.npy"
+        jiggle_path = f"{circ_dir}/ensemble_0_jiggles*.npy"
+        rand_ind_files = glob.glob(full_path)
+        jiggle_files = glob.glob(jiggle_path)
+        ret_1 = ret_1 and (len(rand_ind_files) > 0)
+        ret_2 = ret_2 and (len(jiggle_files) > 0)
+    return ret_1, ret_2

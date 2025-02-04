@@ -14,7 +14,7 @@ from .convert_to_cliff import ConvertToZXZXZ, ConvertToZXZXZSimple
 from .leap_mod import LEAPSynthesisPass2
 from .qsearch_mod import QSearchSynthesisPass2
 from .distance import *
-from .write_qasm import WriteQasmPass, ReplaceWithQasmPass
+from .write_qasm import WriteQasmPass, ReplaceWithQasmPass, CleanupBlockFiles
 from .perturb_hamiltonian import HamiltonianNoisePass
 from .ensemble_leap import EnsembleLeap
 from .ensemble_zxzxz import EnsembleZXZXZ

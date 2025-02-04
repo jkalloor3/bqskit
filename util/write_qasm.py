@@ -1,6 +1,8 @@
 """This module implements the WriteQASM pass"""
 from __future__ import annotations
 import os
+import glob
+from pathlib import Path
 
 from bqskit.ir import Circuit
 from bqskit.compiler.basepass import BasePass
@@ -30,6 +32,8 @@ class WriteQasmPass(BasePass):
         cc = circuit.copy()
         cc.unfold_all()
         qasm_str = cc.to("qasm")
+        print("Writing Block to : ", file_name, flush=True)
+        Path(file_name).parent.mkdir(parents=True, exist_ok=True)
         with open(file_name, "w") as f:
             f.write(qasm_str)
 
@@ -59,3 +63,18 @@ class ReplaceWithQasmPass(BasePass):
                 print("After partitioning New Gate Counts: ", new_circ.gate_counts, flush=True)
                 data["min_cnot_count"] = new_circ.count(CNOTGate()) // 2
                 circuit.become(new_circ)
+
+class CleanupBlockFiles(BasePass):
+    async def run(
+            self, 
+            circuit : Circuit, 
+            data: PassData
+    ) -> None:
+        if "checkpoint_dir" in data:
+            # checkpoint_dir = data["checkpoint_dir"]
+            if "checkpoint_data_file" in data:
+                file_name = os.path.join(data["checkpoint_dir"], "block_*")
+                file_names = glob.glob(file_name)
+                for file_name in file_names:
+                    # Remove file
+                    os.remove(file_name)
