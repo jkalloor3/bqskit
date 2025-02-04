@@ -8,6 +8,7 @@ import numpy as np
 from bqskit.compiler.basepass import BasePass
 from bqskit.compiler.passdata import PassData
 from bqskit.ir.circuit import Circuit
+from bqskit.qis.unitary import UnitaryMatrix
 from bqskit.ir.gates.constant.sx import SqrtXGate
 from bqskit.ir.gates.parameterized.rx import RXGate
 from bqskit.ir.gates.parameterized.rz import RZGate
@@ -48,23 +49,9 @@ class ZXZXZDecomposition(BasePass):
         self.always_use_rx = always_use_rx
         self.always_use_u1 = always_use_u1
 
+
     @staticmethod
-    def run_zxzxz_decomp(circuit: Circuit, 
-                         use_u1: bool = False,
-                         use_rx: bool = False) -> Circuit:
-        """
-        Convert a single-qubit circuit to ZXZXZ sequence.
-
-        Args:
-            circuit (Circuit): The circuit to convert.
-
-        Returns:
-            Circuit: The ZXZXZ sequence.
-        """
-
-        utry = circuit.get_unitary()
-
-        # Calculate params
+    def get_zxzxz_decomp_params(utry: UnitaryMatrix) -> tuple[float, float, float]:
         utry = np.linalg.det(utry) ** (-0.5) * utry
         i1 = cmath.phase(utry[1, 1])
         i2 = cmath.phase(utry[1, 0])
@@ -76,6 +63,34 @@ class ZXZXZDecomposition(BasePass):
         t = (t + np.pi) % (2 * np.pi) - np.pi
         p = (p + np.pi) % (2 * np.pi) - np.pi
         l = (l + np.pi) % (2 * np.pi) - np.pi
+        return l, t, p
+    
+
+    @staticmethod 
+    def get_zxzxz_circ_structure() -> Circuit:
+        circ = Circuit(1)
+        circ.append_gate(RZGate(), 0, [0])
+        circ.append_gate(SqrtXGate(), 0)
+        circ.append_gate(RZGate(), 0, [0])
+        circ.append_gate(SqrtXGate(), 0)
+        circ.append_gate(RZGate(), 0, [0])
+        return circ
+
+    @staticmethod
+    def run_zxzxz_decomp_circ(utry: UnitaryMatrix, 
+                         use_u1: bool = False,
+                         use_rx: bool = False) -> Circuit:
+        """
+        Convert a single-qubit circuit to ZXZXZ sequence.
+
+        Args:
+            circuit (Circuit): The circuit to convert.
+
+        Returns:
+            Circuit: The ZXZXZ sequence.
+        """
+        # Calculate params
+        l, t, p = ZXZXZDecomposition.get_zxzxz_decomp_params(utry)
 
         new_circuit = Circuit(1)
 
@@ -105,6 +120,24 @@ class ZXZXZDecomposition(BasePass):
             new_circuit.append_gate(RZGate(), 0, [p])
 
         return new_circuit
+
+    @staticmethod
+    def run_zxzxz_decomp(circuit: Circuit, 
+                         use_u1: bool = False,
+                         use_rx: bool = False) -> Circuit:
+        """
+        Convert a single-qubit circuit to ZXZXZ sequence.
+
+        Args:
+            circuit (Circuit): The circuit to convert.
+
+        Returns:
+            Circuit: The ZXZXZ sequence.
+        """
+
+        utry = circuit.get_unitary()
+
+        return ZXZXZDecomposition.run_zxzxz_decomp_circ(utry, use_u1, use_rx)
 
     async def run(self, circuit: Circuit, data: PassData) -> None:
         """Perform the pass's operation, see :class:`BasePass` for more."""

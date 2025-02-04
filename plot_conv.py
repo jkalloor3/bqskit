@@ -19,7 +19,7 @@ colors = ["blue", "orange", "green", "red", "purple", "cyan", "pink", "brown"]
 def plot_data(circ_name, block_num, tol) -> None:
     fig, axes = plt.subplots(1, 1, figsize=(7, 6))
     
-    data, _ = get_json_data(circ_name, block_num, tol, noisy=False)
+    data = get_json_data(circ_name, block_num, tol, noisy=False)
 
     x_axis = data["Ensemble Size"]
 
@@ -29,24 +29,14 @@ def plot_data(circ_name, block_num, tol) -> None:
         if header not in data:
             print(f"Header {header} not found in data")
             continue
-        y: list[list[float]] = data[header]
-        # Each row in y is a group of data, plot mean and std. dev of row as error bar
-        mean_ys = np.mean(y, axis=1)
-        std_ys = np.std(y, axis=1)
-        axes.errorbar(x_axis, mean_ys, yerr=std_ys, label=header, color=colors[2*i])
-        axes.plot(x_axis, mean_ys, '*', color=colors[2*i])
-
+        y = data[header]
         header_2 = header + " w/ QP"
-        if header_2 not in data:
-            print(f"Header {header_2} not found in data")
-            continue
-        y: list[list[float]] = data[header_2]
-        # Each row in y is a group of data, plot mean and std. dev of row as error bar
-        mean_ys = np.mean(y, axis=1)
-        std_ys = np.std(y, axis=1)
-        axes.errorbar(x_axis, mean_ys, yerr=std_ys, label=header_2, color=colors[2*i + 1], linestyle="--")
-        axes.plot(x_axis, mean_ys, 'o', color=colors[2*i + 1])
-        # axes.errorbar()
+        if header_2 in data:
+            y_qp = data[header_2]
+            axes.plot(x_axis, y_qp, label=header_2, color=colors[i], linestyle='--')
+            axes.plot(x_axis, y_qp, 'o', color=colors[i])
+        axes.plot(x_axis, y, label=headers[i], color=colors[i])
+        axes.plot(x_axis, y, '*', color=colors[i])
 
     axes.set_yscale('log')
     axes.legend(fontsize=11)
@@ -75,16 +65,16 @@ def get_json_data(circ_name: str, block_num: str | int, tol: float, noisy: bool 
             return None, None
     data = json.load(open(file_path, 'r'))
 
-    csv_path = csv_folder.format(tol=tol, circ_name=circ_name, block_num=block_num)
-    print(csv_path)
-    if os.path.exists(csv_path):
-        df = pd.read_csv(csv_path)
-    else:
-        csv_path = csv_folder.format(tol=int(tol), circ_name=circ_name, block_num=block_num)
-        if not os.path.exists(csv_path):
-            return None, None
-        df = pd.read_csv(csv_path)
-    return data, df
+    # csv_path = csv_folder.format(tol=tol, circ_name=circ_name, block_num=block_num)
+    # print(csv_path)
+    # if os.path.exists(csv_path):
+    #     df = pd.read_csv(csv_path)
+    # else:
+    #     csv_path = csv_folder.format(tol=int(tol), circ_name=circ_name, block_num=block_num)
+    #     if not os.path.exists(csv_path):
+    #         return None, None
+    #     df = pd.read_csv(csv_path)
+    return data #, df
 
 
 def plot_noisy_data(data: dict, axes: plt.Axes, label: str= "", color: str = ["blue"]):
@@ -135,4 +125,4 @@ if __name__ == '__main__':
     circ_name = sys.argv[1]
     block_num = sys.argv[2]
     # plot_all_noisy_data(circ_name, block_num)
-    plot_data(circ_name, block_num, 3.0)
+    plot_data(circ_name, block_num, 3.5)

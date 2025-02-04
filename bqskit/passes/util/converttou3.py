@@ -46,10 +46,10 @@ class ToU3Pass(BasePass):
                 params = U3Gate().calc_params(op.get_unitary())
                 point = CircuitPoint(cycle, op.location[0])
                 circuit.replace_gate(point, U3Gate(), op.location, params)
-
+   
+    @staticmethod
     def run_group_circ(circuit: Circuit) -> None:
         """Perform the pass's operation"""
-        orig_gate_counts = circuit.gate_counts
         GroupSingleQuditGatePass.group(circuit)
         for cycle, op in circuit.operations_with_cycles():
             if (op.num_params >= 3 and op.radixes == (2,)):
@@ -68,4 +68,6 @@ class ToU3Pass(BasePass):
                 else:
                     await self.run_circ(circ)
         else:
+            if self.group:
+                    ToU3Pass.run_group_circ(circ)
             await self.run_circ(circuit)

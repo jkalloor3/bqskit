@@ -40,16 +40,16 @@ class IdentityGate(ConstantGate):
         self._radixes = tuple(radixes or [2] * num_qudits)
         self._dim = int(np.prod(self.radixes))
         self._utry = UnitaryMatrix.identity(self.dim, self.radixes)
-        self._qasm_name = 'identity%d' % self.num_qudits
+        self._qasm_name = 'id'
 
-    def get_qasm_gate_def(self) -> str:
-        """Return a qasm gate definition block for this gate."""
-        param_symbols = ['a%d' % i for i in range(self.num_qudits)]
-        param_str = ','.join(param_symbols)
-        header = 'gate identity%d %s' % (self.num_qudits, param_str)
-        body_stmts = ['\tU(0,0,0) %s;' % sym for sym in param_symbols]
-        body = '\n'.join(body_stmts)
-        return f'{header}\n{{\n{body}\n}}\n'
+    # def get_qasm_gate_def(self) -> str:
+    #     """Return a qasm gate definition block for this gate."""
+    #     param_symbols = ['a%d' % i for i in range(self.num_qudits)]
+    #     param_str = ','.join(param_symbols)
+    #     header = 'gate identity%d %s' % (self.num_qudits, param_str)
+    #     body_stmts = ['\tU(0,0,0) %s;' % sym for sym in param_symbols]
+    #     body = '\n'.join(body_stmts)
+    #     return f'{header}\n{{\n{body}\n}}\n'
 
     def __eq__(self, other: object) -> bool:
         return (

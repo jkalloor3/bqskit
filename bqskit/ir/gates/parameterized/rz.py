@@ -42,6 +42,11 @@ class RZGate(QubitGate, DifferentiableUnitary, CachedClass):
                 [0, pexp],
             ],
         )
+    
+    @staticmethod
+    def calc_params(unitary: UnitaryMatrix) -> float:
+        param = float(np.real(-1j * np.log(unitary[1, 1] / unitary[0, 0])))
+        return param
 
     def get_grad(self, params: RealVector = []) -> npt.NDArray[np.complex128]:
         """
