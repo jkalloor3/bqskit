@@ -362,11 +362,6 @@ class ForEachBlockPass(BasePass):
         if self.calculate_error_bound:
             _logger.debug(f'New circuit error is {data.error}.')
 
-        if self.check_checkpoint:
-            data["inner_foreach_finished"] = True
-            pickle.dump(data, open(data["checkpoint_data_file"], 'wb'))
-            self.cleanup_checkpoint_files(checkpoint_dir, len(blocks))
-
         return
 
 

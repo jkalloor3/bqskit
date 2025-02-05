@@ -272,7 +272,7 @@ class  JiggleEnsemblePass(BasePass):
         checkpoint_dir = data["checkpoint_dir"]
         ensemble_file_name = os.path.join(checkpoint_dir, "ensemble_{ind}_{extra}.qasms")
         jiggle_file_name = os.path.join(checkpoint_dir, "ensemble_{ind}_jiggles_{extra}.npy")
-        final_ens_file = f"{checkpoint_dir}/ensemble_final.qasms"
+        final_ens_file = os.path.join(checkpoint_dir, "ensemble_final.qasms")
 
         if os.path.exists(final_ens_file):
             print("Already Finished Jiggle", flush=True)

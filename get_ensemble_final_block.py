@@ -23,7 +23,7 @@ good_instantiation_options = {
     'method': 'minimization'
 }
 
-base_checkpoint_dir = "block_checkpoints_final_paper/"
+base_checkpoint_dir = "/pscratch/sd/j/jkalloor/bqskit/block_checkpoints_final_paper"
 NUM_UNIQUE_CIRCS = 250
 
 def get_ensemble_workflow(circ_name: str, tol: float) -> WorkflowLike:
@@ -94,21 +94,44 @@ def get_ensemble_workflow(circ_name: str, tol: float) -> WorkflowLike:
     return leap_workflow
 
 
-def get_final_workflow(circ_name: str, tol: float) -> WorkflowLike | None:
-    # Check if already finished
-    checkpoint_dir = f"{base_checkpoint_dir}/{circ_name}_{tol}/"
+def check_if_finished(circ_name: str, tol: float) -> tuple[bool, bool, str]:
+    '''
+    Given a circ_name and a tolerance, check if the ensemble is complete
+    
+    ret_1 -> completely finished
+    ret_2 -> jiggle pass finished
+    ret_3 -> extra_str
+    
+    '''
+    checkpoint_dir = os.path.join(base_checkpoint_dir, f"{circ_name}_{tol}")
     final_file = os.path.join(checkpoint_dir, "ensemble_final_rand_inds.npy")
     if os.path.exists(final_file):
-        print(f"Already finished {circ_name}:{tol}!", flush=True)
-        return None
-    # Check if there is a .npy file in the checkpoint dir
-    jiggle_file = f"{checkpoint_dir}/*.npy"
+        return True, True, ""
+    # Check if there is a jiggle .npy file in the checkpoint dir for at least 5
+    jiggle_file = os.path.join(checkpoint_dir, "*5_jiggles*.npy")
     jiggle_files = glob.glob(jiggle_file)
     if len(jiggle_files) == 0:
-        print(f"Jiggle Pass is not completed yet for {circ_name}:{tol}!", 
-              flush=True)
+        return False, False, ""
+    # Try to get extra_str from jiggle files
+    extra_str = jiggle_files[0].split("5_jiggles_")[1]
+    # Remove everything after .
+    extra_str = extra_str.split(".npy")[0]
+    return False, True, extra_str
+
+def get_final_workflow(circ_name: str, tol: float) -> WorkflowLike | None:
+    # Check if already finished
+    # checkpoint_dir = f"{base_checkpoint_dir}/{circ_name}_{tol}/"
+    checkpoint_dir = os.path.join(base_checkpoint_dir, f"{circ_name}_{tol}")
+    print(f"Checkpoint Dir: {checkpoint_dir}", flush=True)
+    finished, jiggle_finished, extra_str = check_if_finished(circ_name, tol)
+    if finished:
+        print(f"Already finished {circ_name} {tol}", flush=True)
+        return None
+    if not jiggle_finished:
+        print(f"Jiggle not finished {circ_name} {tol}", flush=True)
         return get_ensemble_workflow(circ_name, tol)
-    jiggle_pass = JiggleEnsemblePass()
+    # Else run the Final 2 passes
+    jiggle_pass = JiggleEnsemblePass(checkpoint_extra_str=extra_str)
     workflow = [
         CheckpointRestartPass(checkpoint_dir, 
                                 default_passes=[]),
@@ -158,7 +181,7 @@ def find_file(circ_name: str, block_num: str) -> tuple[str, str]:
         return circ_name, circ_file
     circ_file = f"bad_blocks/{circ_name}.qasm"
     if not os.path.exists(circ_file):
-        raise Exception("File not found")
+        raise Exception(f"File not found for {circ_name}: {block_num}")
 
     return circ_name, circ_file
 
@@ -172,20 +195,14 @@ def get_circ_data(circ_name: str, block_num: str | int, tol: float) -> list[tupl
         circ_data = []
         print("Finding all circ data", flush=True)
         for dir in os.listdir(base_checkpoint_dir):
-            final_file = os.path.join(base_checkpoint_dir, dir, 
-                                      "ensemble_final_rand_inds.npy")
-            if os.path.exists(final_file):
-                continue
-            jiggle_file = os.path.join(base_checkpoint_dir, dir, "*.npy")
-            jiggle_files = glob.glob(jiggle_file)
-            if len(jiggle_files) == 0:
-                continue
             parts = dir.split("_")
-            circ_name = parts[0]
-            block_num = parts[1]
+            block_num = parts[-2]
+            tol = float(parts[-1])
+            circ_name = "_".join(parts[:-2])
             circ_name, circ_file = find_file(circ_name, block_num)
-            tol = float(parts[2])
-            circ_data.append((circ_name, circ_file, tol))
+            finished, jiggle_finished, _ = check_if_finished(circ_name, tol)
+            if not finished and jiggle_finished:
+                circ_data.append((circ_name, circ_file, tol))
         return circ_data
     
     else:
