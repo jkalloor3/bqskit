@@ -13,7 +13,7 @@ from bqskit.ir.lang import get_language
 from bqskit.ir.opt.cost.functions import GPNormalizedFrobeniusCostGenerator, GPNormalizedFrobeniusCostGenerator
 from bqskit.ir.opt.minimizers.lbfgs import LBFGSMinimizer
 from bqskit.ir.opt.cost.generator import CostFunctionGenerator
-from bqskit.ir.gates import U3Gate, CNOTGate, GlobalPhaseGate
+from bqskit.ir.gates import U3Gate, CNOTGate, RZGate
 from bqskit.qis import UnitaryMatrix
 import numpy as np
 from math import ceil
@@ -82,6 +82,15 @@ class  JiggleEnsemblePass(BasePass):
         circ_copy.set_params(params)
         return circ_copy
 
+    @staticmethod
+    def get_rz_perturbations(epsilon: float) -> np.ndarray[float]:
+        # Get RZ Perturbation angles 
+        # These are the perturbations to do Z and S Twirling
+        angle_perturbations = np.array([1, -1, 0.5, -0.5, 0.25, -0.25, 0.125, -0.125]) * np.pi
+        perturbed_angles = epsilon * angle_perturbations
+        return perturbed_angles
+
+    @staticmethod
     def get_perturbations(num_qudits: int, epsilon: float, ens_size: int) -> list[UnitaryMatrix]:
         perturbations = []
         pauli_strings = ["X", "Y", "Z"]
@@ -116,63 +125,59 @@ class  JiggleEnsemblePass(BasePass):
     async def single_jiggle_ham(self, circ: Circuit, dist: float, num: int, target: UnitaryMatrix) -> np.ndarray[float]:
         # For each U3 gate, calculate do a Hamiltonian perturbation
         num_u3s = circ.count(U3Gate())
+        num_zs = circ.count(RZGate())
+        if (num_u3s + num_zs) == 0:
+            return np.array([])
         # For each u3, come up with 16 param perturbations
         num_options = 16
         u3_param_options: list[list[list[float]]] = []
+        z_param_options: list[list[float]] = []
         perturb_dist = (self.success_threshold - dist) / (num_u3s + 1)
         for op in circ.operations():
             if isinstance(op.gate, U3Gate):
                 cur_u3_utry = op.get_unitary()
                 u3_param_options.append(self.get_ham_perturbations(cur_u3_utry, perturb_dist, num_options * 2))
-        
+            if isinstance(op.gate, RZGate):
+                z_params = JiggleEnsemblePass.get_rz_perturbations(perturb_dist) + op.params[0]
+                z_param_options.append(z_params.tolist())
         # Now randomly pick num combinations of these options
         final_params = []
-        frob_cost_calc = self.cost.gen_cost(circ, target)
         for _ in range(num):
-            if num_u3s > 0:
-                rand_inds = np.random.choice(num_options, num_u3s, replace=True)
-                # Positive perturbation
-                full_params_1: list[list[float]] = [u3_param_options[i][ind * 2] for i, ind in enumerate(rand_inds)]
-                # Negative perturbation
-                full_params_2: list[list[float]] = [u3_param_options[i][ind * 2 + 1] for i, ind in enumerate(rand_inds)]
-                # full_params_1 = list(itertools.chain.from_iterable(full_params_1))
-                new_circ = circ.copy()
-                ind = 0
-                for op in new_circ.operations():
-                    if isinstance(op.gate, U3Gate):
-                        op.params = full_params_1[ind]
-                        ind += 1
+            rand_inds = np.random.choice(num_options, num_u3s, replace=True)
+            # Positive perturbation
+            full_params_1: list[list[float]] = [u3_param_options[i][ind * 2] for i, ind in enumerate(rand_inds)]
+            # Negative perturbation
+            full_params_2: list[list[float]] = [u3_param_options[i][ind * 2 + 1] for i, ind in enumerate(rand_inds)]
+            # full_params_1 = list(itertools.chain.from_iterable(full_params_1))
+            # Get Z perturbations
+            rand_z_inds = np.random.choice(4, num_zs, replace=True)
+            
+            z_params_1: list[float] = [z_param_options[i][ind * 2] for i, ind in enumerate(rand_z_inds)]
+            z_params_2: list[float] = [z_param_options[i][ind * 2 + 1] for i, ind in enumerate(rand_z_inds)]
+            new_circ = circ.copy()
+            ind = 0
+            z_ind = 0
+            for op in new_circ.operations():
+                if isinstance(op.gate, U3Gate):
+                    op.params = full_params_1[ind]
+                    ind += 1
+                if isinstance(op.gate, RZGate):
+                    op.params = [z_params_1[z_ind]]
+                    z_ind += 1
 
-                full_params_1 = new_circ.params
-                
-                ind = 0
-                for op in new_circ.operations():
-                    if isinstance(op.gate, U3Gate):
-                        op.params = full_params_2[ind]
-                        ind += 1
-
-                full_params_2 = new_circ.params
-                
-                
-                dist_1 = frob_cost_calc.get_cost(full_params_1)
-                dist_2 = frob_cost_calc.get_cost(full_params_2)
-            else:
-                dist_1 = dist
-                dist_2 = dist
-
-            full_params_1 = self.jiggle_params(full_params_1, circ, dist_1, target)
-            full_params_2= self.jiggle_params(full_params_2, circ, dist_2, target)
+            full_params_1 = new_circ.params
+            ind = 0
+            z_ind = 0
+            for op in new_circ.operations():
+                if isinstance(op.gate, U3Gate):
+                    op.params = full_params_2[ind]
+                    ind += 1
+                if isinstance(op.gate, RZGate):
+                    op.params = [z_params_2[z_ind]]
+                    z_ind += 1
+            full_params_2 = new_circ.params
             final_params.append(full_params_1)
             final_params.append(full_params_2)
-            # dist_1 = frob_cost_calc.get_cost(full_params_1)
-            # dist_2 = frob_cost_calc.get_cost(full_params_2)
-            # frob_dists.append(frob_cost.calc_cost(new_circ_1, target))
-            # frob_dists.append(frob_cost.calc_cost(new_circ_2, target))
-            # dists.append(dist_1)
-            # dists.append(dist_2)
-
-        # print("Avg. Dist Post Jiggle: ", np.mean(dists), flush=True)
-        # print("Avg. Frob Dist Post Jiggle: ", np.mean(frob_dists), flush=True)
 
         return np.vstack(final_params)
 

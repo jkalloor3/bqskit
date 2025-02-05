@@ -438,7 +438,7 @@ class CreateEnsemblePass(BasePass):
             ensembles = []
             while os.path.exists(file_name):
                 new_ens = load_ensemble(file_name)
-                avg_count = np.mean([circ.num_params for circ, _ in new_ens])
+                avg_count = np.mean([circ.num_params for circ in new_ens])
                 print("Avg Count", avg_count, flush=True)
                 ensembles.append(new_ens)
                 file_name = f"{checkpoint_dir}/ensemble_{len(ensembles)}_{self.checkpoint_extra_str}.qasms"

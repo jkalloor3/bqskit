@@ -122,7 +122,8 @@ class UnFixTPass(BasePass):
                 if isinstance(op.gate, TGate) or isinstance(op.gate, TdgGate):
                     if isinstance(op.gate, TdgGate):
                         angle = -np.pi / 4
-                    angle = np.pi / 4
+                    else:
+                        angle = np.pi / 4
                     gate = RZGate()
                     new_ops.append(Operation(gate, op.location, [angle]))
                     pts.append(pt)

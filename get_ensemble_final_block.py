@@ -85,6 +85,7 @@ def get_ensemble_workflow(circ_name: str, tol: float) -> WorkflowLike:
                 FixGlobalPhasePass(),
             ],
             allocate_error=True,
+            skip_file="ensemble_0_.qasms"
         ),
         create_ensemble_pass,
         CleanupBlockFiles(),
@@ -107,9 +108,11 @@ def get_final_workflow(circ_name: str, tol: float) -> WorkflowLike | None:
         print(f"Jiggle Pass is not completed yet for {circ_name}:{tol}!", 
               flush=True)
         return get_ensemble_workflow(circ_name, tol)
+    jiggle_pass = JiggleEnsemblePass()
     workflow = [
         CheckpointRestartPass(checkpoint_dir, 
                                 default_passes=[]),
+        jiggle_pass, # To reload jiggled unitaries
         CheckEnsembleQualityPass(False),
         GenerateProbabilityPass()
     ]

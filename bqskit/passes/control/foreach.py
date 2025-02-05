@@ -78,7 +78,7 @@ class ForEachBlockPass(BasePass):
         allocate_error: bool = False,
         allocate_error_gate: Gate = CNOTGate(),
         allocate_skew_factor: int = -1,
-        check_checkpoint: bool = False,
+        skip_file: str | None = None,
     ) -> None:
         """
         Construct a ForEachBlockPass.
@@ -160,7 +160,7 @@ class ForEachBlockPass(BasePass):
         self.allocate_error_gate = allocate_error_gate
         self.allocate_skew_factor = allocate_skew_factor
         self.error_cost_gen = error_cost_gen
-        self.check_checkpoint = check_checkpoint
+        self.skip_file = skip_file
         if not callable(self.collection_filter):
             raise TypeError(
                 'Expected callable method that maps Operations to booleans for'
@@ -213,11 +213,10 @@ class ForEachBlockPass(BasePass):
         block_datas: list[PassData] = []
         block_gates = []
 
-        if self.check_checkpoint:
-            if data.get("inner_foreach_finished", False):
-                print("Skipping inner foreach", flush=True)
-                self.cleanup_checkpoint_files(checkpoint_dir, len(blocks))
-                # If the inner foreach pass has finished, we can skip this pass
+        if self.skip_file and should_checkpoint:
+            full_skip = join(checkpoint_dir, self.skip_file)
+            if exists(full_skip):
+                print("Skipping for loop", flush=True)
                 return
 
         for i, (cycle, op) in enumerate(blocks):

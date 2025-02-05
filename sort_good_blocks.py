@@ -20,7 +20,8 @@ def partition_workflow(circ_name: str):
     ExtractMeasurements(),
     ScanPartitioner(8),
     ForEachBlockPass([
-        WriteQasmPass(block_save_dir.format(circ_name=circ_name))
+        WriteQasmPass(block_save_dir.format(circ_name=circ_name),
+                      write=True)
     ])
 ]
 
@@ -51,8 +52,8 @@ def sort_blocks(circ_name: str, good_output_folder, bad_output_folder):
     # Delete block_save_dir
     os.rmdir(block_save_dir.format(circ_name=circ_name))
 
-circ_types = ["*"]
-input_folder = f"/pscratch/sd/j/jkalloor/bqskit/QITE_8"
+circ_types = ["mult*"]
+input_folder = f"/pscratch/sd/j/jkalloor/bqskit/ensemble_benchmarks_new"
 good_output_folder = 'good_blocks'
 bad_output_folder = 'bad_blocks'
 job_ids = []
