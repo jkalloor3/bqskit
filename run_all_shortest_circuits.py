@@ -14,7 +14,7 @@ header = """#!/bin/bash -l
 #SBATCH -q regular
 #SBATCH -A m4141_g
 #SBATCH -C gpu
-#SBATCH --time=5:55:00
+#SBATCH --time=11:55:00
 #SBATCH -N 1
 #SBATCH --signal=B:USR1@1
 #SBATCH --output=./slurm_logs/{file}/{circ}/{tol}_tol_block_size
@@ -25,11 +25,12 @@ echo "python {file}.py {circ} {timestep} {tol}"
 python {file}.py {circ} {timestep} {tol}
 """
 
-one_q_err = 1e-4
-two_q_err = 4e-3
+cliff_t = True
 
 if __name__ == '__main__':
     file = "get_ensemble_final_block"
+    if cliff_t:
+        file = "get_ensemble_final_block_cliffordt"
     
     # Get all circs
     # dirs = ["ensemble_benchmarks", "qce23_qfactor_benchmarks"]
@@ -42,8 +43,8 @@ if __name__ == '__main__':
 
     # circs = ["shor_12"]
 
-    tols = [1.0, 3.0]
-    skips = ["vqe", "heisenberg_3", "tfim_3", "qft", "tf"]
+    tols = [3.0, 5.0]
+    skips = ["vqe", "heisenberg_3", "tf"]
     for circ in circs:
         timesteps = ["all_blocks"]
         for skip in skips:
@@ -52,7 +53,7 @@ if __name__ == '__main__':
         for timestep in timesteps:
             for tol in tols:
                 # print(check_if_finished(circ, tol))
-                if check_if_finished(circ, tol)[1]:
+                if check_if_finished(circ, tol, cliff_t=cliff_t)[1]:
                     print(f"Skipping {circ} {tol}, already finished")
                     continue
                 else:
