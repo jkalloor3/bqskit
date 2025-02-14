@@ -75,6 +75,7 @@ class FixAnglesPass(BasePass):
                     zxzxz_circ = get_rz_gate_circ(angle, precision)
                     pt = CircuitPoint(cycle, op.location[0])
                     circuit.replace_with_circuit(pt, zxzxz_circ,as_circuit_gate=True)
+                    # new_dist = normalized_gp_frob_cost(zxzxz_circ.get_unitary(), op.get_unitary())
                 if RXGate.is_rx(op.get_unitary()):
                     rz_unitary = HGate().get_unitary() @ op.get_unitary() @ HGate().get_unitary()
                     angle = RZGate.calc_params(rz_unitary)
@@ -86,7 +87,7 @@ class FixAnglesPass(BasePass):
                     circuit.replace_with_circuit(pt, zxzxz_circ,as_circuit_gate=True)
                 if RYGate.is_ry(op.get_unitary()):
                     hy_unitary = SGate().get_unitary() @ HGate().get_unitary()
-                    rz_unitary = hy_unitary @ op.get_unitary() @ hy_unitary.conj().T
+                    rz_unitary = hy_unitary.conj().T @ op.get_unitary() @ hy_unitary
                     angle = RZGate.calc_params(rz_unitary)
                     zxzxz_circ = get_rz_gate_circ(angle, precision)
                     # Add SH gate on both sides
@@ -96,15 +97,18 @@ class FixAnglesPass(BasePass):
                     zxzxz_circ.append_gate(SGate(), (0,))
                     pt = CircuitPoint(cycle, op.location[0])
                     circuit.replace_with_circuit(pt, zxzxz_circ,as_circuit_gate=True)
+                    # new_dist = normalized_gp_frob_cost(zxzxz_circ.get_unitary(), op.get_unitary())
 
         circuit.unfold_all()
 
     async def run(self, circuit: Circuit, data: PassData) -> None:
         if self.run_scan_sols:
+            # print("Original Scan Sol Counts: ", [c.gate_counts for c, _ in data["scan_sols"]])
             for circ, _ in data["scan_sols"]:
-                orig_counts = circ.gate_counts
+                # orig_counts = circ.gate_counts
                 FixAnglesPass.run_circ(circ, self.precision)
                 # print(orig_counts, circ.gate_counts)
+            # print("Final Scan Sol Counts: ", [c.gate_counts for c, _ in data["scan_sols"]])
         else:
             FixAnglesPass.run_circ(circuit, self.precision)
             print(circuit.gate_counts)

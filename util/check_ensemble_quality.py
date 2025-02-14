@@ -76,6 +76,9 @@ class CheckEnsembleQualityPass(BasePass):
         checkpoint_dir = data["checkpoint_dir"]
         final_ens_file = f"{checkpoint_dir}/ensemble_final.qasms"
         final_ens_jiggle_file = f"{checkpoint_dir}/ensemble_final_jiggle.npy"
+
+        print("Checkpoint Dir: ", checkpoint_dir, flush=True)
+        print("Starting Check Ensemble Quality Pass", flush=True)
         
         if os.path.exists(final_ens_file):
             # Load the ensemble from the checkpoint
@@ -155,8 +158,8 @@ class CheckEnsembleQualityPass(BasePass):
             for row in csv_dict:
                 writer.writerow(row)
             # Copy best jiggled ensemble file to new file name
-            best_ensemble_file_name = f"{checkpoint_dir}/ensemble_{best_ind}_{self.checkpoint_extra_str}.qasms"
-            best_file_name = f"{checkpoint_dir}/ensemble_{best_ind}_jiggles_{self.checkpoint_extra_str}.npy"
-            shutil.copyfile(best_ensemble_file_name, final_ens_file)
-            shutil.copyfile(best_file_name, final_ens_jiggle_file)
+            # best_ensemble_file_name = f"{checkpoint_dir}/ensemble_{best_ind}_{self.checkpoint_extra_str}.qasms"
+            # best_file_name = f"{checkpoint_dir}/ensemble_{best_ind}_jiggles_{self.checkpoint_extra_str}.npy"
+            # shutil.copyfile(best_ensemble_file_name, final_ens_file)
+            # shutil.copyfile(best_file_name, final_ens_jiggle_file)
 

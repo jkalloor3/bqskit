@@ -14,7 +14,7 @@ header = """#!/bin/bash -l
 #SBATCH -q regular
 #SBATCH -A m4141_g
 #SBATCH -C gpu
-#SBATCH --time=11:55:00
+#SBATCH --time=06:55:00
 #SBATCH -N 1
 #SBATCH --signal=B:USR1@1
 #SBATCH --output=./slurm_logs/{file}/{circ}/{tol}_tol_block_size
@@ -26,15 +26,19 @@ python {file}.py {circ} {timestep} {tol}
 """
 
 cliff_t = True
+# cliff_t = False
 
 if __name__ == '__main__':
     file = "get_ensemble_final_block"
     if cliff_t:
         file = "get_ensemble_final_block_cliffordt"
+
+    # file = "initial_optimize"
     
     # Get all circs
     # dirs = ["ensemble_benchmarks", "qce23_qfactor_benchmarks"]
     dirs = ["QITE_8"]
+    # dirs = ["ham_sim_qasm"]
     circs = []
     for dir in dirs:
         files = glob.glob(f"{dir}/*.qasm")
@@ -42,27 +46,32 @@ if __name__ == '__main__':
     # circs = ["adder9"]
 
     # circs = ["shor_12"]
+    # circs = ["good_blocks", "bad_blocks", "ham_sim_qasm", "QITE_8"]
+    # circs = ["all_probs"]
 
     tols = [3.0, 5.0]
+    # tols = [1]
     skips = ["vqe", "heisenberg_3", "tf"]
     for circ in circs:
         timesteps = ["all_blocks"]
-        for skip in skips:
-            if circ.startswith(skip):
-                timesteps = []
+        # timesteps = ["1"]
+        # for skip in skips:
+        #     if circ.startswith(skip):
+        #         timesteps = []
+        # timesteps = ["1"]
         for timestep in timesteps:
             for tol in tols:
                 # print(check_if_finished(circ, tol))
-                if check_if_finished(circ, tol, cliff_t=cliff_t)[1]:
-                    print(f"Skipping {circ} {tol}, already finished")
-                    continue
-                else:
-                    to_write = open(file_name, 'w')
-                    to_write.write(header.format(file=file, circ=circ, tol=tol, timestep=timestep))
-                    to_write.close()
-                    print(f"python {file}.py {circ} {timestep} {tol}")
-                    # os.system(f"python {file}.py {circ} {timestep} {tol}")
-                    time.sleep(2*sleep_time)
-                    output = subprocess.check_output(['sbatch' , file_name])
-                    print(output)
-                    time.sleep(sleep_time)
+                # if check_if_finished(circ, tol, cliff_t=cliff_t)[1]:
+                #     print(f"Skipping {circ} {tol}, already finished")
+                #     continue
+                # else:
+                to_write = open(file_name, 'w')
+                to_write.write(header.format(file=file, circ=circ, tol=tol, timestep=timestep))
+                to_write.close()
+                print(f"python {file}.py {circ} {timestep} {tol}")
+                # os.system(f"python {file}.py {circ} {timestep} {tol}")
+                time.sleep(2*sleep_time)
+                output = subprocess.check_output(['sbatch' , file_name])
+                print(output)
+                time.sleep(sleep_time)

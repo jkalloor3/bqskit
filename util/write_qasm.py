@@ -37,7 +37,9 @@ class WriteQasmPass(BasePass):
             print("Writing Block to : ", file_name, flush=True)
         Path(file_name).parent.mkdir(parents=True, exist_ok=True)
         with open(file_name, "w") as f:
-            f.write(qasm_str)
+            chars =  f.write(qasm_str)
+            print("Writing to file: ", file_name, chars, flush=True)
+            print("Number of qudits: ", circuit.num_qudits, flush=True)
 
 class ReplaceWithQasmPass(BasePass):
 

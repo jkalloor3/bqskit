@@ -2,7 +2,7 @@ from .analyze_block_pass import AnalyzeBlockPass, TCountPass, MakeHistogramPass
 from .second_leap import SecondLEAPSynthesisPass
 from .common import *
 from .stats import *
-from .fix_global_phase import FixGlobalPhasePass
+from .fix_global_phase import FixGlobalPhasePass, fix_phase
 from .calculate_error_pass import CalculateErrorBoundPass
 from .second_qsearch import SecondQSearchSynthesisPass
 from .subselect_ensemble_pass import SubselectEnsemblePass
@@ -25,3 +25,5 @@ from .jiggle_ensemble import JiggleEnsemblePass
 from .ensemble import CreateEnsemblePass
 from .fix_angles import FixAnglesPass, UnFixTPass
 from .convert_to_clifft import *
+from .gg import *
+from .combine_blocks import get_circ_block_dirs

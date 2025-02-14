@@ -26,18 +26,39 @@ good_instantiation_options = {
 base_checkpoint_dir = "block_checkpoints_final_paper_clifft/"
 NUM_UNIQUE_CIRCS = 250
 
+def check_if_finished(circ_name: str, tol: float) -> tuple[bool, bool, str]:
+    '''
+    Given a circ_name and a tolerance, check if the ensemble is complete
+    ret_1 -> completely finished
+    ret_2 -> jiggle pass finished
+    ret_3 -> extra_str
+    
+    '''
+    checkpoint_dir = os.path.join(base_checkpoint_dir, f"{circ_name}_{tol}")
+    final_file = os.path.join(checkpoint_dir, "ensemble_final_rand_inds.npy")
+    if os.path.exists(final_file):
+        return True, True, ""
+    # Check if there is a jiggle .npy file in the checkpoint dir for at least 5
+    jiggle_file = os.path.join(checkpoint_dir, "*4_jiggles*.npy")
+    jiggle_files = glob.glob(jiggle_file)
+    if len(jiggle_files) == 0:
+        return False, False, ""
+    # Try to get extra_str from jiggle files
+    extra_str = jiggle_files[0].split("4_jiggles_")[1]
+    # Remove everything after .
+    extra_str = extra_str.split(".npy")[0]
+    return False, True, extra_str
+
 def get_ensemble_workflow(circ_name: str, tol: float) -> list:
     # workflow = gpu_workflow(tol, f"{circ_name}_{tol}_{timestep}")
     checkpoint_dir = f"{base_checkpoint_dir}/{circ_name}_{tol}/"
     err_thresh = 10 ** (-1 * tol)
     extra_err_thresh = err_thresh * 0.01
-    small_block_size = 3
-    block_size = 4
+    # small_block_size = 3
+    block_size = 3
 
     slow_partitioner_passes = [
-        ScanPartitioner(block_size=small_block_size),
         ScanPartitioner(block_size=block_size),
-        # ScanPartitioner(block_size=(small_block_size + 2)),
     ]
     create_ensemble_pass = CreateEnsemblePass(
             success_threshold=err_thresh, 
@@ -49,16 +70,16 @@ def get_ensemble_workflow(circ_name: str, tol: float) -> list:
             checkpoint_extra_str=""
     )
 
-    create_ensemble_pass_2 = CreateEnsemblePass(
-            success_threshold=err_thresh, 
-            use_calculated_error=False, 
-            num_circs=NUM_UNIQUE_CIRCS,
-            num_random_ensembles=0,
-            solve_exact_dists=True,
-            sort_by_t=True,
-            checkpoint_extra_str="",
-            save_as_scan=True
-    )
+    # create_ensemble_pass_2 = CreateEnsemblePass(
+    #         success_threshold=err_thresh, 
+    #         use_calculated_error=False, 
+    #         num_circs=NUM_UNIQUE_CIRCS,
+    #         num_random_ensembles=0,
+    #         solve_exact_dists=True,
+    #         sort_by_t=True,
+    #         checkpoint_extra_str="",
+    #         save_as_scan=True
+    # )
 
     synthesis_pass = LEAPSynthesisPass2(
         store_partial_solutions=True,
@@ -70,7 +91,7 @@ def get_ensemble_workflow(circ_name: str, tol: float) -> list:
     )
 
     jiggle_pass = JiggleEnsemblePass(success_threshold=err_thresh, 
-                                  num_circs=10000, 
+                                  num_circs=2000, 
                                   use_ensemble=True,
                                   use_calculated_error=False,
                                   checkpoint_extra_str="",
@@ -79,26 +100,21 @@ def get_ensemble_workflow(circ_name: str, tol: float) -> list:
                                   do_u3_perturbation=True)
 
     leap_workflow = [
-        FixAnglesPass(10),
+        FixAnglesPass(15),
         UnFixTPass(),
         CheckpointRestartPass(checkpoint_dir, 
                                 default_passes=slow_partitioner_passes),
         ForEachBlockPass(
             [
-                ForEachBlockPass(
-                    [
-                        synthesis_pass,
-                        FixAnglesPass(10, run_scan_sols=True),
-                        ConvertToZXZXZSimple(),
-                        WriteQasmPass()
-                    ],
-                    allocate_error=True,
-                ),
-                create_ensemble_pass_2,
+                synthesis_pass,
+                FixAnglesPass(tol * 2 + 2, run_scan_sols=True),
+                ConvertToZXZXZSimple(group=False),
+                WriteQasmPass(write=False),
                 NumericalTReductionPass(
-                    full_loops=2,
+                    full_loops=3,
                     success_threshold=err_thresh,
                     use_calculated_error=True),
+                FixAnglesPass(tol * 2 + 2, run_scan_sols=True),
                 ToU3Pass(ensemble=True, group=True),
                 FixGlobalPhasePass(),
             ],
@@ -108,6 +124,8 @@ def get_ensemble_workflow(circ_name: str, tol: float) -> list:
         create_ensemble_pass,
         jiggle_pass,
         CleanupBlockFiles(),
+        CheckEnsembleQualityPass(True),
+        GenerateProbabilityPass()
     ]
     return leap_workflow
 
@@ -115,23 +133,20 @@ def get_ensemble_workflow(circ_name: str, tol: float) -> list:
 def get_final_workflow(circ_name: str, tol: float) -> WorkflowLike | None:
     # Check if already finished
     checkpoint_dir = f"{base_checkpoint_dir}/{circ_name}_{tol}/"
-    final_file = os.path.join(checkpoint_dir, "ensemble_final_rand_inds.npy")
-    if os.path.exists(final_file):
-        print(f"Already finished {circ_name}:{tol}!", flush=True)
+    print(f"Checkpoint Dir: {checkpoint_dir}", flush=True)
+    finished, jiggle_finished, extra_str = check_if_finished(circ_name, tol)
+    if finished:
+        print(f"Already finished {circ_name} {tol}", flush=True)
         return None
-    # Check if there is a .npy file in the checkpoint dir
-    jiggle_file = f"{checkpoint_dir}/*.npy"
-    jiggle_files = glob.glob(jiggle_file)
-    if len(jiggle_files) == 0:
-        print(f"Jiggle Pass is not completed yet for {circ_name}:{tol}!", 
-              flush=True)
+    if not jiggle_finished:
+        print(f"Jiggle not finished {circ_name} {tol}", flush=True)
         return get_ensemble_workflow(circ_name, tol)
     jiggle_pass = JiggleEnsemblePass()
     workflow = [
         CheckpointRestartPass(checkpoint_dir, 
                                 default_passes=[]),
         jiggle_pass, # To reload jiggled unitaries
-        CheckEnsembleQualityPass(False),
+        CheckEnsembleQualityPass(True),
         GenerateProbabilityPass()
     ]
     return workflow
@@ -176,34 +191,33 @@ def find_file(circ_name: str, block_num: str) -> tuple[str, str]:
         return circ_name, circ_file
     circ_file = f"bad_blocks/{circ_name}.qasm"
     if not os.path.exists(circ_file):
-        raise Exception("File not found")
+        raise Exception(f"File not found for {circ_name}: {block_num}")
 
     return circ_name, circ_file
 
-
+includes = ["QITE"]
 def get_circ_data(circ_name: str, block_num: str | int, tol: float) -> list[tuple[str, str, float]]:
     # Categorize circs into different categories and run them
-
+    if tol == -1.0:
+        tols = [3.0, 5.0]
+    else:
+        tols = [tol]
     if circ_name == "all_probs":
         # Get all the circ names, block_nums and tols which have a .npy file
         # but no ensemble_final.qasms file
         circ_data = []
         print("Finding all circ data", flush=True)
         for dir in os.listdir(base_checkpoint_dir):
-            final_file = os.path.join(base_checkpoint_dir, dir, 
-                                      "ensemble_final_rand_inds.npy")
-            if os.path.exists(final_file):
-                continue
-            jiggle_file = os.path.join(base_checkpoint_dir, dir, "*.npy")
-            jiggle_files = glob.glob(jiggle_file)
-            if len(jiggle_files) == 0:
-                continue
             parts = dir.split("_")
-            circ_name = parts[0]
-            block_num = parts[1]
+            block_num = parts[-2]
+            tol = float(parts[-1])
+            circ_name = "_".join(parts[:-2])
             circ_name, circ_file = find_file(circ_name, block_num)
-            tol = float(parts[2])
-            circ_data.append((circ_name, circ_file, tol))
+            finished, jiggle_finished, _ = check_if_finished(circ_name, tol)
+            # print(f"Checking {circ_name} {block_num} {tol} {finished} {jiggle_finished}", flush=True)
+            if not finished and jiggle_finished:
+                for tol in tols:
+                    circ_data.append((circ_name, circ_file, tol))
         return circ_data
     
     else:
@@ -215,17 +229,22 @@ def get_circ_data(circ_name: str, block_num: str | int, tol: float) -> list[tupl
             block_nums = [file.split('_')[-1].split('.')[0] for file in all_circ_files]
             circ_data = []
             for i, block_num in enumerate(block_nums):
+                name, circ_file = find_file(circ_name, block_num)
                 circ_file = all_circ_files[i]
-                circ_data.append((f"{circ_name}_{block_num}", circ_file, tol))
+                for tol in tols:
+                    circ_data.append((name, circ_file, tol))
             return circ_data
         else:
             circ_name, circ_file = find_file(circ_name, block_num)
-            return [(circ_name, circ_file, tol)]
+            circ_data = []
+            for tol in tols:
+                circ_data.append((circ_name, circ_file, tol))
+            return circ_data
 
 if __name__ == '__main__':
     circ_name = argv[1]
     block_num = argv[2] if len(argv) > 2 else ""
-    tol = float(argv[3]) if len(argv) > 3 else 0.0
+    tol = float(argv[3]) if len(argv) > 3 else -1.0
     circ_data = get_circ_data(circ_name, block_num, tol)
     print(circ_data)
     get_shortest_circuits(circ_data)

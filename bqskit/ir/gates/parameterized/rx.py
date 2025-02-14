@@ -5,6 +5,8 @@ import numpy as np
 import numpy.typing as npt
 
 from bqskit.ir.gates.qubitgate import QubitGate
+from bqskit.ir.gates.constant.h import HGate
+from bqskit.ir.gates.parameterized.rz import RZGate
 from bqskit.qis.unitary.differentiable import DifferentiableUnitary
 from bqskit.qis.unitary.optimizable import LocallyOptimizableUnitary
 from bqskit.qis.unitary.unitary import RealVector
@@ -85,29 +87,5 @@ class RXGate(
 
     @staticmethod
     def is_rx(unitary: UnitaryMatrix, verbose: bool = False) -> float:
-        
-        top_left = unitary[0, 0]
-        if np.allclose(top_left, 0 + 0j):
-            # Assert that off-diagonal elements are 1j or -1j
-            a = np.allclose(unitary[0, 1], 1j) or np.allclose(unitary[0, 1], -1j)
-            b = np.allclose(unitary[1, 0], unitary[0, 1])
-            return a and b
-        else:
-            # global phase removes complex part of top-left
-            global_phase = top_left / np.abs(top_left)
-            # Calculate potential thetas
-            theta = np.arccos(np.abs(top_left)) * 2
-            # Check rest of unitary
-            cos = np.cos(theta / 2) * global_phase
-            sin_1 = -1j * np.sin(theta / 2) * global_phase
-            sin_2 = -1 * sin_1 # Same theta could be represented by -sin
-            if verbose:
-                print("Global Phase: ", global_phase)
-                print("Theta: ", theta)
-                print("Cos: ", cos)
-                print("Sin: ", sin_1)
-                print("Sin_2: ", sin_2)
-            top_right = np.allclose(unitary[0, 1], sin_1) or np.allclose(unitary[0, 1], sin_2)
-            bottom_left = np.allclose(unitary[1, 0], unitary[0, 1])
-            bottom_right = np.allclose(unitary[1, 1], cos)
-            return top_right and bottom_left and bottom_right
+        rz_unitary = HGate().get_unitary() @ unitary @ HGate().get_unitary()
+        return RZGate.is_rz(rz_unitary)

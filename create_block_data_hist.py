@@ -1,6 +1,7 @@
 from bqskit.ir.circuit import Circuit
 from sys import argv
 from bqskit.compiler.compiler import Compiler
+from bqskit.passes import ScanPartitioner, ExtendBlockSizePass, CheckpointRestartPass, ForEachBlockPass
 # Generate a super ensemble for some error bounds
 
 from util import AnalyzeBlockPass, WriteQasmPass, MakeHistogramPass
@@ -14,10 +15,7 @@ import pandas as pd
 
 checkpoint_dir = "block_histograms/"
 
-includes = ["qft", "adder"]
-
-
-def get_shortest_circuits(circ_name: str) -> list[Circuit]:
+def partition(circ_name: str) -> None:
     circ = load_circuit(circ_name)
 
     print("Original Gate Counts: ", circ.gate_counts, flush=True)
@@ -34,21 +32,9 @@ def get_shortest_circuits(circ_name: str) -> list[Circuit]:
         ExtendBlockSizePass(),
     ]
 
-    fast_partitioner_passes = [
-        QuickPartitioner(block_size=small_block_size),
-        ExtendBlockSizePass(),
-        QuickPartitioner(block_size=big_block_size),
-        ExtendBlockSizePass(),
-    ]
-
-    if circ.num_qudits > 20:
-        partitioner_passes = fast_partitioner_passes
-    else:
-        partitioner_passes = slow_partitioner_passes
-
     leap_workflow = [
         CheckpointRestartPass(checkpoint_dir, 
-                                default_passes=partitioner_passes),
+                                default_passes=slow_partitioner_passes),
         ForEachBlockPass(
             [
                 MakeHistogramPass(),
@@ -57,9 +43,8 @@ def get_shortest_circuits(circ_name: str) -> list[Circuit]:
         MakeHistogramPass(),
     ]
     num_workers = 128
-    compiler = Compiler(num_workers=num_workers)
-    # target = circ.get_unitary()
-    out_circ, data = compiler.compile(circ, workflow=leap_workflow, request_data=True)
+    compiler = Compiler(num_workers=3)
+    compiler.compile(circ, workflow=leap_workflow, request_data=True)
     return 
 
 def get_csv_data(file_name: str) -> list:
@@ -72,45 +57,40 @@ def get_data(file_name: str) -> tuple[list, list, list, list]:
         data = pickle.load(f)
     return data['2Q Count'], data['Depth'], data['Free Params'], data['Widths']
     
-def create_small_block_histogram():
+def create_small_block_histogram(circ_name = ""):
+    dirs = glob.glob(f"block_histograms/{circ_name}*")
+    print(dirs)
+    if len(dirs) == 0:
+        return
     all_data = {}
     all_data["2Q Count"] = []
     all_data["Depth"] = []
     all_data["Free Params"] = []
     all_data["Widths"] = []
-    for folder_name in os.listdir(checkpoint_dir):
-        run = False
-        for inc in includes:
-            if folder_name.startswith(inc):
-                run = True
-        if not run:
-            continue
-        folder_path = os.path.join(checkpoint_dir, folder_name)
+    for folder_path in dirs:
         if os.path.isdir(folder_path):
             data_files = glob.glob(os.path.join(folder_path, 'block*.data'))
             for data_file in data_files:
                 counts, depths, params, widths = get_data(data_file)
+                print("File: ", data_file)
+                print("Total Counts: ", len(counts))
                 all_data["2Q Count"].extend(counts)
                 all_data["Depth"].extend(depths)
                 all_data["Free Params"].extend(params)
                 all_data["Widths"].extend(widths)
     
-    MakeHistogramPass.create_histogram(all_data, 'small_block_histograms.png')
+    MakeHistogramPass.create_histogram(all_data, f'{circ_name}_small_block_histograms.png')
     
-def create_large_block_histogram():
+def create_large_block_histogram(circ_name = ""):
+    dirs = glob.glob(f"block_histograms/{circ_name}*")
+    if len(dirs) == 0:
+        return
     all_data = {}
     all_data["2Q Count"] = []
     all_data["Depth"] = []
     all_data["Free Params"] = []
     all_data["Widths"] = []
-    for folder_name in os.listdir(checkpoint_dir):
-        run = False
-        for inc in includes:
-            if folder_name.startswith(inc):
-                run = True
-        if not run:
-            continue
-        folder_path = os.path.join(checkpoint_dir, folder_name)
+    for folder_path in dirs:
         if os.path.isdir(folder_path):
             data_file = os.path.join(folder_path, 'data.data')
             counts, depths, params, widths = get_data(data_file)
@@ -119,7 +99,7 @@ def create_large_block_histogram():
             all_data["Free Params"].extend(params)
             all_data["Widths"].extend(widths)
     
-    MakeHistogramPass.create_histogram( all_data,  'large_block_histograms.png')
+    MakeHistogramPass.create_histogram( all_data,  f'{circ_name}_large_block_histograms.png')
 
 def create_ratio_histogram(full_checkpoint_dir: str):
     all_data = {}
@@ -145,9 +125,10 @@ def create_ratio_histogram(full_checkpoint_dir: str):
 
 if __name__ == '__main__':
     global target
-    # circ_name = argv[1]
-    # get_shortest_circuits(circ_name)
-    # create_large_block_histogram()
-    cliff_t_dir = "/home/jkalloor/bqskit/block_checkpoints_clifft"
-    nisq_dir = "/home/jkalloor/bqskit/bqskit/block_checkpoints_nisq_0"
-    create_ratio_histogram(cliff_t_dir)
+    circ_name = argv[1]
+    # partition(circ_name)
+    create_small_block_histogram(circ_name)
+    create_large_block_histogram(circ_name=circ_name)
+    # cliff_t_dir = "/home/jkalloor/bqskit/block_checkpoints_clifft"
+    # nisq_dir = "/home/jkalloor/bqskit/bqskit/block_checkpoints_nisq_0"
+    # create_ratio_histogram(cliff_t_dir)

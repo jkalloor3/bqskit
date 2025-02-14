@@ -85,11 +85,11 @@ def get_ensemble_workflow(circ_name: str, tol: float) -> WorkflowLike:
                 FixGlobalPhasePass(),
             ],
             allocate_error=True,
-            skip_file="ensemble_0_.qasms"
+            skip_file="ensemble_5_.qasms"
         ),
         create_ensemble_pass,
+        jiggle_pass,
         CleanupBlockFiles(),
-        jiggle_pass
     ]
     return leap_workflow
 
@@ -188,7 +188,10 @@ def find_file(circ_name: str, block_num: str) -> tuple[str, str]:
 
 def get_circ_data(circ_name: str, block_num: str | int, tol: float) -> list[tuple[str, str, float]]:
     # Categorize circs into different categories and run them
-
+    if tol == -1.0:
+        tols = [0.5, 1.0, 3.0]
+    else:
+        tols = [tol]
     if circ_name == "all_probs":
         # Get all the circ names, block_nums and tols which have a .npy file
         # but no ensemble_final.qasms file
@@ -202,7 +205,8 @@ def get_circ_data(circ_name: str, block_num: str | int, tol: float) -> list[tupl
             circ_name, circ_file = find_file(circ_name, block_num)
             finished, jiggle_finished, _ = check_if_finished(circ_name, tol)
             if not finished and jiggle_finished:
-                circ_data.append((circ_name, circ_file, tol))
+                for tol in tols:
+                    circ_data.append((circ_name, circ_file, tol))
         return circ_data
     
     else:
@@ -214,17 +218,22 @@ def get_circ_data(circ_name: str, block_num: str | int, tol: float) -> list[tupl
             block_nums = [file.split('_')[-1].split('.')[0] for file in all_circ_files]
             circ_data = []
             for i, block_num in enumerate(block_nums):
+                name, circ_file = find_file(circ_name, block_num)
                 circ_file = all_circ_files[i]
-                circ_data.append((f"{circ_name}_{block_num}", circ_file, tol))
+                for tol in tols:
+                    circ_data.append((name, circ_file, tol))
             return circ_data
         else:
             circ_name, circ_file = find_file(circ_name, block_num)
-            return [(circ_name, circ_file, tol)]
+            circ_data = []
+            for tol in tols:
+                circ_data.append((circ_name, circ_file, tol))
+            return circ_data
 
 if __name__ == '__main__':
     circ_name = argv[1]
     block_num = argv[2] if len(argv) > 2 else ""
-    tol = float(argv[3]) if len(argv) > 3 else 0.0
+    tol = float(argv[3]) if len(argv) > 3 else -1.0
     circ_data = get_circ_data(circ_name, block_num, tol)
     print(circ_data)
     get_shortest_circuits(circ_data)

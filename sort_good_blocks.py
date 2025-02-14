@@ -2,24 +2,31 @@ import os
 from bqskit.ir import Circuit
 from bqskit.ir.gates import CNOTGate
 from sys import argv
-from bqskit.passes import ScanPartitioner, ForEachBlockPass, ExtractMeasurements
+from bqskit.passes import ScanPartitioner, ExtractMeasurements, ExtendBlockSizePass, ForEachBlockPass, UnfoldPass
 from util import WriteQasmPass
 from bqskit.compiler import Compiler
 from bqskit import enable_logging
 import time
 import glob
+# from pathlib import Path
+import pickle
 
 # enable_logging(True)
 
 block_save_dir = "/pscratch/sd/j/jkalloor/bqskit/block_qasms_{circ_name}/"
+partitioned_circ_save_file = "/pscratch/sd/j/jkalloor/bqskit/partitioned_circs/{circ_name}.pickle"
 
-compiler = Compiler(num_workers=128)
+compiler = Compiler(num_workers=1)
 
 def partition_workflow(circ_name: str):
     return [
-    ExtractMeasurements(),
+    # ExtractMeasurements(),
+    ScanPartitioner(3),
+    ExtendBlockSizePass(3),
     ScanPartitioner(8),
+    ExtendBlockSizePass(3),
     ForEachBlockPass([
+        UnfoldPass(),
         WriteQasmPass(block_save_dir.format(circ_name=circ_name),
                       write=True)
     ])
@@ -37,23 +44,28 @@ def sort_blocks(circ_name: str, good_output_folder, bad_output_folder):
         if filename.endswith('.qasm'):
             file_path = os.path.join(save_dir, filename)
             circuit = Circuit.from_file(file_path)
+            print(circuit.num_qudits, file_path)
+            qasm_str = open(file_path, 'r').read()
             block_num = filename.split('.')[0].split('_')[-1]
 
-            cnot_count = circuit.count(CNOTGate())
+            # cnot_count = circuit.count(CNOTGate())
+            cnot_count = qasm_str.count('cx')
             output_filename = f"{circ_name}_{block_num}.qasm"
             if cnot_count > 25:
                 output_path = os.path.join(good_output_folder, output_filename)
             else:
                 output_path = os.path.join(bad_output_folder, output_filename)
-            circuit.save(output_path)
-            os.unlink(file_path)
+            # circuit.save(output_path)
+            # Move file to new file path
+            os.rename(file_path, output_path)
+            # os.unlink(file_path)
             time.sleep(1)
     
     # Delete block_save_dir
     os.rmdir(block_save_dir.format(circ_name=circ_name))
 
-circ_types = ["mult*"]
-input_folder = f"/pscratch/sd/j/jkalloor/bqskit/ensemble_benchmarks_new"
+circ_types = ["*qae11*"]
+input_folder = f"/pscratch/sd/j/jkalloor/bqskit/qce23*"
 good_output_folder = 'good_blocks'
 bad_output_folder = 'bad_blocks'
 job_ids = []
@@ -65,6 +77,7 @@ for circ_type in circ_types:
         job_ids.append((name, process_files(name, file)))
 
 for name, job_id in job_ids:
-    compiler.result(job_id)
+    out_circ = compiler.result(job_id)
     print("Finished: ", name, flush=True)
-    sort_blocks(name, good_output_folder, bad_output_folder)
+    # sort_blocks(name, good_output_folder, bad_output_folder)
+    pickle.dump(out_circ, open(partitioned_circ_save_file.format(circ_name=name), 'wb'))

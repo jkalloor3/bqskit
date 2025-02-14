@@ -176,17 +176,20 @@ class ConvertToZXZXZ(BasePass):
             checkpoint_data_file = data["checkpoint_data_file"]
             pickle.dump(data, open(checkpoint_data_file, "wb"))
 class ConvertToZXZXZSimple(BasePass):
-    def run_circuit(self, circuit: Circuit) -> None:
+
+    def __init__(self, group: bool = False) -> None:
+        self.group = group
+
+    def run_circuit(self, circuit: Circuit, group: bool = False) -> None:
         # Group Single Qudit Gates
-        GroupSingleQuditGatePass.group(circuit)
+        if group:
+            GroupSingleQuditGatePass.group(circuit)
         # For each CircuitGate, replace with correspond ZXZXZ
         cg_ops = []
         pts = []
         for cycle, op in circuit.operations_with_cycles(reverse=True):
-            if isinstance(op.gate, CircuitGate):
-                circ = op.gate._circuit
-                if op.num_params >= 3:
-                    circ = ZXZXZDecomposition.run_zxzxz_decomp(circ)
+            if op.num_params >= 2:
+                circ = ZXZXZDecomposition.run_zxzxz_decomp_circ(utry=op.get_unitary())
                 cg_ops.append(Operation(CircuitGate(circ), op.location, circ.params))
                 pts.append(CircuitPoint(cycle, op.location[0]))
 
@@ -204,7 +207,7 @@ class ConvertToZXZXZSimple(BasePass):
         scan_sols: list[tuple[Circuit, float]] = data["scan_sols"]
         for circ, _ in scan_sols:
             # orig_gate_count = circ.gate_counts
-            self.run_circuit(circ)
+            self.run_circuit(circ, self.group)
             # print("ZXZXZPass: ", orig_gate_count, circ.gate_counts, flush=True)
             # global_phase_correction = target.get_target_correction_factor(circ.get_unitary())
             # final_dist = cost.calc_cost(circ, data.target)
