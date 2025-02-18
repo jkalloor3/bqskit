@@ -19,7 +19,7 @@ from .perturb_hamiltonian import HamiltonianNoisePass
 from .ensemble_leap import EnsembleLeap
 from .ensemble_zxzxz import EnsembleZXZXZ
 from .ensemble_scan import EnsembleScanningGateRemovalPass
-from .check_ensemble_quality import CheckEnsembleQualityPass
+from .check_ensemble_quality import *
 from .jiggle_scans import JiggleScansPass
 from .jiggle_ensemble import JiggleEnsemblePass
 from .ensemble import CreateEnsemblePass

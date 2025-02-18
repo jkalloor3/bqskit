@@ -2,7 +2,7 @@ from bqskit.ir.circuit import Circuit
 from .fix_global_phase import fix_phase
 from bqskit.qis import UnitaryMatrix
 from pathlib import Path
-import pickle
+from multiprocessing import shared_memory
 from itertools import chain
 import numpy as np
 import os
@@ -12,7 +12,7 @@ from bqskit.ir.lang.qasm2 import OPENQASM2Language
 from .distance import frobenius_cost, normalized_frob_cost
 import multiprocessing as mp
 
-from .gg import gg_gate_def
+from .gg import gg_gate_def, GridSynthGate
 
 base_bqskit_dir = "/pscratch/sd/j/jkalloor/bqskit"
 good_block_dir = f"{base_bqskit_dir}/good_blocks"
@@ -22,6 +22,16 @@ base_checkpoint_dir = f"{base_bqskit_dir}/block_checkpoints_final_paper"
 qlang = OPENQASM2Language(gate_defs=[("gg", gg_gate_def)])
 
 NUM_UNIQUE_CIRCS = 250
+
+def count_params(circ: Circuit) -> int:
+    """
+    Count the number of parameters in a circuit.
+    GG gates have 3 params when in realiyt they have 1.
+    """
+    num_ggs = circ.count(GridSynthGate())
+    num_params = circ.num_params
+    num_params -= num_ggs * 2
+    return num_params
 
 def stack_padding(it: list[np.ndarray], vertical: bool = True) -> np.ndarray:
     max_width = max(a.shape[1] for a in it)
@@ -63,25 +73,53 @@ def create_single_jiggled_ensemble(circ_params: tuple[Circuit, np.ndarray],
             ens.append(new_circ)
     return ens
 
+def creat_single_unitary(circ: Circuit, param: np.ndarray, target: UnitaryMatrix) -> tuple[UnitaryMatrix, float]:
+    utry = circ.get_unitary(param)
+    gp_correction = target.get_target_correction_factor(utry)
+    utry = utry * gp_correction
+    cost_1 = normalized_frob_cost(utry, target)
+    return (utry, cost_1)
+
+
 def create_jiggled_unitaries(circ_params: tuple[Circuit, np.ndarray], 
-                                   target: UnitaryMatrix = None, phase_fix: bool = False,
-                                   add_cost: bool = False, verbose: bool = False) -> list[tuple[UnitaryMatrix]] | list[tuple[UnitaryMatrix, float]]:
+                                   target: UnitaryMatrix = None) -> list[tuple[UnitaryMatrix]] | list[tuple[UnitaryMatrix, float]]:
     circ, params = circ_params
     ens = []
-    if verbose:
-        print("Params Shape: ", params.shape, "Circuit Params: ", circ.num_params, flush=True)
+    correct = target is not None
+    # print("Params Shape: ", params.shape, "Circuit Params: ", circ.num_params, flush=True)
     for param in params.tolist():
         utry = circ.get_unitary(param)
-        if phase_fix:
+        if correct:
             gp_correction = target.get_target_correction_factor(utry)
             utry = utry * gp_correction
-        if add_cost:
             cost_1 = normalized_frob_cost(utry, target)
             ens.append((utry, cost_1))
         else:
             ens.append(utry)
+    # print("Ens Size: ", len(ens), flush=True)
     return ens
 
+def create_jiggled_unitaries_shm(circ_ind: tuple[Circuit, int], shm_name: str, shm_shape: tuple[int, int, int],target: UnitaryMatrix = None) -> list[tuple[UnitaryMatrix]] | list[tuple[UnitaryMatrix, float]]:
+    existing_shm = shared_memory.SharedMemory(name=shm_name)
+    shared_array = np.ndarray(shm_shape, dtype=np.float64, buffer=existing_shm.buf)
+    circ, param_ind = circ_ind
+    params: np.ndarray = shared_array[param_ind]
+    ens = []
+    correct = target is not None
+    # avg_cost = 0
+    # print("Params Shape: ", params.shape, "Circuit Params: ", circ.num_params, flush=True)
+    for param in params.tolist():
+        utry = circ.get_unitary(param)
+        if correct:
+            gp_correction = target.get_target_correction_factor(utry)
+            utry = utry * gp_correction
+            cost_1 = normalized_frob_cost(utry, target)
+            # avg_cost += cost_1 / len(params)
+            ens.append((utry, cost_1))
+        else:
+            ens.append(utry)
+    existing_shm.close()
+    return ens
 
 
 def create_jiggled_ensemble(circ_params: list[tuple[Circuit, np.ndarray]]) -> list[Circuit]:
@@ -93,6 +131,14 @@ def create_jiggled_ensemble_mp(circ_params: list[tuple[Circuit, np.ndarray]]) ->
     with mp.Pool(processes=5) as pool:
         ensemble = pool.map(create_single_jiggled_ensemble, circ_params)
     return list(chain.from_iterable(ensemble))
+
+
+def load_jiggled_ensemble_separate(file_name: str, jiggle_file_name: str) -> tuple[list[Circuit], np.ndarray]:
+    circs = load_ensemble(file_name)
+    print("Num Circs: ", len(circs), flush=True)
+    params: np.ndarray = np.load(jiggle_file_name)
+    print("Params Shape: ", params.shape, flush=True)
+    return circs, params
 
 def load_jiggled_ensemble(file_name: str, jiggle_file_name: str) -> list[tuple[Circuit, np.ndarray]]:
     circs = load_ensemble(file_name)
@@ -192,10 +238,10 @@ def load_compiled_block_circuits(circ_name: int,
 
     if target is None:
         print("Returning just Circuits", flush=True)
-        with mp.Pool(processes=128) as pool:
+        with mp.Pool(processes=os.cpu_count()) as pool:
             ens: list[list[Circuit]] = pool.map(create_single_jiggled_ensemble, circ_params)
     else:
-        with mp.Pool(processes=128) as pool:
+        with mp.Pool(processes=os.cpu_count()) as pool:
             params = list(zip(circ_params, [target] * len(circ_params), [True] * len(circ_params), [True] * len(circ_params)))
             ens: list[list[tuple[Circuit, UnitaryMatrix, float]]] = pool.starmap(create_single_jiggled_ensemble, 
                                                                                 params)
@@ -219,14 +265,11 @@ def get_unitary_vec(circ: Circuit) -> np.ndarray[np.float128]:
     return circ.get_unitary().get_flat_vector()
 
 
-def get_block_names(circ_name: str) -> list[str]:
-    good_circ_files = glob.glob(f"{good_block_dir}/{circ_name}_*.qasm")
-    bad_circ_files = glob.glob(f"{bad_block_dir}/{circ_name}_*.qasm")
+def get_block_names(circ_name: str, extra: str= "") -> list[str]:
+    good_circ_files = glob.glob(f"{good_block_dir}{extra}/{circ_name}_*.qasm")
+    bad_circ_files = glob.glob(f"{bad_block_dir}{extra}/{circ_name}_*.qasm")
     all_circ_files = good_circ_files + bad_circ_files
 
-    if len(all_circ_files) == 0:
-        print("No blocks found for circ", circ_name, flush=True)
-        return True, True
     block_nums = [file.split('_')[-1].split('.')[0] for file in all_circ_files]
     return block_nums
 
@@ -263,6 +306,7 @@ def check_if_finished(circ_name: str,
     if len(all_circ_files) == 0:
         print("No blocks found for circ", circ_name, flush=True)
         return True, True
+    
     block_nums = [file.split('_')[-1].split('.')[0] for file in all_circ_files]
     # Check if all blocks have been processed
     ret_1 = True

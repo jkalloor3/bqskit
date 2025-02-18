@@ -23,7 +23,10 @@ good_instantiation_options = {
     'method': 'minimization'
 }
 
-base_checkpoint_dir = "block_checkpoints_final_paper_clifft/"
+extra = ""
+base_checkpoint_dir = f"block_checkpoints_final_paper_clifft{extra}/"
+good_block_folder = f"good_blocks{extra}/"
+bad_block_folder = f"bad_blocks{extra}/"
 NUM_UNIQUE_CIRCS = 250
 
 def check_if_finished(circ_name: str, tol: float) -> tuple[bool, bool, str]:
@@ -49,9 +52,9 @@ def check_if_finished(circ_name: str, tol: float) -> tuple[bool, bool, str]:
     extra_str = extra_str.split(".npy")[0]
     return False, True, extra_str
 
-def get_ensemble_workflow(circ_name: str, tol: float) -> list:
+def get_ensemble_workflow(circ_name: str, tol: float, num_processes: int = 1) -> list:
     # workflow = gpu_workflow(tol, f"{circ_name}_{tol}_{timestep}")
-    checkpoint_dir = f"{base_checkpoint_dir}/{circ_name}_{tol}/"
+    checkpoint_dir = os.path.join(base_checkpoint_dir, f"{circ_name}_{tol}")
     err_thresh = 10 ** (-1 * tol)
     extra_err_thresh = err_thresh * 0.01
     # small_block_size = 3
@@ -70,17 +73,6 @@ def get_ensemble_workflow(circ_name: str, tol: float) -> list:
             checkpoint_extra_str=""
     )
 
-    # create_ensemble_pass_2 = CreateEnsemblePass(
-    #         success_threshold=err_thresh, 
-    #         use_calculated_error=False, 
-    #         num_circs=NUM_UNIQUE_CIRCS,
-    #         num_random_ensembles=0,
-    #         solve_exact_dists=True,
-    #         sort_by_t=True,
-    #         checkpoint_extra_str="",
-    #         save_as_scan=True
-    # )
-
     synthesis_pass = LEAPSynthesisPass2(
         store_partial_solutions=True,
         success_threshold = extra_err_thresh,
@@ -91,7 +83,7 @@ def get_ensemble_workflow(circ_name: str, tol: float) -> list:
     )
 
     jiggle_pass = JiggleEnsemblePass(success_threshold=err_thresh, 
-                                  num_circs=2000, 
+                                  num_circs=10000, 
                                   use_ensemble=True,
                                   use_calculated_error=False,
                                   checkpoint_extra_str="",
@@ -123,31 +115,31 @@ def get_ensemble_workflow(circ_name: str, tol: float) -> list:
         ),
         create_ensemble_pass,
         jiggle_pass,
-        CleanupBlockFiles(),
-        CheckEnsembleQualityPass(True),
-        GenerateProbabilityPass()
+        # CleanupBlockFiles(),
+        CheckEnsembleQualityPass(True, shm_percentage=(1.0 / num_processes)),
+        GenerateProbabilityPass(shm_percentage=(1.0 / num_processes)),
     ]
     return leap_workflow
 
 
-def get_final_workflow(circ_name: str, tol: float) -> WorkflowLike | None:
+def get_final_workflow(circ_name: str, tol: float, num_processes: int = 1) -> WorkflowLike | None:
     # Check if already finished
-    checkpoint_dir = f"{base_checkpoint_dir}/{circ_name}_{tol}/"
+    checkpoint_dir = os.path.join(base_checkpoint_dir, f"{circ_name}_{tol}")
     print(f"Checkpoint Dir: {checkpoint_dir}", flush=True)
-    finished, jiggle_finished, extra_str = check_if_finished(circ_name, tol)
+    finished, jiggle_finished, _ = check_if_finished(circ_name, tol)
     if finished:
         print(f"Already finished {circ_name} {tol}", flush=True)
         return None
     if not jiggle_finished:
         print(f"Jiggle not finished {circ_name} {tol}", flush=True)
-        return get_ensemble_workflow(circ_name, tol)
+        return get_ensemble_workflow(circ_name, tol, num_processes)
     jiggle_pass = JiggleEnsemblePass()
     workflow = [
         CheckpointRestartPass(checkpoint_dir, 
                                 default_passes=[]),
         jiggle_pass, # To reload jiggled unitaries
-        CheckEnsembleQualityPass(True),
-        GenerateProbabilityPass()
+        CheckEnsembleQualityPass(True, shm_percentage=(1.0 / num_processes)),
+        GenerateProbabilityPass(shm_percentage=(1.0 / num_processes))
     ]
     return workflow
 
@@ -158,12 +150,15 @@ def get_shortest_circuits(circ_data: list[tuple[str, str, float]]) -> list[Circu
     Args:
         circ_data: list of tuples of the form (circ_name, circ_file, tol)
     '''
+
+    num_processes = len(circ_data)
+    print(f"Num Processes: {num_processes}", flush=True)
     workflows = [
-        get_final_workflow(circ_name, tol)
+        get_final_workflow(circ_name, tol, num_processes)
         for circ_name, _, tol in circ_data
     ]
 
-    num_workers = 128
+    num_workers = os.cpu_count()
     compiler = Compiler(num_workers=num_workers)
     
     workflow_ind = 0
@@ -186,16 +181,15 @@ def get_shortest_circuits(circ_data: list[tuple[str, str, float]]) -> list[Circu
 def find_file(circ_name: str, block_num: str) -> tuple[str, str]:
     circ_name = f"{circ_name}_{block_num}"
 
-    circ_file = f"good_blocks/{circ_name}.qasm"
+    circ_file = f"{good_block_folder}/{circ_name}.qasm"
     if os.path.exists(circ_file):
         return circ_name, circ_file
-    circ_file = f"bad_blocks/{circ_name}.qasm"
+    circ_file = f"{bad_block_folder}/{circ_name}.qasm"
     if not os.path.exists(circ_file):
         raise Exception(f"File not found for {circ_name}: {block_num}")
 
     return circ_name, circ_file
 
-includes = ["QITE"]
 def get_circ_data(circ_name: str, block_num: str | int, tol: float) -> list[tuple[str, str, float]]:
     # Categorize circs into different categories and run them
     if tol == -1.0:
@@ -223,8 +217,8 @@ def get_circ_data(circ_name: str, block_num: str | int, tol: float) -> list[tupl
     else:
         if block_num == "all_blocks":
             # Get all blocks
-            good_circ_files = glob.glob(f"good_blocks/{circ_name}_*.qasm")
-            bad_circ_files = glob.glob(f"bad_blocks/{circ_name}_*.qasm")
+            good_circ_files = glob.glob(f"{good_block_folder}/{circ_name}_*.qasm")
+            bad_circ_files = glob.glob(f"{bad_block_folder}/{circ_name}_*.qasm")
             all_circ_files = good_circ_files + bad_circ_files
             block_nums = [file.split('_')[-1].split('.')[0] for file in all_circ_files]
             circ_data = []

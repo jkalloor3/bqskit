@@ -28,7 +28,7 @@ from bqskit.utils.math import dot_product
 from bqskit.runtime import get_runtime
 
 import os
-from .common import store_jiggled_ensemble, load_jiggled_ensemble, create_jiggled_unitaries
+from .common import (store_jiggled_ensemble, count_params, load_ensemble)
 from .gg import GridSynthGate, gg_gate_def, MIN_EPSILON
 from .distance import normalized_gp_frob_cost
 
@@ -37,7 +37,6 @@ _logger = logging.getLogger(__name__)
 frob_cost = GPNormalizedFrobeniusCostGenerator()
 
 lang = get_language("qasm")
-
 class  JiggleEnsemblePass(BasePass):
     """Converts single-qubit general unitary gates to U3 Gates."""
     num_jiggles = 0
@@ -277,7 +276,7 @@ class  JiggleEnsemblePass(BasePass):
         # new_un = circ.get_unitary()
         # print("Initial Dist: ", normalized_gp_frob_cost(new_un, target), dist, flush=True)
 
-        num_params = circ.num_params
+        num_params = count_params(circ)
 
         int_thresh = ceil(-1 * np.log10(self.success_threshold / num_params)) + 1
         max_op_dist = (self.success_threshold / num_params / 10) 
@@ -303,12 +302,7 @@ class  JiggleEnsemblePass(BasePass):
                     #     print("Bad GridsynthGate", op.params, flush=True)
 
         # This ensures that qasm will be decoded the same way later
-        new_un = circ.get_unitary()
-        # print("Post Replace Dist: ", normalized_gp_frob_cost(new_un, target), flush=True)
         circ_final: Circuit =  lang.decode(lang.encode(circ), gate_defs = [("gg", gg_gate_def)])
-        # new_un = circ_final.get_unitary()
-        # print("Post Decode Dist: ", normalized_gp_frob_cost(new_un, target), flush=True)
-        # print("Final Gate Counts: ", circ_final.gate_counts, flush=True)
         num_tasks = ceil(num_circs / 40)
         circs_per_task = ceil(num_circs / num_tasks)
         # print("Num Circs", num_circs, "Num Tasks", num_tasks, "Circs Per Task", circs_per_task, flush=True)
@@ -337,53 +331,32 @@ class  JiggleEnsemblePass(BasePass):
         checkpoint_dir = data["checkpoint_dir"]
         ensemble_file_name = os.path.join(checkpoint_dir, "ensemble_{ind}_{extra}.qasms")
         jiggle_file_name = os.path.join(checkpoint_dir, "ensemble_{ind}_jiggles_{extra}.npy")
-        final_ens_file = os.path.join(checkpoint_dir, "ensemble_final.qasms")
+        
+        start_ens_ind = 0
+        jiggle_file = jiggle_file_name.format(ind=start_ens_ind, extra=self.checkpoint_extra_str)
 
-        if os.path.exists(final_ens_file):
-            print("Already Finished Jiggle", flush=True)
+        if os.path.exists(jiggle_file):
+            # Check if ensemble has been loaded
+            while os.path.exists(jiggle_file):
+                start_ens_ind += 1
+                jiggle_file = jiggle_file_name.format(ind=start_ens_ind, extra=self.checkpoint_extra_str)
+
+        if start_ens_ind >= 5:
+            print("Finished Jiggle Ensemble Pass", flush=True)
             return
 
         if self.use_calculated_error:
-            # print("OLD", self.success_threshold)
             self.success_threshold = self.success_threshold * data.get("error_percentage_allocated", 1)
-            # print("NEW", self.success_threshold)
-        
-        # print("Success Threshold", self.success_threshold, flush=True)
-        
-        ens_ind = 0
-        ens_file = ensemble_file_name.format(ind=ens_ind, extra=self.checkpoint_extra_str)
-        jiggle_file = jiggle_file_name.format(ind=ens_ind, extra=self.checkpoint_extra_str)
-        ensemble_unitaries = []
 
-        if os.path.exists(jiggle_file):
-            # Load the ensemble from the checkpoint
-            while os.path.exists(jiggle_file):
-                circ_params: list[tuple[Circuit, np.ndarray]] = load_jiggled_ensemble(ens_file, jiggle_file)
-                jiggled_unitaries = await get_runtime().map(create_jiggled_unitaries, circ_params, 
-                                                  target=data.target, 
-                                                  add_cost = True, 
-                                                  phase_fix=True)
-                jiggled_unitaries: list[tuple[UnitaryMatrix, float]] = list(itertools.chain.from_iterable(jiggled_unitaries))
-                dists = [jiggled_unitaries[i][1] for i in range(len(jiggled_unitaries))]
-                ensemble_unitaries.append(jiggled_unitaries)
-                ens_ind += 1
-                ens_file = ensemble_file_name.format(ind=ens_ind, extra=self.checkpoint_extra_str)
-                jiggle_file = jiggle_file_name.format(ind=ens_ind, extra=self.checkpoint_extra_str)
-                print("Avg Dist Post Jiggle Load: ", np.mean(dists), flush=True)
-                # print("Num Circs: ", len(jiggled_circs), flush=True)
-            print("Ensemble Size", [len(ens) for ens in ensemble_unitaries], flush=True)
-            print("Finished Jiggle Ensemble Pass", flush=True)
-            data["ensemble_unitaries"] = ensemble_unitaries
-            return
+        # Reload ensembles
+        ensembles = {}
+        for i in range(start_ens_ind, 5):
+            ens_file = ensemble_file_name.format(ind=i, extra=self.checkpoint_extra_str)
+            print("Loading Ensemble", ens_file, flush=True)
+            ensembles[i] = load_ensemble(ens_file)
 
-        if not self.use_ensemble:
-            # Use the original circuit as circuit
-            data["ensemble"] = [[circuit]]
-
-        print("Number of ensembles", len(data["ensemble"]), flush=True)
-        # all_circ_params = []
-
-        for ens_ind, scan_sols in enumerate(data["ensemble"]):
+        for ens_ind in range(start_ens_ind, 5):
+            scan_sols = ensembles[ens_ind]
             print("Number of SCAN SOLS", len(scan_sols), flush=True)
             # For each params come up with nth root of num_circs number of extra params
             circuits = scan_sols
@@ -399,27 +372,16 @@ class  JiggleEnsemblePass(BasePass):
                                                          target=data.target, 
                                                          num_circs = ceil(self.num_circs / len(circuits))
                                                         )
-            # all_circ_params.append(circ_params)
+            if self.count_t:
+                counts = [count_params(c) for c, _ in circ_params]
+            else:
+                counts = [c.count(CNOTGate()) for c,_ in circ_params]
             print("Num Circ Params Post Jiggle", len(circ_params), flush=True)
-            try:
-                jiggled_unitaries: list[list[tuple[UnitaryMatrix, float]]] = await get_runtime().map(
-                    create_jiggled_unitaries, circ_params, target=data.target, 
-                    phase_fix=True, add_cost = True, verbose=(ens_ind == 4))
-                jiggled_unitaries = list(itertools.chain.from_iterable(jiggled_unitaries))
-                # print("Num Unitaries: ", len(jiggled_unitaries), flush=True)
-                dists = [jiggled_unitaries[i][1] for i in range(len(jiggled_unitaries))]
-                # dists = [self.cost.calc_cost(circ, data.target) for circ in jiggled_circs[:len(jiggled_circs):80]]
-                print("Dists Post Jiggle Combo: ", np.mean(dists), flush=True)
-                ens_file = ensemble_file_name.format(ind=ens_ind, extra=self.checkpoint_extra_str)
-                jiggle_file = jiggle_file_name.format(ind=ens_ind, extra=self.checkpoint_extra_str)
-                store_jiggled_ensemble(circ_params, ens_file, jiggle_file)
-                ensemble_unitaries.append(jiggled_unitaries)
-            except:
-                print("Error Saving", flush=True)
-                continue
+            print("Avg Count Post Jiggle", np.mean(counts), flush=True)
+            ens_file = ensemble_file_name.format(ind=ens_ind, extra=self.checkpoint_extra_str)
+            jiggle_file = jiggle_file_name.format(ind=ens_ind, extra=self.checkpoint_extra_str)
+            store_jiggled_ensemble(circ_params, ens_file, jiggle_file)
 
-        print("Number of Circs post Jiggle", [len(ens) for ens in ensemble_unitaries], flush=True)
-        data["ensemble_unitaries"] = ensemble_unitaries
         return
 
         

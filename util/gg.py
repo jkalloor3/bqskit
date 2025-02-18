@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import numpy as np
 
+from cachetools import LRUCache
 from typing import TYPE_CHECKING
 
 from bqskit.ir.circuit import Circuit, CircuitLocation
@@ -81,21 +82,33 @@ class GridSynthGate(QubitGate, CachedClass):
     _num_qudits = 1
     _num_params = 3
     _qasm_name = 'gg'
+    cache = LRUCache(maxsize=1000)
+    lru_ind = 0
 
     def get_unitary(self, params: RealVector = []) -> UnitaryMatrix:
         """Return the unitary for this gate, see :class:`Unitary` for more."""
-        t_circ = self.get_circuit(params)
         # print(params, flush=True)
-        return t_circ.get_unitary()
+        angle = round(params[0], 20)
+        epsilon = int(params[1])
+        z_twirl = int(params[2])
+        if GridSynthGate.cache.get((angle, epsilon), False):
+            un = GridSynthGate.cache[(angle, epsilon)]
+            if z_twirl == 1:
+                un = ZGate().get_unitary() @ un @ ZGate().get_unitary()
+        else:
+            t_circ = self.get_circuit(params)
+            un = t_circ.get_unitary()
+            GridSynthGate.cache[(angle, epsilon)] = un
+
+        return un
 
     def get_circuit(self, params: RealVector = []) -> Circuit:
         # self.check_parameters(params)
-        angle = params[0]
+        angle = round(params[0], 20)
         epsilon = int(params[1])
         z_twirl = int(params[2])
         # If Z twirl is 0, no twirl
-        # print("Angle: ", angle, "Epsilon: ", epsilon, "Z twirl: ", z_twirl, flush=True)
-        t_str = get_approx_t_str(angle, int(epsilon))
+        t_str = get_approx_t_str(angle, epsilon)
         # If Z twirl is 1, add a Z gate
         if z_twirl == 1:
             t_str = "Z" + t_str + "Z"

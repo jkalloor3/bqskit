@@ -19,7 +19,7 @@ import numpy as np
 import os
 import pickle
 
-from util import normalized_gp_frob_cost
+from util import normalized_gp_frob_cost, count_params
 
 from .common import load_ensemble, store_ensemble
 
@@ -426,26 +426,17 @@ class CreateEnsemblePass(BasePass):
         """Perform the pass's operation, see :class:`BasePass` for more."""
         print("Running Ensemble Pass on block", data.get("block_num", -1), flush=True)
         checkpoint_dir = data["checkpoint_dir"]
-        file_name = f"{checkpoint_dir}/ensemble_0_{self.checkpoint_extra_str}.qasms"
-        jiggle_file_name = f"{checkpoint_dir}/ensemble_0_jiggles_{self.checkpoint_extra_str}.npy"
-
-        if os.path.exists(jiggle_file_name):
-            print("Already Jiggled, skipping loading")
-            return
-        
+        _file_name = "{checkpoint_dir}/ensemble_{ind}_.qasms"
+        start_ens_ind = 0
+        file_name = _file_name.format(checkpoint_dir=checkpoint_dir, ind=start_ens_ind)
         if os.path.exists(file_name):
-            # Load the ensemble from the checkpoint
-            ensembles = []
             while os.path.exists(file_name):
-                new_ens = load_ensemble(file_name)
-                avg_count = np.mean([circ.num_params for circ in new_ens])
-                print("Avg Count", avg_count, flush=True)
-                ensembles.append(new_ens)
-                file_name = f"{checkpoint_dir}/ensemble_{len(ensembles)}_{self.checkpoint_extra_str}.qasms"
+                start_ens_ind += 1
+                file_name = _file_name.format(checkpoint_dir=checkpoint_dir, ind=start_ens_ind)
             print(f"File Name: {file_name} does not exist", flush=True)
-            print("Finished Create Ensemble", flush=True)
-            data["ensemble"] = ensembles
-            return
+            if start_ens_ind >= 5:
+                print("Finished Create Ensemble", flush=True)
+                return
         
         print(f"File Name: {file_name} does not exist", flush=True)
 
@@ -460,38 +451,34 @@ class CreateEnsemblePass(BasePass):
             
         approx_circs, pts, dists, _, _ = self.parse_data(circuit, block_data)        
         all_ensembles: list[list[Circuit]] = await self.assemble_circuits(circuit, approx_circs, pts, dists=dists, target=data.target)
-
-        min_params = np.inf
-        min_ind = 0
-
-        for i, all_circs in enumerate(all_ensembles):
-            all_circs = sorted(all_circs, key=lambda x: x.num_params)
-            avg_params = np.mean([circ.num_params for circ in all_circs])
-            if avg_params < min_params:
-                min_ind = i
-            if all_circs is not None:
-                data["ensemble"].append(all_circs)
         
         if len(all_ensembles) == 0:
             _logger.error("No ensembles found!!!!")
             return
         
-        if self.save_as_scan:
-            # Pick the 30 circuits with the lowest number of parameters
-            all_circs = all_ensembles[min_ind]
-            all_circs = all_circs[:30]
-            dists = [normalized_gp_frob_cost(circ.get_unitary(), data.target) for circ in all_circs]
-            scan_sols = list(zip(all_circs, dists))
-            data["scan_sols"] = scan_sols
-            data.pop("ensemble")
-            return
+        # if self.save_as_scan:
+
+        #     min_params = np.inf
+        #     min_ind = 0
+
+        #     for i in range(start_ens_ind, all_ensembles):
+        #         all_circs = all_ensembles[i]
+        #         all_circs = sorted(all_circs, key=lambda x: x.num_params)
+        #         avg_params = np.mean([circ.num_params for circ in all_circs])
+        #         if avg_params < min_params:
+        #             min_ind = i
+        #     # Pick the 30 circuits with the lowest number of parameters
+        #     all_circs = all_ensembles[min_ind]
+        #     all_circs = all_circs[:30]
+        #     dists = [normalized_gp_frob_cost(circ.get_unitary(), data.target) for circ in all_circs]
+        #     scan_sols = list(zip(all_circs, dists))
+        #     data["scan_sols"] = scan_sols
+        #     data.pop("ensemble")
+        #     return
 
         if "checkpoint_dir" in data:
             # Store ensembles separately
             checkpoint_dir = data["checkpoint_dir"]
-            for i, ens in enumerate(data["ensemble"]):
-                store_ensemble(ens, f"{checkpoint_dir}/ensemble_{i}_{self.checkpoint_extra_str}.qasms")
-        
-        return
-
-        
+            for i in range(start_ens_ind, len(all_ensembles)):
+                ens = all_ensembles[i]
+                store_ensemble(ens, _file_name.format(checkpoint_dir=checkpoint_dir, ind=i))   
