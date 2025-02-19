@@ -2,7 +2,7 @@ import time
 import subprocess
 import os
 import glob
-from util import check_if_finished
+from util import get_block_names
 
 
 sleep_time = 0.05
@@ -12,21 +12,21 @@ file_name = 'job.sh'
 
 header = """#!/bin/bash -l
 #SBATCH -q regular
-#SBATCH -A m4141_g
-#SBATCH -C gpu
-#SBATCH --time=06:55:00
+#SBATCH -A m4141
+#SBATCH -C cpu
+#SBATCH --time=09:55:00
 #SBATCH -N 1
 #SBATCH --signal=B:USR1@1
-#SBATCH --output=./slurm_logs/{file}/{circ}/{tol}_tol_block_size
+#SBATCH --output=./slurm_logs/{file}_tket/{circ}/{tol}_tol_block_size
 
 module load conda
 conda activate /global/common/software/m4141/ensemble_env_2
-echo "python {file}.py {circ} {timestep} {tol}"
-python {file}.py {circ} {timestep} {tol}
+echo "python {file}.py {circ} {timestep} {tol} _tket"
+python {file}.py {circ} {timestep} {tol} _tket
 """
 
 cliff_t = True
-# cliff_t = False
+cliff_t = False
 
 if __name__ == '__main__':
     file = "get_ensemble_final_block"
@@ -36,21 +36,26 @@ if __name__ == '__main__':
     # file = "initial_optimize"
     
     # Get all circs
-    # dirs = ["ensemble_benchmarks", "qce23_qfactor_benchmarks"]
-    dirs = ["QITE_8"]
+    dirs = ["ensemble_benchmarks", "qce23_qfactor_benchmarks"]
+    # dirs = ["QITE_8"]
     # dirs = ["ham_sim_qasm"]
-    circs = []
+    trial_circs = []
     for dir in dirs:
         files = glob.glob(f"{dir}/*.qasm")
-        circs.extend([file.split('/')[-1].split(".")[0] for file in files])
-    # circs = ["adder9"]
+        trial_circs.extend([file.split('/')[-1].split(".")[0] for file in files])
 
-    # circs = ["shor_12"]
-    # circs = ["good_blocks", "bad_blocks", "ham_sim_qasm", "QITE_8"]
-    # circs = ["all_probs"]
+    circs = []
+    circs_to_partition = []
+    for circ in trial_circs:
+        blocks = get_block_names(circ, extra="_tket")
+        if len(blocks) == 0:
+            circs_to_partition.append(circ)
+        else:
+            circs.append(circ)
+    
+    print("Circs to partition: ", circs_to_partition)
 
-    tols = [3.0, 5.0]
-    # tols = [1]
+    tols = [-1.0]
     skips = ["vqe", "heisenberg_3", "tf"]
     for circ in circs:
         timesteps = ["all_blocks"]
