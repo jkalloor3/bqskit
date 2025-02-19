@@ -23,7 +23,7 @@ good_instantiation_options = {
     'method': 'minimization'
 }
 
-extra = ""
+extra = "_tket"
 base_checkpoint_dir = f"block_checkpoints_final_paper_clifft{extra}/"
 good_block_folder = f"good_blocks{extra}/"
 bad_block_folder = f"bad_blocks{extra}/"
@@ -158,7 +158,7 @@ def get_shortest_circuits(circ_data: list[tuple[str, str, float]]) -> list[Circu
         for circ_name, _, tol in circ_data
     ]
 
-    num_workers = os.cpu_count()
+    num_workers = min(os.cpu_count(), 250)
     compiler = Compiler(num_workers=num_workers)
     
     workflow_ind = 0

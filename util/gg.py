@@ -3,8 +3,9 @@ from __future__ import annotations
 
 import numpy as np
 
-from cachetools import LRUCache
+# from multiprocessing import shared_memory, Lock
 from typing import TYPE_CHECKING
+from cachetools import LRUCache
 
 from bqskit.ir.circuit import Circuit, CircuitLocation
 from bqskit.ir.gates import (IdentityGate, ZGate, SGate, SdgGate, 
@@ -65,6 +66,53 @@ def get_approx_t_str(angle: float, precision: int) -> str:
     # print("Angle: ", angle, "Num: ", num, "Den: ", den)
     return approximate_rz_direct(num, den, precision)[0]
 
+# class SharedLRUCache:
+#     def __init__(self, size=10):
+#         self.size = size
+#         self.lock = Lock()  # Prevent race conditions
+
+#     def connect_to_cache(self, base_name: str):
+#         # Connect to shared memory for keys and values
+#         self.shm_keys = shared_memory.SharedMemory(name=base_name + "_keys")
+#         self.shm_values = shared_memory.SharedMemory(name=base_name + "_values")
+
+#         size = self.size
+#         self.keys = np.ndarray((size, 2), dtype=np.float64, buffer=self.shm_keys.buf)
+#         self.values = np.ndarray((size, 2, 2), dtype=np.complex128, buffer=self.shm_values.buf)
+
+#     def create_cache(self, base_name: str):
+#         # Create shared memory for keys and values
+#         size = self.size
+
+#         self.shm_keys = shared_memory.SharedMemory(name=base_name + "_keys", create=True, size= size * np.dtype(np.float64).itemsize * 2)
+#         self.shm_values = shared_memory.SharedMemory(name=base_name + "_values", create=True, size=size * np.dtype(np.complex128).itemsize * 2 * 2)
+        
+#         self.keys = np.ndarray((size, 2), dtype=np.float64, buffer=self.shm_keys.buf)
+#         self.values = np.ndarray((size, 2, 2), dtype=np.complex128, buffer=self.shm_values.buf)
+
+#         self.keys.fill(0)
+#         self.values.fill(0)
+
+#     def put(self, key: tuple[float, int], value: UnitaryMatrix):
+#         idx = hash(key) % self.size
+#         self.keys[idx] = key
+#         self.values[idx] = value.numpy
+
+#     def get(self, key: tuple[float, int], default = None):
+#         idx = hash(key) % self.size
+#         if np.allclose(self.keys[idx], key, rtol=0, atol=1e-16):
+#             return UnitaryMatrix(self.values[idx])
+#         else:
+#             return default
+
+#     def close(self):
+#         self.shm_keys.close()
+#         self.shm_values.close()
+
+#     def unlink(self):
+#         self.shm_keys.unlink()
+#         self.shm_values.unlink()
+
 class GridSynthGate(QubitGate, CachedClass):
     """
     A gate representing an arbitrary rotation around the Z axis.
@@ -82,8 +130,27 @@ class GridSynthGate(QubitGate, CachedClass):
     _num_qudits = 1
     _num_params = 3
     _qasm_name = 'gg'
-    cache = LRUCache(maxsize=1000)
+    cache = LRUCache(maxsize=10)
     lru_ind = 0
+
+    @staticmethod
+    def create_cache(base_name: str):
+        # print("Creating cache: ", base_name, flush=True)
+        # traceback.print_stack()
+        # print("", flush=True)
+        # GridSynthGate.cache.create_cache(base_name)
+        pass
+
+    @staticmethod
+    def connect_to_cache(base_name: str):
+        # GridSynthGate.cache.connect_to_cache(base_name)
+        pass
+
+    # def get_unitary(self, params: RealVector = []) -> UnitaryMatrix:
+    #     """Return the unitary for this gate, see :class:`Unitary` for more."""
+    #     t_circ = self.get_circuit(params)
+    #     un = t_circ.get_unitary()
+    #     return un
 
     def get_unitary(self, params: RealVector = []) -> UnitaryMatrix:
         """Return the unitary for this gate, see :class:`Unitary` for more."""
@@ -91,14 +158,17 @@ class GridSynthGate(QubitGate, CachedClass):
         angle = round(params[0], 20)
         epsilon = int(params[1])
         z_twirl = int(params[2])
-        if GridSynthGate.cache.get((angle, epsilon), False):
-            un = GridSynthGate.cache[(angle, epsilon)]
-            if z_twirl == 1:
-                un = ZGate().get_unitary() @ un @ ZGate().get_unitary()
-        else:
-            t_circ = self.get_circuit(params)
+        un = GridSynthGate.cache.get((angle, epsilon), None)
+        if un is None:
+            t_circ = self.get_circuit([angle, epsilon, 0])
             un = t_circ.get_unitary()
             GridSynthGate.cache[(angle, epsilon)] = un
+        else:
+            # print("Cache Hit!", flush=True)
+            pass
+
+        if z_twirl == 1:
+            un = ZGate().get_unitary() @ un @ ZGate().get_unitary()
 
         return un
 

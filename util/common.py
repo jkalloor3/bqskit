@@ -99,27 +99,29 @@ def create_jiggled_unitaries(circ_params: tuple[Circuit, np.ndarray],
     # print("Ens Size: ", len(ens), flush=True)
     return ens
 
-def create_jiggled_unitaries_shm(circ_ind: tuple[Circuit, int], shm_name: str, shm_shape: tuple[int, int, int],target: UnitaryMatrix = None) -> list[tuple[UnitaryMatrix]] | list[tuple[UnitaryMatrix, float]]:
+def create_jiggled_unitaries_shm(circ_ind: tuple[Circuit, int],
+                                 shm_name: str, 
+                                 shm_shape: tuple[int, int, int], 
+                                 target: UnitaryMatrix = None) -> tuple[UnitaryMatrix, float]:
     existing_shm = shared_memory.SharedMemory(name=shm_name)
     shared_array = np.ndarray(shm_shape, dtype=np.float64, buffer=existing_shm.buf)
     circ, param_ind = circ_ind
     params: np.ndarray = shared_array[param_ind]
-    ens = []
-    correct = target is not None
-    # avg_cost = 0
-    # print("Params Shape: ", params.shape, "Circuit Params: ", circ.num_params, flush=True)
-    for param in params.tolist():
+    orig_unitary = circ.get_unitary()
+    avg_unitary = np.zeros_like(orig_unitary)
+    avg_dist = 0.0
+    for i, param in enumerate(params.tolist()):
         utry = circ.get_unitary(param)
-        if correct:
-            gp_correction = target.get_target_correction_factor(utry)
-            utry = utry * gp_correction
-            cost_1 = normalized_frob_cost(utry, target)
-            # avg_cost += cost_1 / len(params)
-            ens.append((utry, cost_1))
-        else:
-            ens.append(utry)
+        gp_correction = target.get_target_correction_factor(utry)
+        utry: UnitaryMatrix = utry * gp_correction
+        cost_1 = normalized_frob_cost(utry, target)
+        avg_unitary += utry.numpy
+        avg_dist += cost_1
+
     existing_shm.close()
-    return ens
+    avg_unitary = avg_unitary / len(params)
+    avg_dist = avg_dist / len(params)
+    return avg_unitary, avg_dist
 
 
 def create_jiggled_ensemble(circ_params: list[tuple[Circuit, np.ndarray]]) -> list[Circuit]:

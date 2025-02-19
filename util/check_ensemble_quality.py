@@ -4,7 +4,7 @@ from typing import Any
 
 from bqskit.compiler.passdata import PassData
 from bqskit.compiler.basepass import BasePass
-from multiprocessing import shared_memory
+from multiprocessing import cpu_count, shared_memory
 from math import ceil
 from bqskit.ir.gates import CNOTGate, TGate, TdgGate
 from bqskit.ir import Circuit
@@ -13,7 +13,6 @@ from bqskit.qis import UnitaryMatrix
 from bqskit.runtime import get_runtime
 import os
 import time
-import itertools
 import shutil
 from util.common import load_jiggled_ensemble_separate, create_jiggled_unitaries_shm, count_params
 
@@ -27,49 +26,59 @@ NUM_FINAL_CIRCS = 4000
 NUM_UNIQUE_CIRCS = 250
 # MAX_SENDABLE_PARAMS = 150
 MAX_PARAMS_PER_CIRC = 80
-# Set to 32GB
-MAX_SHM_SIZE = 32 * 1024 * 1024 * 1024  # 32GB
+# Set to 16GB
+MAX_SHM_SIZE = 16 * 1024 * 1024 * 1024  # 16GB
 
 
-async def calculate_unitaries(circuits, params: np.ndarray, target: UnitaryMatrix, shm_name: str, shm_percentage: float = 1.0) -> list[tuple[UnitaryMatrix, float]]:
+async def calculate_unitaries(circuits: list[Circuit], 
+                              params: np.ndarray, 
+                              target: UnitaryMatrix, 
+                              shm_name: str, 
+                              shm_percentage: float = 1.0) -> tuple[np.ndarray, float]:
     # Check if circ_params are too large
     assert len(circuits) == params.shape[0]
+
     # Params is of shape (num_circuits, diff_params_per_circ, params_in_circ)
     param_size = params.nbytes
-    print("Param Size", param_size, flush=True)
+    # Wil return unitaries of size num_circuits * diff_params_per_circ * (4 ** circuit.num_qubits)
+    print("Param Size (Gs)", param_size / 1024 / 1024 / 1024, flush=True)
     max_shm_size = int(MAX_SHM_SIZE * shm_percentage)
-    # Split the params to form (num_chunks, num_circuits,
-    # diff_params_per_circ /num_chunks , params_in_circ)
-    if param_size > max_shm_size:
-        # Split the params along axis 1
-        num_chunks = ceil(param_size / max_shm_size)
-        print("Num Chunks", num_chunks, flush=True)
-        # Split the params into chunks
-        chunk_params = np.array_split(params, num_chunks, axis=1)
-    else:
-        chunk_params = [params]
-
-    # print("Chunk Shapes", [x.shape for x in chunk_params], flush=True)
+    # Get num chunks
+    min_num_chunks = 8
+    param_chunks = ceil(param_size / max_shm_size)
+    # See how many of the total workers we can use
+    calc_num_chunks = ceil(250 / (256 * shm_percentage))
+    num_chunks = max(min_num_chunks, calc_num_chunks, param_chunks)
+    print("Num Chunks", num_chunks, flush=True)
+    chunk_params = np.array_split(params, num_chunks, axis=0)
+    circuit_chunks_inds = np.array_split(np.arange(len(circuits)), num_chunks, axis=0)
 
     existing_shm = shared_memory.SharedMemory(name=shm_name)
     print(f"Sending {len(chunk_params)} times", flush=True)
-    jiggled_unitaries: list[tuple[UnitaryMatrix, float]] = []
-    for circ_param_chunk in chunk_params:
+    avg_utries: list[np.ndarray[np.complex128]] = []
+    avg_dists: list[float] = []
+    for chunk_ind, circ_param_chunk in enumerate(chunk_params):
+        circuit_chunk_inds = circuit_chunks_inds[chunk_ind]
+        circuit_chunk = [circuits[i] for i in circuit_chunk_inds]
         # print("Chunk Size", shm_size, circ_param_chunk.shape, flush=True)
         shared_array = np.ndarray(circ_param_chunk.shape, dtype=np.float64, buffer=existing_shm.buf)
         shared_array[:] = circ_param_chunk[:]
         print("Wrote to Shared Memory", flush=True)
-        param_inds = np.arange(len(circuits))
-        circ_inds = list(zip(circuits, param_inds))
-        jiggled_unitaries_chunk: list[list[tuple[UnitaryMatrix, float]]] = await get_runtime().map(
-            create_jiggled_unitaries_shm , circ_inds, shm_name=shm_name, 
-            shm_shape=circ_param_chunk.shape, target=target)
-        print("Jiggled Unitaries Chunk", len(jiggled_unitaries_chunk), flush=True)
-        jiggled_unitaries_chunk = list(itertools.chain.from_iterable(jiggled_unitaries_chunk))
-        jiggled_unitaries.extend(jiggled_unitaries_chunk)
-
+        param_inds = np.arange(circ_param_chunk.shape[0])
+        circ_inds = list(zip(circuit_chunk, param_inds))
+        avg_configs: list[tuple[UnitaryMatrix, float]] = await get_runtime().map(create_jiggled_unitaries_shm , circ_inds, 
+                                shm_name=shm_name, 
+                                shm_shape=circ_param_chunk.shape,
+                                target=target)
+        print("Length of avg_configs", len(avg_configs), flush=True)
+        new_avg_utry = np.mean([x[0] for x in avg_configs], axis=0)
+        new_avg_dist = np.mean([x[1] for x in avg_configs])
+        print("New Avg Dist", new_avg_dist, flush=True)
+        avg_utries.append(new_avg_utry)
+        avg_dists.append(new_avg_dist)
+        # Get the jiggled unitaries from the shared memory
     existing_shm.close()
-    return jiggled_unitaries
+    return np.mean(avg_utries, axis=0), np.mean(avg_dists)
 
 
 class CheckEnsembleQualityPass(BasePass):
@@ -90,30 +99,27 @@ class CheckEnsembleQualityPass(BasePass):
         self.checkpoint_extra_str = checkpoint_extra_str
         self.shm_percentage = shm_percentage
 
-    def get_ensemble_data(self, ens: list[tuple[UnitaryMatrix, float]], target: UnitaryMatrix, orig_count: int) -> dict[str, Any]:
+    def get_ensemble_data(self, avg_utry: np.ndarray, 
+                          avg_dist: float, 
+                          target: UnitaryMatrix, 
+                          orig_count: int) -> dict[str, Any]:
         ensemble_data = {}
-        unitaries: list[UnitaryMatrix] = [x[0] for x in ens]
-        norm_e1s = [x[1] for x in ens]
-        print("Average Norm Epsilon: ", np.mean(norm_e1s), flush=True)
-        frob_factor = np.sqrt(unitaries[0].shape[0] * 2)
-        frob_e1s = [frob_factor * c for c in norm_e1s]
-        # norm_e1_nogps = [normalized_frob_cost(un, target) for un in unitaries[:2000]]
-        # norm_e1_2s = [norm_cost.calc_cost(c, target)for c in ens[:2000]]
-        # norm_e1_nogp_2s = [frob_cost.calc_cost(c, target)for c in ens[:2000]]
-        norm_e1 = np.mean(norm_e1s)
-        frob_e1 = np.mean(frob_e1s)
-        mean_un = np.mean(unitaries, axis=0)
+        dim = avg_utry.shape[0]
+        print("Average Norm Epsilon: ", avg_dist, flush=True)
+        frob_factor = np.sqrt(dim * 2)
+        norm_e1 = avg_dist
+        frob_e1 = avg_dist * frob_factor
+        mean_un = avg_utry
         norm_bias = normalized_frob_cost(mean_un, target)
         frob_bias = frobenius_cost(mean_un, target)
         
         # final_counts = [self.gate_func(circ) for circ in ens]
         ensemble_data["Ensemble Generation Method"] = ""
-        ensemble_data["Num Circs"] = len(ens)
+        ensemble_data["Num Circs"] = 20000
         ensemble_data[f"Orig. {self.gate_title}"] = orig_count
         # ensemble_data[f"Avg. {self.gate_title}"] = np.mean(final_counts)
         ensemble_data["Norm. Epsilon"] = norm_e1
         ensemble_data["Epsilon"] = frob_e1
-        ensemble_data["Max Epsilon"] = np.max(frob_e1s)
         ensemble_data["Norm. Bias"] = norm_bias
         ensemble_data["Bias"] = frob_bias
         norm_ratio = norm_bias / (norm_e1 * norm_e1)
@@ -155,7 +161,17 @@ class CheckEnsembleQualityPass(BasePass):
 
         shm_name = checkpoint_dir.split("/")[-1] + "_" + BASE_SHM_NAME
         print("Shared Memory Name: ", shm_name, flush=True)
-        shm = shared_memory.SharedMemory(create=True, size=MAX_SHM_SIZE * self.shm_percentage, name=shm_name)
+        shm_size = int(MAX_SHM_SIZE * self.shm_percentage)
+        try:
+            shm = shared_memory.SharedMemory(name=shm_name)
+            print("Shared Memory Exists", flush=True)
+            shm.close()
+            shm.unlink()
+        except:
+            print("Shared Memory Does Not Exist", flush=True)
+        
+        # Create new shared memory
+        shm = shared_memory.SharedMemory(create=True, size=shm_size, name=shm_name)
 
         best_ind = 0
         best_ratio = float("inf")
@@ -166,14 +182,14 @@ class CheckEnsembleQualityPass(BasePass):
             while os.path.exists(jiggle_file):
                 circuits, params = load_jiggled_ensemble_separate(ens_file, jiggle_file)
                 start = time.time()
-                jiggled_unitaries = await calculate_unitaries(circuits, 
+                avg_utry, avg_dist = await calculate_unitaries(circuits, 
                                                               params, 
                                                               target=data.target,
                                                               shm_name=shm_name,
                                                               shm_percentage=self.shm_percentage)
                 end = time.time()
                 print("Time to calculate unitaries: ", end - start, flush=True)
-                csv_dict[start_ens_ind] = self.get_ensemble_data(jiggled_unitaries, target, None)
+                csv_dict[start_ens_ind] = self.get_ensemble_data(avg_utry, avg_dist, target, None)
                 csv_dict[start_ens_ind]["Ensemble Generation Method"] = self.ensemble_names[start_ens_ind]
                 ratio = csv_dict[start_ens_ind]["Ratio"]
                 print("Ratio: ", ratio, flush=True)
@@ -201,7 +217,7 @@ class CheckEnsembleQualityPass(BasePass):
         shm.unlink()
 
         # Randomly sample 4000 circuits from the best ensemble
-        num_unitaries = len(ensemble_unitaries[best_ind])
+        num_unitaries = 20000
         if num_unitaries > NUM_FINAL_CIRCS:
             rand_inds = np.random.choice(num_unitaries, 
                                          NUM_FINAL_CIRCS, 
