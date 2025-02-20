@@ -250,7 +250,7 @@ class CheckpointRestartPass(BasePass):
         data["checkpoint_data_file"] = save_data_file
         data["checkpoint_circuit_file"] = save_circuit_file
         if not exists(join(self.checkpoint_dir, "circuit.pickle")):
-            print("Checkpoint does not exist!", flush=True)
+            print("Checkpoint does not exist!", self.checkpoint_dir, flush=True)
             await Workflow(self.default_passes).run(circuit, data)
             Path(self.checkpoint_dir).mkdir(parents=True, exist_ok=True)
             pickle.dump(circuit, open(save_circuit_file, "wb"))
@@ -258,8 +258,13 @@ class CheckpointRestartPass(BasePass):
         else:
             # Already checkpointed, restore
             _logger.info("Restoring from Checkpoint!")
-            print("RESTORING FROM CHECKPOINT", flush=True)
+            print("RESTORING FROM CHECKPOINT", self.checkpoint_dir, flush=True)
             new_circuit = pickle.load(open(save_circuit_file, "rb"))
             circuit.become(new_circuit)
             new_data = pickle.load(open(save_data_file, "rb"))
             data.update(new_data)
+            # Set checkpoint dir still
+            data["checkpoint_dir"] = self.checkpoint_dir
+            data["checkpoint_data_file"] = save_data_file
+            data["checkpoint_circuit_file"] = save_circuit_file
+

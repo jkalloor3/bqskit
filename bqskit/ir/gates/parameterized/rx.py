@@ -5,6 +5,8 @@ import numpy as np
 import numpy.typing as npt
 
 from bqskit.ir.gates.qubitgate import QubitGate
+from bqskit.ir.gates.constant.h import HGate
+from bqskit.ir.gates.parameterized.rz import RZGate
 from bqskit.qis.unitary.differentiable import DifferentiableUnitary
 from bqskit.qis.unitary.optimizable import LocallyOptimizableUnitary
 from bqskit.qis.unitary.unitary import RealVector
@@ -81,3 +83,9 @@ class RXGate(
         theta = 2 * np.arccos(a / np.sqrt(a ** 2 + b ** 2))
         theta *= -1 if b < 0 else 1
         return [theta]
+
+
+    @staticmethod
+    def is_rx(unitary: UnitaryMatrix, verbose: bool = False) -> float:
+        rz_unitary = HGate().get_unitary() @ unitary @ HGate().get_unitary()
+        return RZGate.is_rz(rz_unitary)

@@ -137,20 +137,26 @@ if __name__ == '__main__':
     circ_name = argv[1]
     block_num = argv[2]
     tol = float(argv[3])
-    num_unique_circs = int(argv[4])
     cliff = False
 
-    circ_path = load_block(circ_name, block_num, good=True)
+    circ_path = load_block(circ_name, block_num)
     initial_circ = Circuit.from_file(circ_path)
     target = UnitaryMatrix(initial_circ.get_unitary()) 
     print("Got initial circ", flush=True)
     # circs = load_compiled_block_circuits_qp(circ_name, block_num, tol, num_unique_circs)
-    circs: list[tuple[Circuit, UnitaryMatrix, float]] = load_compiled_block_circuits(circ_name, block_num, tol, num_unique_circs, target=target)
+    circs: list[Circuit] = load_compiled_block_circuits(circ_name, block_num, tol)
     qp_inds, circ_probs = load_compiled_block_circuits_qp_inds(circ_name, 
                                                                block_num, 
-                                                               tol, 
-                                                               num_unique_circs)
+                                                               tol)
     print("Num Circs: ", len(circs), flush=True)
+
+    # Pick random circuits
+    rand_circs = [circs[i] for i in [1,4,7,2]]
+    rand_uns = [c.get_unitary() for c in rand_circs]
+    rand_dists = [normalized_gp_frob_cost(target, un) for un in rand_uns]
+    print("Avg Dist: ", np.mean(rand_dists))
+
+    exit(0)
 
     if len(circs) == 0:
         print("No circuits found")
@@ -165,12 +171,6 @@ if __name__ == '__main__':
     dists_qp = [circs[i][2] for i in qp_inds]
     mean_dists_qp = np.sum([j * circ_probs[i] for i,j in enumerate(dists_qp)])
     print("Avg Dist QP: ", mean_dists_qp)
-    # uns = [c.get_unitary() for c in bqskit_circs]
-    # with mp.Pool(processes=100) as pool:
-    #     uns = pool.map(get_unitary, bqskit_circs)
-    # frob_dists = [normalized_gp_frob_cost(un, target) for un in uns]
-    # print("Avg Norm. Dist: ", np.mean(dists))
-    # print("Avg Dist: ", np.mean(frob_dists))
     print("Original CX Count: ", initial_circ.count(CNOTGate()))
 
     opt_str = ""
@@ -260,4 +260,4 @@ if __name__ == '__main__':
     out_data["Trace Distance w/ QP"] = final_tds_qp
     out_data["TVD w/ QP"] = final_tvds_qp
     out_data["Frobenius Distance w/ QP"] = final_frobs_qp
-    json.dump(out_data, open(f"no_qp_conv_data/{circ_name}_{block_num}_{tol}_{num_unique_circs}.json", "w"))
+    json.dump(out_data, open(f"no_qp_conv_data/{circ_name}_{block_num}_{tol}.json", "w"))

@@ -10,23 +10,20 @@ from bqskit.runtime import get_runtime
 from bqskit.compiler.basepass import BasePass
 from bqskit.compiler.passdata import PassData
 import numpy as np
+from multiprocessing import shared_memory
+from .check_ensemble_quality import calculate_unitaries, NUM_FINAL_CIRCS, BASE_SHM_NAME, MAX_SHM_SIZE
+from .common import load_jiggled_ensemble_separate
 from .distance import frobenius_cost, normalized_frob_cost
 from qpsolvers import solve_ls
 import pickle
 import os
 
-
 class GenerateProbabilityPass(BasePass):
     
-    def __init__(
-        self,
-    ) -> None:
-        """
-        Construct a Instantiate Count pass and then 
+    def __init__(self, shm_percentage: float = 1.0) -> None:
+        super().__init__()
+        self.shm_percentage = shm_percentage
 
-        """
-        return
-    
     @staticmethod
     def calculate_probs(ensemble: np.ndarray, target: np.ndarray) -> np.ndarray:
         M = len(ensemble)
@@ -91,28 +88,47 @@ class GenerateProbabilityPass(BasePass):
 
         print("Running Generate Probability Pass", flush=True)
         checkpoint_dir = data["checkpoint_dir"]
+        final_ens_file = f"{checkpoint_dir}/ensemble_final.qasms"
+        final_ens_jiggle_file = f"{checkpoint_dir}/ensemble_final_jiggle.npy"
         probs_file = f"{checkpoint_dir}/ensemble_final_probs.npy"
 
-        # if os.path.exists(probs_file):
-        #     print("Already Generated Probs", flush=True)
-        #     data["final_ensemble_probs"] = np.load(probs_file)
-        #     return
+
+        if os.path.exists(probs_file):
+            print("Already calculated probabilities, skipping", flush=True)
+            return
+
+        shm_name = checkpoint_dir.split("/")[-1] + "_" + BASE_SHM_NAME
+        print("Shared Memory Name: ", shm_name, flush=True)
+        shm = shared_memory.SharedMemory(create=True, size=MAX_SHM_SIZE * self.shm_percentage, name=shm_name)
+
+        circuits, params = load_jiggled_ensemble_separate(final_ens_file, final_ens_jiggle_file)
+        best_ensemble_unitaries = await calculate_unitaries(circuits, params, 
+                                                            target=data.target,
+                                                            shm_name=shm_name,
+                                                            shm_percentage=self.shm_percentage)
         
-        best_ensemble_unitaries: list[UnitaryMatrix] = data["final_ensemble_unitaries"]
+        shm.close()
+        shm.unlink()
+        
+        if len(best_ensemble_unitaries) > NUM_FINAL_CIRCS:
+            rand_inds_file = f"{checkpoint_dir}/ensemble_final_rand_inds.npy"
+            rand_inds = np.load(rand_inds_file)
+            best_ensemble_unitaries = [best_ensemble_unitaries[i] for i in rand_inds]
+        
+        best_ensemble_unitaries: list[UnitaryMatrix] = [u for u, _ in best_ensemble_unitaries]
         best_ensemble_unitaries = np.stack([x.numpy for x in best_ensemble_unitaries])
-        # best_ensemble_unitaries: list[UnitaryMatrix] = np.array([circ.get_unitary() for circ in best_ensemble])
 
         print(f"Calculating Probs on {len(best_ensemble_unitaries)} unitaries", flush=True)
 
         if len(best_ensemble_unitaries) < 5:
-            data["final_ensemble_probs"] = [1 / len(best_ensemble_unitaries) for _ in best_ensemble_unitaries]
+            final_probs = [1 / len(best_ensemble_unitaries) for _ in best_ensemble_unitaries]
         else:
             # Now calculate the probability for this ensemble
-            data["final_ensemble_probs"] = GenerateProbabilityPass.calculate_probs(best_ensemble_unitaries, data.target)
+            final_probs = GenerateProbabilityPass.calculate_probs(best_ensemble_unitaries, data.target)
 
         print("Calculated Probabilities", flush=True)
 
         if "checkpoint_dir" in data:
-            np.save(probs_file, data["final_ensemble_probs"])
+            np.save(probs_file, final_probs)
         return
 

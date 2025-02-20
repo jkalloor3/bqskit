@@ -54,6 +54,7 @@ class ToU3Pass(BasePass):
         for cycle, op in circuit.operations_with_cycles():
             if (op.num_params >= 3 and op.radixes == (2,)):
                 params = U3Gate().calc_params(op.get_unitary())
+                # print(params, flush=True)
                 point = CircuitPoint(cycle, op.location[0])
                 circuit.replace_gate(point, U3Gate(), op.location, params)
         

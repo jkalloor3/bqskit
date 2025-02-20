@@ -4,60 +4,122 @@ from typing import Any
 
 from bqskit.compiler.passdata import PassData
 from bqskit.compiler.basepass import BasePass
+from multiprocessing import cpu_count, shared_memory
+from math import ceil
 from bqskit.ir.gates import CNOTGate, TGate, TdgGate
 from bqskit.ir import Circuit
 from bqskit.ir.opt.cost.functions import GPNormalizedFrobeniusCostGenerator, GPNormalizedFrobeniusCostGenerator
 from bqskit.qis import UnitaryMatrix
 from bqskit.runtime import get_runtime
 import os
-import itertools
+import time
 import shutil
-from util.common import load_jiggled_ensemble, create_jiggled_unitaries
+from util.common import load_jiggled_ensemble_separate, create_jiggled_unitaries_shm, count_params
 
 from .distance import frobenius_cost, normalized_frob_cost
 
-
 norm_cost = GPNormalizedFrobeniusCostGenerator()
 frob_cost = GPNormalizedFrobeniusCostGenerator()
+
+BASE_SHM_NAME = "param_arr"
+NUM_FINAL_CIRCS = 4000
+NUM_UNIQUE_CIRCS = 250
+# MAX_SENDABLE_PARAMS = 150
+MAX_PARAMS_PER_CIRC = 80
+# Set to 16GB
+MAX_SHM_SIZE = 16 * 1024 * 1024 * 1024  # 16GB
+
+
+async def calculate_unitaries(circuits: list[Circuit], 
+                              params: np.ndarray, 
+                              target: UnitaryMatrix, 
+                              shm_name: str, 
+                              shm_percentage: float = 1.0) -> tuple[np.ndarray, float]:
+    # Check if circ_params are too large
+    assert len(circuits) == params.shape[0]
+
+    # Params is of shape (num_circuits, diff_params_per_circ, params_in_circ)
+    param_size = params.nbytes
+    # Wil return unitaries of size num_circuits * diff_params_per_circ * (4 ** circuit.num_qubits)
+    print("Param Size (Gs)", param_size / 1024 / 1024 / 1024, flush=True)
+    max_shm_size = int(MAX_SHM_SIZE * shm_percentage)
+    # Get num chunks
+    min_num_chunks = 8
+    param_chunks = ceil(param_size / max_shm_size)
+    # See how many of the total workers we can use
+    calc_num_chunks = ceil(250 / (256 * shm_percentage))
+    num_chunks = max(min_num_chunks, calc_num_chunks, param_chunks)
+    print("Num Chunks", num_chunks, flush=True)
+    chunk_params = np.array_split(params, num_chunks, axis=0)
+    circuit_chunks_inds = np.array_split(np.arange(len(circuits)), num_chunks, axis=0)
+
+    existing_shm = shared_memory.SharedMemory(name=shm_name)
+    print(f"Sending {len(chunk_params)} times", flush=True)
+    avg_utries: list[np.ndarray[np.complex128]] = []
+    avg_dists: list[float] = []
+    for chunk_ind, circ_param_chunk in enumerate(chunk_params):
+        circuit_chunk_inds = circuit_chunks_inds[chunk_ind]
+        circuit_chunk = [circuits[i] for i in circuit_chunk_inds]
+        # print("Chunk Size", shm_size, circ_param_chunk.shape, flush=True)
+        shared_array = np.ndarray(circ_param_chunk.shape, dtype=np.float64, buffer=existing_shm.buf)
+        shared_array[:] = circ_param_chunk[:]
+        print("Wrote to Shared Memory", flush=True)
+        param_inds = np.arange(circ_param_chunk.shape[0])
+        circ_inds = list(zip(circuit_chunk, param_inds))
+        avg_configs: list[tuple[UnitaryMatrix, float]] = await get_runtime().map(create_jiggled_unitaries_shm , circ_inds, 
+                                shm_name=shm_name, 
+                                shm_shape=circ_param_chunk.shape,
+                                target=target)
+        print("Length of avg_configs", len(avg_configs), flush=True)
+        new_avg_utry = np.mean([x[0] for x in avg_configs], axis=0)
+        new_avg_dist = np.mean([x[1] for x in avg_configs])
+        print("New Avg Dist", new_avg_dist, flush=True)
+        avg_utries.append(new_avg_utry)
+        avg_dists.append(new_avg_dist)
+        # Get the jiggled unitaries from the shared memory
+    existing_shm.close()
+    return np.mean(avg_utries, axis=0), np.mean(avg_dists)
+
+
 class CheckEnsembleQualityPass(BasePass):
     def __init__(self, 
                  count_t: bool = False,
                  csv_name: str = "",
-                 checkpoint_extra_str: str = ""
+                 checkpoint_extra_str: str = "",
+                 shm_percentage: float = 1.0,
                  ) -> None:
         self.count_t = count_t
         self.csv_name = csv_name
         self.ensemble_names = ["Least CNOTs", "Medium CNOTs", "Valid CNOTs"]
-        self.gate_title = "T Count" if count_t else "CNOT Count"
+        for i in range(10):
+            # Default Names
+            self.ensemble_names.append(f"Random Circuits #{i}")
+        self.gate_title = "Num Params" if count_t else "CNOT Count"
         self.gate_func = lambda x: x.count(TGate()) + x.count(TdgGate()) + x.num_params * 60 if count_t else x.count(CNOTGate())
         self.checkpoint_extra_str = checkpoint_extra_str
-    
-    def get_ensemble_data(self, ens: list[tuple[UnitaryMatrix, float]], target: UnitaryMatrix, orig_count: int) -> dict[str, Any]:
+        self.shm_percentage = shm_percentage
+
+    def get_ensemble_data(self, avg_utry: np.ndarray, 
+                          avg_dist: float, 
+                          target: UnitaryMatrix, 
+                          orig_count: int) -> dict[str, Any]:
         ensemble_data = {}
-        print("In Get Ensemble Data", flush=True)
-        unitaries: list[UnitaryMatrix] = [x[0] for x in ens]
-        norm_e1s = [x[1] for x in ens]
-        print("Average Norm Epsilon: ", np.mean(norm_e1s), flush=True)
-        frob_factor = np.sqrt(unitaries[0].shape[0] * 2)
-        print("Frob Factor: ", frob_factor, flush=True)
-        frob_e1s = [frob_factor * c for c in norm_e1s]
-        # norm_e1_nogps = [normalized_frob_cost(un, target) for un in unitaries[:2000]]
-        # norm_e1_2s = [norm_cost.calc_cost(c, target)for c in ens[:2000]]
-        # norm_e1_nogp_2s = [frob_cost.calc_cost(c, target)for c in ens[:2000]]
-        norm_e1 = np.mean(norm_e1s)
-        frob_e1 = np.mean(frob_e1s)
-        mean_un = np.mean(unitaries, axis=0)
+        dim = avg_utry.shape[0]
+        print("Average Norm Epsilon: ", avg_dist, flush=True)
+        frob_factor = np.sqrt(dim * 2)
+        norm_e1 = avg_dist
+        frob_e1 = avg_dist * frob_factor
+        mean_un = avg_utry
         norm_bias = normalized_frob_cost(mean_un, target)
         frob_bias = frobenius_cost(mean_un, target)
         
         # final_counts = [self.gate_func(circ) for circ in ens]
         ensemble_data["Ensemble Generation Method"] = ""
-        ensemble_data["Num Circs"] = len(ens)
+        ensemble_data["Num Circs"] = 20000
         ensemble_data[f"Orig. {self.gate_title}"] = orig_count
         # ensemble_data[f"Avg. {self.gate_title}"] = np.mean(final_counts)
         ensemble_data["Norm. Epsilon"] = norm_e1
         ensemble_data["Epsilon"] = frob_e1
-        ensemble_data["Max Epsilon"] = np.max(frob_e1s)
         ensemble_data["Norm. Bias"] = norm_bias
         ensemble_data["Bias"] = frob_bias
         norm_ratio = norm_bias / (norm_e1 * norm_e1)
@@ -71,84 +133,105 @@ class CheckEnsembleQualityPass(BasePass):
     async def run(self, circuit: Circuit, data: PassData) -> None:
         # Check Ensemble Quality and output it to a CSV
         print("Check Ensemble Quality Pass", flush=True)
-        checkpoint_dir = data["checkpoint_dir"]
+        checkpoint_dir: str = data["checkpoint_dir"]
         final_ens_file = f"{checkpoint_dir}/ensemble_final.qasms"
         final_ens_jiggle_file = f"{checkpoint_dir}/ensemble_final_jiggle.npy"
+
+        print("Checkpoint Dir: ", checkpoint_dir, flush=True)
+        print("Starting Check Ensemble Quality Pass", flush=True)
         
         if os.path.exists(final_ens_file):
             # Load the ensemble from the checkpoint
-            circ_params: list[tuple[Circuit, np.ndarray]] = load_jiggled_ensemble(final_ens_file, 
-                                                                                  final_ens_jiggle_file)
-            best_ensemble = await get_runtime().map(create_jiggled_unitaries, circ_params, 
-                                                  target=data.target, 
-                                                  add_cost = False, 
-                                                  fix_phase=True)
-            best_ensemble: list[UnitaryMatrix] = list(itertools.chain(*best_ensemble))
-            if len(best_ensemble) > 4000:
-                rand_inds_file = f"{checkpoint_dir}/ensemble_final_rand_inds.npy"
-                if os.path.exists(rand_inds_file):
-                    rand_inds = np.load(rand_inds_file)
-                else:
-                    rand_inds = np.random.choice(len(best_ensemble), 4000, replace=False)
-                    np.save(rand_inds_file, rand_inds)
-                best_ensemble = [best_ensemble[i] for i in rand_inds]
-            data["final_ensemble_unitaries"] = best_ensemble
-            print("Check Ensemble Quality Pass", flush=True)
+            print("Already Checked!", flush=True)
             return
         
-        ensemble_unitaries: list[list[tuple[UnitaryMatrix, float]]] = data["ensemble_unitaries"]
-        print("Num Ensembles: ", len(ensemble_unitaries), flush=True)
-        print("Ensemble Lengths: ", [len(x) for x in ensemble_unitaries], flush=True)
+        # Otherwise, reload from saved files - Would have done in 
+        ensemble_file_name = os.path.join(checkpoint_dir, "ensemble_{ind}_{extra}.qasms")
+        jiggle_file_name = os.path.join(checkpoint_dir, "ensemble_{ind}_jiggles_{extra}.npy")
+        final_ens_file = os.path.join(checkpoint_dir, "ensemble_final.qasms")
+        start_ens_ind = 1
+        ens_file = ensemble_file_name.format(ind=start_ens_ind, extra=self.checkpoint_extra_str)
+        jiggle_file = jiggle_file_name.format(ind=start_ens_ind, extra=self.checkpoint_extra_str)
+        ensemble_unitaries = {}
+        ensemble_counts = {}
 
-        for i in range(3, len(ensemble_unitaries)):
-            self.ensemble_names.append(f"Random Circuits #{i-2}")
-        
         target = data.target
-        # if len(ensemble_unitaries) == 1:
-        #     csv_dict = [await self.get_ensemble_data(ensemble_unitaries[0], target, 
-        #                                              self.gate_func(circuit))]
-        # else:
-        #     csv_dict: list[dict[str, Any]] = await get_runtime().map(
-        #         self.get_ensemble_data, ensemble_unitaries, target=target, 
-        #         orig_count = self.gate_func(circuit))
-        csv_dict = []
-        for ens_un in ensemble_unitaries:
-            csv_dict.append(self.get_ensemble_data(ens_un, target, None))
+        csv_dict = {}
+        # Create Shared Memory
 
+        shm_name = checkpoint_dir.split("/")[-1] + "_" + BASE_SHM_NAME
+        print("Shared Memory Name: ", shm_name, flush=True)
+        shm_size = int(MAX_SHM_SIZE * self.shm_percentage)
+        try:
+            shm = shared_memory.SharedMemory(name=shm_name)
+            print("Shared Memory Exists", flush=True)
+            shm.close()
+            shm.unlink()
+        except:
+            print("Shared Memory Does Not Exist", flush=True)
+        
+        # Create new shared memory
+        shm = shared_memory.SharedMemory(create=True, size=shm_size, name=shm_name)
 
-        final_ratios = []
-        for i in range(len(ensemble_unitaries)):
-            csv_dict[i]["Ensemble Generation Method"] = self.ensemble_names[i]
-            final_ratios.append(csv_dict[i]["Norm. Ratio"])
+        best_ind = 0
+        best_ratio = float("inf")
+        best_count = float("inf")
 
-        # Ensemble is good if any of the final ratios is less than 10
-        data["good_ensemble"] = any([x < 10 for x in final_ratios])
+        if os.path.exists(jiggle_file):
+            # Load the ensemble from the checkpoint
+            while os.path.exists(jiggle_file):
+                circuits, params = load_jiggled_ensemble_separate(ens_file, jiggle_file)
+                start = time.time()
+                avg_utry, avg_dist = await calculate_unitaries(circuits, 
+                                                              params, 
+                                                              target=data.target,
+                                                              shm_name=shm_name,
+                                                              shm_percentage=self.shm_percentage)
+                end = time.time()
+                print("Time to calculate unitaries: ", end - start, flush=True)
+                csv_dict[start_ens_ind] = self.get_ensemble_data(avg_utry, avg_dist, target, None)
+                csv_dict[start_ens_ind]["Ensemble Generation Method"] = self.ensemble_names[start_ens_ind]
+                ratio = csv_dict[start_ens_ind]["Ratio"]
+                print("Ratio: ", ratio, flush=True)
+                count = np.mean([count_params(c) for c in circuits])
+                csv_dict[start_ens_ind]["Avg. Count"] = count
+                ensemble_counts[start_ens_ind] = count
+                print("Avg Count Post Jiggle Load: ", count, flush=True)
+                if ratio < 10:
+                    best_ind = start_ens_ind
+                    best_ratio = ratio
+                    best_count = count
+                    print("FOUND GOOD ENSEMBLE", flush=True)
+                    break
+                else:
+                    if ratio < best_ratio and count < best_count:
+                        best_ind = start_ens_ind
+                        best_ratio = ratio
+                        best_count = count
+                    # Keep Looking
+                    start_ens_ind += 1
+                    ens_file = ensemble_file_name.format(ind=start_ens_ind, extra=self.checkpoint_extra_str)
+                    jiggle_file = jiggle_file_name.format(ind=start_ens_ind, extra=self.checkpoint_extra_str)
 
-        if data["good_ensemble"]:
-            print("FOUND GOOD ENSEMBLE", flush=True)
+        shm.close()
+        shm.unlink()
 
-        # Pick best ensemble
-        best_ind = np.argmin(final_ratios)
-        # Randomly sample 2000 circuits from the best ensemble
-        best_ensemble: list[tuple[UnitaryMatrix, float]] = ensemble_unitaries[best_ind]
-        if len(best_ensemble) > 4000:
-
-            rand_inds = np.random.choice(len(best_ensemble), 4000, replace=False)
-            best_ensemble = [best_ensemble[i] for i in rand_inds]
+        # Randomly sample 4000 circuits from the best ensemble
+        num_unitaries = 20000
+        if num_unitaries > NUM_FINAL_CIRCS:
+            rand_inds = np.random.choice(num_unitaries, 
+                                         NUM_FINAL_CIRCS, 
+                                         replace=False)
             rand_inds_file = f"{checkpoint_dir}/ensemble_final_rand_inds.npy"
             np.save(rand_inds_file, rand_inds)
-            # best_ensemble = np.random.choice(best_ensemble, 2000, replace=False)
-
-        best_ensemble_unitaries = [u for u, _ in best_ensemble]
-        data["final_ensemble_unitaries"] = best_ensemble_unitaries
         
         if "checkpoint_dir" in data:
             checkpoint_data_file: str = data["checkpoint_data_file"]
             csv_file = checkpoint_data_file.replace(".data", f"{self.csv_name}.csv")
             writer = csv.DictWriter(open(csv_file, "w", newline=""), 
-                                    fieldnames=csv_dict[0].keys())
+                                    fieldnames=csv_dict[1].keys())
             writer.writeheader()
-            for row in csv_dict:
+            for row in csv_dict.values():
                 writer.writerow(row)
             # Copy best jiggled ensemble file to new file name
             best_ensemble_file_name = f"{checkpoint_dir}/ensemble_{best_ind}_{self.checkpoint_extra_str}.qasms"

@@ -128,14 +128,14 @@ from collections import Counter
 
 class MakeHistogramPass(BasePass):
 
-    def create_histogram(counts: dict[str, list], filename: str, rem_outliers = True):
+    def create_histogram(counts: dict[str, list], filename: str, rem_outs = True):
         fig, axes = plt.subplots(1, len(counts.keys()), figsize=(5 * len(counts.keys()), 5))
         i = 0
         if len(counts.keys()) == 1:
             axes = [axes]
         for label, count in counts.items():
             filtered = np.array(count)
-            if not (label == "Widths") and rem_outliers:
+            if not (label == "Widths") and rem_outs:
                 filtered = filtered[rem_outliers(filtered)]
             axes[i].hist(filtered)
             axes[i].set_ylabel(label)

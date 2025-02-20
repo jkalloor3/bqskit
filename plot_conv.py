@@ -1,6 +1,7 @@
 import os
 import json
 import sys
+import numpy as np
 import pandas as pd
 from util import load_block
 from bqskit.ir import Circuit
@@ -22,7 +23,8 @@ def plot_data(circ_name, block_num, tol) -> None:
 
     x_axis = data["Ensemble Size"]
 
-    headers = ["TVD", "Trace Distance", "Frobenius Distance"]
+    # headers = ["TVD", "Trace Distance", "Frobenius Distance"]
+    headers = ["Frobenius Distance"]
     for i, header in enumerate(headers):
         if header not in data:
             print(f"Header {header} not found in data")

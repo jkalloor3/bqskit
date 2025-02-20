@@ -78,7 +78,7 @@ class ForEachBlockPass(BasePass):
         allocate_error: bool = False,
         allocate_error_gate: Gate = CNOTGate(),
         allocate_skew_factor: int = -1,
-        check_checkpoint: bool = False,
+        skip_file: str | None = None,
     ) -> None:
         """
         Construct a ForEachBlockPass.
@@ -160,7 +160,7 @@ class ForEachBlockPass(BasePass):
         self.allocate_error_gate = allocate_error_gate
         self.allocate_skew_factor = allocate_skew_factor
         self.error_cost_gen = error_cost_gen
-        self.check_checkpoint = check_checkpoint
+        self.skip_file = skip_file
         if not callable(self.collection_filter):
             raise TypeError(
                 'Expected callable method that maps Operations to booleans for'
@@ -213,11 +213,10 @@ class ForEachBlockPass(BasePass):
         block_datas: list[PassData] = []
         block_gates = []
 
-        if self.check_checkpoint:
-            if data.get("inner_foreach_finished", False):
-                print("Skipping inner foreach", flush=True)
-                self.cleanup_checkpoint_files(checkpoint_dir, len(blocks))
-                # If the inner foreach pass has finished, we can skip this pass
+        if self.skip_file and should_checkpoint:
+            full_skip = join(checkpoint_dir, self.skip_file)
+            if exists(full_skip):
+                print("Skipping for loop", flush=True)
                 return
 
         for i, (cycle, op) in enumerate(blocks):
@@ -296,7 +295,7 @@ class ForEachBlockPass(BasePass):
             unfolded_circ = subcircuit.copy()
             unfolded_circ.unfold_all()
             # If skew factor is negative, then we are giving more error budget to blocks with fewer CNOT gates
-            skewed_gates = max(unfolded_circ.count(self.allocate_error_gate), 1) ** self.allocate_skew_factor
+            skewed_gates = max(unfolded_circ.num_params, 1) ** self.allocate_skew_factor
             block_gates.append(skewed_gates)
 
         # Assign error as percentage of block
@@ -304,7 +303,7 @@ class ForEachBlockPass(BasePass):
         if self.allocate_error:
             for i in range(len(block_datas)):
                 # Percentage is proportional to skew function
-                print("Error Percentage for Block: ", i, " is: ", block_gates[i] / total_gates * data.get("error_percentage_allocated", 1), flush=True)
+                # print("Error Percentage for Block: ", i, " is: ", block_gates[i] / total_gates * data.get("error_percentage_allocated", 1), flush=True)
                 block_datas[i]["error_percentage_allocated"] = block_gates[i] * data.get("error_percentage_allocated", 1) / total_gates 
 
         # Do the work
@@ -362,11 +361,6 @@ class ForEachBlockPass(BasePass):
         data.update_error_mul(error_sum)
         if self.calculate_error_bound:
             _logger.debug(f'New circuit error is {data.error}.')
-
-        if self.check_checkpoint:
-            data["inner_foreach_finished"] = True
-            pickle.dump(data, open(data["checkpoint_data_file"], 'wb'))
-            self.cleanup_checkpoint_files(checkpoint_dir, len(blocks))
 
         return
 

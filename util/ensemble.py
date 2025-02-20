@@ -17,6 +17,9 @@ from bqskit.ir.gates import CNOTGate
 from bqskit.qis import UnitaryMatrix
 import numpy as np
 import os
+import pickle
+
+from util import normalized_gp_frob_cost, count_params
 
 from .common import load_ensemble, store_ensemble
 
@@ -37,7 +40,8 @@ class CreateEnsemblePass(BasePass):
                  num_random_ensembles: int = 3,
                  solve_exact_dists: bool = False,
                  sort_by_t: bool = False,
-                 checkpoint_extra_str: str = "") -> None:
+                 checkpoint_extra_str: str = "",
+                 save_as_scan: bool = False) -> None:
         """
         Construct a ToU3Pass.
 
@@ -49,6 +53,7 @@ class CreateEnsemblePass(BasePass):
         self.success_threshold = success_threshold
         self.num_circs = num_circs
         self.cost = cost
+        self.hs_cost = GPNormalizedFrobeniusCostGenerator()
         self.solve_exact_dists = solve_exact_dists
         self.use_calculated_error = use_calculated_error
         self.num_random_ensembles = num_random_ensembles
@@ -62,6 +67,7 @@ class CreateEnsemblePass(BasePass):
         }
         self.sort_by_t = sort_by_t
         self.checkpoint_extra_str = checkpoint_extra_str
+        self.save_as_scan = save_as_scan
 
     async def unfold_circ(
             config_dist: tuple[list[CircuitGate], float], 
@@ -70,7 +76,7 @@ class CreateEnsemblePass(BasePass):
             locations: list[CircuitLocationLike], 
             target: UnitaryMatrix = None) -> tuple[Circuit, float]:
         
-        config, dist = config_dist
+        config, pred_dist = config_dist
         operations = [
             Operation(cg, loc, cg._circuit.params)
             for cg, loc
@@ -80,8 +86,9 @@ class CreateEnsemblePass(BasePass):
         copied_circuit.batch_replace(pts, operations)
         copied_circuit.unfold_all()
 
-        dist = frob_cost.calc_cost(copied_circuit, target)
-
+        # dist = frob_cost.calc_cost(copied_circuit, target)
+        dist = normalized_gp_frob_cost(copied_circuit.get_unitary(), target)
+        # print("Unfolded Circuit Distance: ", dist, pred_dist, flush=True)
         return copied_circuit, dist
 
     def get_random_inds(self, dists: list[list[float]], num_circs: int) -> list[list[int]]:
@@ -140,22 +147,9 @@ class CreateEnsemblePass(BasePass):
                                      size=(len(gate_count_diffs)),
                                      p=weight,
                                      replace=False)
-        
-        # print("Inds we are looking at: ", orig_inds)
-        # print("Number of psols per block: ", [len(psol_diffs[i]) for i in orig_inds], flush=True)
-        # print("Avg CNOT diffs per block: ", [np.mean(psol_diffs[i]) for i in orig_inds], flush=True)
-        # print("Avg Dists per block: ", [np.mean(psol_dists[i]) for i in orig_inds], flush=True)
-        # print("Avg Total Dist: ", sum([np.mean(psol_dists[i]) for i in orig_inds]), flush=True)
-        # print("Max Total Dist: ", sum([np.max(psol_dists[i]) for i in orig_inds]), flush=True)
-        # print("Distance Threshold: ", total_dist, flush=True)
 
         # Get all possible solutions along with their CNOT count differences
         all_valid_inds = self.BFS(orig_inds, psol_diffs, dists, total_dist)
-
-        # print("INDS: ", flush=True)
-        # print(["-".join([str(y) for y in x[0]]) for x in all_valid_inds], flush=True)
-
-        # print("NUM VALID INDS", len(all_valid_inds), flush=True)
 
         # Sort the solutions by the number of CNOTs saved
         sorted_inds = sorted(all_valid_inds, key=lambda x: x[1])
@@ -178,6 +172,7 @@ class CreateEnsemblePass(BasePass):
         # Return a list with 2 things:
         # 1. List of indices to pick (psol index for each block)
         # 2. Total distance
+        # print("Knapsakck Distances", [sorted_inds[i][2] for i in random_inds], flush=True)
         return [(sorted_inds[i][0]) for i in random_inds]
 
 
@@ -285,7 +280,7 @@ class CreateEnsemblePass(BasePass):
                 locations=locations,
                 target=target
             )
-            return [[all_circs_dists]]
+            return [[all_circs_dists[0]]]
 
         # Try to fill a knapsack with a combo of the block
         # psols that minimizes the number of CNOTs while
@@ -431,24 +426,17 @@ class CreateEnsemblePass(BasePass):
         """Perform the pass's operation, see :class:`BasePass` for more."""
         print("Running Ensemble Pass on block", data.get("block_num", -1), flush=True)
         checkpoint_dir = data["checkpoint_dir"]
-        file_name = f"{checkpoint_dir}/ensemble_0_{self.checkpoint_extra_str}.qasms"
-        jiggle_file_name = f"{checkpoint_dir}/ensemble_0_jiggles_{self.checkpoint_extra_str}.npy"
-
-        if os.path.exists(jiggle_file_name):
-            print("Already Jiggled, skipping loading")
-            return
-        
+        _file_name = "{checkpoint_dir}/ensemble_{ind}_.qasms"
+        start_ens_ind = 0
+        file_name = _file_name.format(checkpoint_dir=checkpoint_dir, ind=start_ens_ind)
         if os.path.exists(file_name):
-            # Load the ensemble from the checkpoint
-            ensembles = []
             while os.path.exists(file_name):
-                ens = load_ensemble(file_name)
-                ensembles.append(ens)
-                file_name = f"{checkpoint_dir}/ensemble_{len(ensembles)}_{self.checkpoint_extra_str}.qasms"
+                start_ens_ind += 1
+                file_name = _file_name.format(checkpoint_dir=checkpoint_dir, ind=start_ens_ind)
             print(f"File Name: {file_name} does not exist", flush=True)
-            print("Finished Create Ensemble", flush=True)
-            data["ensemble"] = ensembles
-            return
+            if start_ens_ind >= 5:
+                print("Finished Create Ensemble", flush=True)
+                return
         
         print(f"File Name: {file_name} does not exist", flush=True)
 
@@ -461,26 +449,36 @@ class CreateEnsemblePass(BasePass):
         data["scan_sols"] = []
         data["ensemble"] = []
             
-        approx_circs, pts, dists, targets, thresholds = self.parse_data(circuit, block_data)        
-        all_ensembles = await self.assemble_circuits(circuit, approx_circs, pts, dists=dists, target=data.target)
-
-        for all_circs in all_ensembles:
-            all_circs = sorted(all_circs, key=lambda x: x[0].count(CNOTGate()))
-            if len(data["scan_sols"]) == 0 and all_circs is not None:
-                data["scan_sols"].extend(all_circs)
-            if all_circs is not None:
-                data["ensemble"].append(all_circs)
-
+        approx_circs, pts, dists, _, _ = self.parse_data(circuit, block_data)        
+        all_ensembles: list[list[Circuit]] = await self.assemble_circuits(circuit, approx_circs, pts, dists=dists, target=data.target)
+        
         if len(all_ensembles) == 0:
             _logger.error("No ensembles found!!!!")
             return
+        
+        # if self.save_as_scan:
+
+        #     min_params = np.inf
+        #     min_ind = 0
+
+        #     for i in range(start_ens_ind, all_ensembles):
+        #         all_circs = all_ensembles[i]
+        #         all_circs = sorted(all_circs, key=lambda x: x.num_params)
+        #         avg_params = np.mean([circ.num_params for circ in all_circs])
+        #         if avg_params < min_params:
+        #             min_ind = i
+        #     # Pick the 30 circuits with the lowest number of parameters
+        #     all_circs = all_ensembles[min_ind]
+        #     all_circs = all_circs[:30]
+        #     dists = [normalized_gp_frob_cost(circ.get_unitary(), data.target) for circ in all_circs]
+        #     scan_sols = list(zip(all_circs, dists))
+        #     data["scan_sols"] = scan_sols
+        #     data.pop("ensemble")
+        #     return
 
         if "checkpoint_dir" in data:
             # Store ensembles separately
             checkpoint_dir = data["checkpoint_dir"]
-            for i, ens in enumerate(data["ensemble"]):
-                store_ensemble(ens, f"{checkpoint_dir}/ensemble_{i}_{self.checkpoint_extra_str}.qasms")
-        
-        return
-
-        
+            for i in range(start_ens_ind, len(all_ensembles)):
+                ens = all_ensembles[i]
+                store_ensemble(ens, _file_name.format(checkpoint_dir=checkpoint_dir, ind=i))   

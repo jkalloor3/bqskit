@@ -32,7 +32,6 @@ from bqskit.utils.typing import is_real_number
 from bqskit.utils.math import dot_product
 
 from util import normalized_frob_cost, normalized_gp_frob_cost
-from util import GenerateProbabilityPass
 
 _logger = logging.getLogger(__name__)
 

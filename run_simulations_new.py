@@ -1,7 +1,10 @@
 from bqskit.ir.circuit import Circuit
-from bqskit.ir.gates import CNOTGate
+from bqskit.ir.gates import CNOTGate, CircuitGate
 from sys import argv
 import numpy as np
+import pickle
+import seaborn as sns
+# import pandas as pd
 from itertools import chain
 
 from bqskit.ir.gates.parameterized.u3 import U3Gate
@@ -10,167 +13,145 @@ from bqskit.ir.point import CircuitPoint
 from qiskit import QuantumCircuit, transpile
 from qiskit.quantum_info import Statevector
 
-from util import load_circuit, load_compiled_circuits
-from util.distance import normalized_frob_cost, tvd, trace_distance, get_density_matrix, get_average_density_matrix
+from util import load_circuit, get_circ_block_dirs, load_compiled_block_circuits_qp_inds, load_block, load_compiled_block_circuits
+from util.distance import normalized_gp_frob_cost
+from util.fix_global_phase import fix_phase
 
 from bqskit.ext import bqskit_to_qiskit
 
 shots = 100
+partitioned_circ_save_file = "/pscratch/sd/j/jkalloor/bqskit/partitioned_circs/{circ_name}.pickle"
 
-def get_ensemble_mags(ens_size, random_states: list[np.ndarray] = None) -> tuple[list[np.ndarray[np.float64]], 
-                                                                                 list[np.ndarray[np.float64]], 
-                                                                                 np.ndarray[np.complex128] | None]:
-    global all_qcircs
-    global bqskit_circs
-    global target
+def generate_full_circuits(block_ensembles: dict, block_probs: list, block_names: list, pcirc: Circuit, ens_size: int) -> list[Circuit]:
+    # Generate ens_size random circuits
+    block_inds: list[list[int]] = []
+    for block_name, probs in block_probs.items():
+        rand_inds = np.random.choice(len(block_ensembles[block_name]), ens_size, p=probs)
+        if ens_size == 1:
+            rand_inds = [rand_inds[0]]
+        block_inds.append(rand_inds)
 
-    print(len(bqskit_circs), len(all_qcircs))
-
-    ensemble_inds: list[int] = np.random.choice(len(bqskit_circs), ens_size)
-    ensemble: list[QuantumCircuit] = [all_qcircs[i] for i in ensemble_inds]
     
-    if ensemble[0].num_qubits <= 10:
-        mean_un = np.mean(np.array([bqskit_circs[i].get_unitary().numpy for i in ensemble_inds]), axis=0)
-    else:
-        mean_un = None
+    # print("BLock Indices: ", block_inds)
+    # Now we have a list of block_inds, we need to generate the circuits
+    all_circs = []
+    for i in range(ens_size):
+        circ = pcirc.copy()
+        ind = 0
+        for cycle, op in circ.operations_with_cycles():
+            pt = CircuitPoint(cycle, op.location[0])
+            block_name = block_names[ind]
+            rand_inds = block_inds[ind]
+            ind += 1
+            assert isinstance(op.gate, CircuitGate)
+            assert isinstance(op.gate._circuit, Circuit)
+            new_block_circ = block_ensembles[block_name][rand_inds[i]]
+            assert isinstance(new_block_circ, Circuit)
+            assert op.gate._circuit.num_qudits == new_block_circ.num_qudits
+            # print(block_name, op.gate._circuit.num_qudits)
+            # dist = normalized_gp_frob_cost(new_block_circ.get_unitary(), op.get_unitary())
+            # print("Distance: ", dist)
+            circ.replace_with_circuit(pt, new_block_circ, as_circuit_gate=True)
+            # op.gate._circuit = block_ensembles[block_name][rand_inds[i]]
+            # op.params = block_ensembles[block_name][rand_inds[i]].params
+            # op._num_params = len(op.params)
+        # print(circ.get_unitary())
+        # circ.unfold_all()
+        all_circs.append(circ)
+    return all_circs
 
-    print("Avg CNOT count: ", np.mean([c.count_ops()['cx'] for c in ensemble]))
-    random_qcircs = get_random_init_state_circuits(ensemble, random_states)
-    noisy_rhos = []
-    noisy_probs = []
-    for circs in random_qcircs:
-        noisy_svs = np.array([Statevector.from_instruction(circ).data for circ in circs])
-        probs = np.array([np.abs(sv)**2 for sv in noisy_svs], dtype=np.float64)
-        avg_probs = np.mean(probs, axis=0)
-        noisy_rho = get_average_density_matrix(noisy_svs)
-        noisy_rhos.append(noisy_rho)
-        noisy_probs.append(avg_probs)
-    return noisy_rhos, noisy_probs, mean_un
 
-def get_qcirc(circ: Circuit):
-    for cycle, op in circ.operations_with_cycles():
-        if op.num_qudits == 1 and not isinstance(op.gate, U3Gate):
-            params = U3Gate().calc_params(op.get_unitary())
-            point = CircuitPoint(cycle, op.location[0])
-            circ.replace_gate(point, U3Gate(), op.location, params)
-
-    q_circ = bqskit_to_qiskit(circ)
-    return q_circ
-
-def get_random_states(num_qubits: int, num_random_states: int = 4):
-    states = []
-    for i in range(4):
-        state = np.random.randint(0, 2, num_qubits)
-        states.append(state)
-    return states
-
-def get_random_init_state_circuits(qcircs: list[QuantumCircuit], random_states: list[np.ndarray]) -> list[list[QuantumCircuit]]:
-    all_qcircs = []
-    for state in random_states:
-        circs = []
-        for qcirc in qcircs:
-            init_circ: QuantumCircuit = qcirc.copy()
-            for i in range(init_circ.num_qubits):
-                if state[i] == 1:
-                    init_circ.h(i)
-            init_circ.compose(qcirc, inplace=True)
-            circs.append(transpile(init_circ, optimization_level=0))
-        all_qcircs.append(circs)
-    return all_qcircs
-
-def aggregate_results(results: list):
-    total_dict = {}
-    for r in results:
-        # print("Result: ", r)
-        x = total_dict
-        y = r.data.meas.get_counts()
-        total_dict = {k: x.get(k, 0) + y.get(k, 0) for k in set(x) | set(y)}
-    return total_dict
 
 # Circ 
 if __name__ == '__main__':
-    global all_qcircs
-    global bqskit_circs
-    global target
-
+    block_ensembles = {}
+    block_probs = {}
+    block_names = []
     circ_type = argv[1]
 
     np.set_printoptions(precision=2, threshold=np.inf, linewidth=np.inf)
 
 
     circ_name = argv[1]
-    timestep = int(argv[2])
-    tol = int(argv[3])
-    num_unique_circs = int(argv[4])
-    cliff = bool(int(argv[5])) if len(argv) > 5 else False
+    max_tol = float(argv[2]) if len(argv) > 2 else 0.01
 
     initial_circ = load_circuit(circ_name, opt=False)
     print("Original CX Count: ", initial_circ.count(CNOTGate()))
     if initial_circ.num_qudits <= 10:
         target = initial_circ.get_unitary()
 
-    opt_str = ""
+    block_targets = {}
+    block_dirs = get_circ_block_dirs(circ_name, max_tol, False)
+    block_names = sorted([x[0] for x in block_dirs])
+    print("Block dirs: ", block_dirs)
+    print("Block names: ", block_names)
 
-    if cliff:
-        bqskit_circs = load_compiled_circuits(circ_name, tol, timestep, ignore_timestep=True, extra_str=f"_{num_unique_circs}_circ_cliff_t_final")
-    else:
-        bqskit_circs = load_compiled_circuits(circ_name, tol, timestep, ignore_timestep=True, extra_str=f"_{num_unique_circs}_circ_final_min_post{opt_str}_calc_bias")
-
-    print("LOADED CIRCUITS", flush=True)
-
-    # Store approximate solutions
-    all_utries = []
-    basic_circs = []
-    circ_files = []
-    base_excitations = []
-    noisy_excitations = []
-
-    ensemble_sizes = [1, 10, 100, 1000] #, 2000, 4000]
-    shot_ratio = max(ensemble_sizes)
-
-    # sampler = Sampler(mode=sim)
-
-    random_states = get_random_states(initial_circ.num_qudits, num_random_states=5)
-    qiskit_circ = bqskit_to_qiskit(initial_circ)
-    qiskit_circs = get_random_init_state_circuits([qiskit_circ], random_states)
-    qiskit_circs = list(chain(*qiskit_circs))
-    print("Got all circuits", flush=True)
-    svs = [Statevector.from_instruction(circ).data for circ in qiskit_circs]
-    rhos = [get_density_matrix(sv) for sv in svs]
-    print("Len of rhos: ", len(rhos))
-    true_probs = [np.abs(sv)**2 for sv in svs]
-    noisy_svs = [Statevector.from_instruction(circ).data for circ in qiskit_circs]
-    noisy_rhos = [get_density_matrix(sv) for sv in noisy_svs]
-    noisy_dists = [trace_distance(rhos[i], noisy_rho) for i,noisy_rho in enumerate(noisy_rhos)]
-    print("Noisy Distances: ", noisy_dists)
-    
-    
-    # print("Noisy Counts: ", noisy_result_dict)
-    print("Finished Running", flush=True)
-    # noisy_result_dict = noisy_result.get_counts(qiskit_circ)
-    base_excitations.append(0)
-    noisy_excitations.append(np.mean(noisy_dists))
-
-    all_qcircs = [get_qcirc(c) for c in bqskit_circs]
-    print("Got MAP", flush=True)
-
-    print("Runing PERFECT ENSEMBLES: ")
-    print(f"Base TVD: {base_excitations[0]}, Noisy TVD {noisy_excitations[0]}")
-    for j, ens_size in enumerate(ensemble_sizes):
-        final_rhos, final_probs, mean_un = get_ensemble_mags(ens_size, random_states)
-
-        print("Len of final rhos: ", len(final_rhos))
-
-        tds = [trace_distance(final_rho, rhos[i]) for i,final_rho in enumerate(final_rhos)]
-        tvds = [tvd(prob, true_probs[i]) for i,prob in enumerate(final_probs)]
-        td = np.mean(tds)
-        mean_tvd = np.mean(tvds)
-        if mean_un is not None:
-            frob_cost = normalized_frob_cost(target, mean_un)
-            print(f"Ensemble Size: {ens_size},  Trace Distance: {tds}, TVDS: {tvds}")
-            print(f"Mean Trace Distance: {td}, Mean TVD: {mean_tvd}, Frobenius Distance: {frob_cost}")
+    # Get all the circuits
+    for block_name, block_data in block_dirs:
+        bc_file = load_block(circ_name, block_name)
+        block_target = Circuit.from_file(bc_file) 
+        block_un = block_target.get_unitary()
+        block_targets[block_name] = block_un
+        if block_data[0] == 'orig':
+            block_ensembles[block_name] = [block_target]
+            block_probs[block_name] = [1]
+        elif block_data[0] == "_opt3":
+            circ_file = load_block(circ_name, block_name, extra="_opt3")
+            block_ensembles[block_name] = [Circuit.from_file(circ_file)]
+            block_probs[block_name] = [1]
         else:
-            print(f"Ensemble Size: {ens_size},  Trace Distance: {tds}, TVDS: {tvds}")
-            print(f"Mean Trace Distance: {td}, Mean TVD: {mean_tvd}")
+            print(block_name, block_data)
+            inds, probs = load_compiled_block_circuits_qp_inds(*block_data)
+            circuits = load_compiled_block_circuits(*block_data)
+            ensemble = [circuits[i] for i in inds]
+            block_ensembles[block_name] = ensemble
+            block_probs[block_name] = probs
 
 
+
+    # print("Num Circuits: ", [len(ens) for ens in block_ensembles.values()], flush=True)
+
+    # print("LOADED CIRCUITS", flush=True)
+
+    pcirc_file = partitioned_circ_save_file.format(circ_name=circ_name)
+    partitioned_circ: Circuit = pickle.load(open(pcirc_file, 'rb'))
+    # print("Partitioned Circuit: ", partitioned_circ.gate_counts)
+    # print(partitioned_circ_save_file)
+
+    ensemble_sizes = [1, 10, 20, 40, 80, 160]
+
+    ensemble_circuits = []
+    num_trials = 10
+    ensemble_costs = []
+
+    # Get avg cost
+    target = initial_circ.get_unitary()
+    for ens_size in ensemble_sizes:
+        mean_costs = []
+        print("Ensemble Size: ", ens_size, flush=True)
+        for i in range(num_trials):
+            # print("Trial: ", i, flush=True)
+            ens = generate_full_circuits(block_ensembles, block_probs, block_names, partitioned_circ, ens_size)
+            [fix_phase(c, target) for c in ens]
+            mean_un = np.mean(np.array([c.get_unitary() for c in ens]), axis=0)
+            mean_costs.append(normalized_gp_frob_cost(mean_un, target))
+        ensemble_costs.append(mean_costs)
+        print("Avg Cost: ", np.mean(mean_costs))
+    
+
+    # Plot ensemble_costs vs ensemble_sizes with mean and error bars
+    import matplotlib.pyplot as plt
+    sns.set_theme(style="whitegrid")
+    plt.figure(figsize=(10, 6))
+    ensemble_sizes = np.array(ensemble_sizes)
+    ensemble_costs = np.array(ensemble_costs)
+    ensemble_costs = np.mean(ensemble_costs, axis=1)
+    ensemble_costs_std = np.std(ensemble_costs, axis=1)
+    plt.errorbar(ensemble_sizes, ensemble_costs, yerr=ensemble_costs_std, fmt='o', capsize=5)
+    plt.xscale('log')
+    plt.xlabel('Ensemble Size')
+    plt.ylabel('Average Cost')
+    plt.title(f'Average Cost vs Ensemble Size for {circ_name}')
+    plt.grid()
+    plt.savefig(f"ensemble_costs_{circ_name}.png")
+    # plt.show()
