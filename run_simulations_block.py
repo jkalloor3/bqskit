@@ -219,30 +219,36 @@ if __name__ == '__main__':
     final_tds = []
     final_frobs = []
     final_tvds = []
-    final_tds_2 = []
-    final_frobs_2 = []
-    final_tvds_2 = []
+    final_tds_qp = []
+    final_frobs_qp = []
+    final_tvds_qp = []
+    num_trials = 10
     for j, ens_size in enumerate(ensemble_sizes):
-        final_rhos, final_probs, mean_un = get_ensemble_mags(ens_size, random_states=random_states)
-        final_rhos_qp, final_probs_qp, mean_un_qp = get_ensemble_mags_qp(ens_size, random_states=random_states)
-        # print("Len of final rhos: ", len(final_rhos))
-        tds = [trace_distance(final_rho, rhos[i]) for i,final_rho in enumerate(final_rhos)]
-        tds_2 = [trace_distance(final_rho, rhos[i]) for i,final_rho in enumerate(final_rhos_qp)]
-        tvds = [tvd(prob, true_probs[i]) for i,prob in enumerate(final_probs)]
-        tvds_2 = [tvd(prob, true_probs[i]) for i,prob in enumerate(final_probs_qp)]
-        td = np.mean(tds)
-        td_2 = np.mean(tds_2)
-        mean_tvd = np.mean(tvds)
-        mean_tvd_2 = np.mean(tvds_2)
-        final_tds.append(td)
-        final_tds_2.append(td_2)
-        final_tvds.append(mean_tvd)
-        final_tvds_2.append(mean_tvd_2)
-        frob_cost = normalized_gp_frob_cost(mean_un, target)
-        final_frobs.append(frob_cost)
-        frob_cost_2 = normalized_gp_frob_cost(mean_un_qp, target)
-        final_frobs_2.append(frob_cost_2)
-        print(f"Ensemble Size: {ens_size},  Trace Distance: {tds}, TVDS: {tvds}")
+        tds = []
+        frobs = []
+        tvds = []
+        tds_qp = []
+        frobs_qp = []
+        tvds_qp = []
+        for _ in range(num_trials):
+            final_rhos, final_probs, mean_un = get_ensemble_mags(ens_size, random_states=random_states)
+            final_rhos_qp, final_probs_qp, mean_un_qp = get_ensemble_mags_qp(ens_size, random_states=random_states)
+            # print("Len of final rhos: ", len(final_rhos))
+            tds.extend([trace_distance(final_rho, rhos[i]) for i,final_rho in enumerate(final_rhos)])
+            tds_qp.extend([trace_distance(final_rho, rhos[i]) for i,final_rho in enumerate(final_rhos_qp)])
+            tvds.extend([tvd(prob, true_probs[i]) for i,prob in enumerate(final_probs)])
+            tvds_qp.extend([tvd(prob, true_probs[i]) for i,prob in enumerate(final_probs_qp)])
+            frobs.append(normalized_gp_frob_cost(mean_un, target))
+            frobs_qp.append(normalized_gp_frob_cost(mean_un_qp, target))
+        
+        final_tds.append(tds)
+        final_tds_qp.append(tds_qp)
+        final_tvds.append(tvds)
+        final_tvds_qp.append(tvds_qp)
+        final_frobs.append(frobs)
+        final_frobs_qp.append(frobs_qp)
+        print(f"Ran Ensemble")
+        # print(f"Ensemble Size: {ens_size},  Trace Distance: {tds}, TVDS: {tvds}")
         # print(f"Mean Trace Distance: {td}, Mean TVD: {mean_tvd}, Frobenius Distance: {frob_cost}")
 
     headers = ["Ensemble Size", "Trace Distance", "TVD", "Frobenius Distance"]
@@ -251,7 +257,7 @@ if __name__ == '__main__':
     out_data["Trace Distance"] = final_tds
     out_data["TVD"] = final_tvds
     out_data["Frobenius Distance"] = final_frobs
-    out_data["Trace Distance w/ QP"] = final_tds_2
-    out_data["TVD w/ QP"] = final_tvds_2
-    out_data["Frobenius Distance w/ QP"] = final_frobs_2
+    out_data["Trace Distance w/ QP"] = final_tds_qp
+    out_data["TVD w/ QP"] = final_tvds_qp
+    out_data["Frobenius Distance w/ QP"] = final_frobs_qp
     json.dump(out_data, open(f"no_qp_conv_data/{circ_name}_{block_num}_{tol}_{num_unique_circs}.json", "w"))
