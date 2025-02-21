@@ -2,6 +2,8 @@ from bqskit.ir.circuit import Circuit
 from sys import argv
 import glob
 import os
+from multiprocessing.shared_memory import SharedMemory
+import numpy as np
 from bqskit.compiler.compiler import Compiler, WorkflowLike
 from bqskit.ir.gates import CNOTGate
 # Generate a super ensemble for some error bounds
@@ -11,7 +13,7 @@ from util import JiggleEnsemblePass, CleanupBlockFiles
 from util import  LEAPSynthesisPass2, SecondLEAPSynthesisPass
 from util import CheckEnsembleQualityPass, FixGlobalPhasePass
 from util import GenerateProbabilityPass
-from util import CreateEnsemblePass
+from util import CreateEnsemblePass, MAX_SHM_SIZE, NUM_CIRCS_PER_PROB
 
 good_instantiation_options = {
     'multistarts': 8,
@@ -23,7 +25,7 @@ good_instantiation_options = {
     'method': 'minimization'
 }
 
-base_checkpoint_dir_form = "/home/jkalloor/bqskit/block_checkpoints_final_paper{extra}"
+base_checkpoint_dir_form = "/pscratch/sd/j/jkalloor/bqskit/block_checkpoints_final_paper{extra}"
 NUM_UNIQUE_CIRCS = 250
 
 def get_ensemble_workflow(circ_name: str, tol: float, extra: str = "") -> WorkflowLike:
@@ -33,7 +35,7 @@ def get_ensemble_workflow(circ_name: str, tol: float, extra: str = "") -> Workfl
     err_thresh = 10 ** (-1 * tol)
 
     extra_err_thresh = err_thresh * 0.01
-    small_block_size = 3
+    small_block_size = 4
     print("Checkpoint Dir: ", checkpoint_dir, flush=True)
     print("Error Threshold: ", err_thresh, flush=True)
 
@@ -47,25 +49,25 @@ def get_ensemble_workflow(circ_name: str, tol: float, extra: str = "") -> Workfl
             success_threshold=err_thresh, 
             use_calculated_error=False, 
             num_circs=NUM_UNIQUE_CIRCS,
-            num_random_ensembles=3,
+            num_random_ensembles=2,
             solve_exact_dists=True,
     )
 
     synthesis_pass = LEAPSynthesisPass2(
         store_partial_solutions=True,
         success_threshold = extra_err_thresh,
-        partial_success_threshold=err_thresh,
+        partial_success_threshold=err_thresh / 3,
         instantiate_options=instantiation_options,
         max_layer=14,
-        max_psols=10
+        max_psols=5
     )
 
     second_synthesis_pass = SecondLEAPSynthesisPass(
         success_threshold = extra_err_thresh,
-        partial_success_threshold=err_thresh,
+        partial_success_threshold=err_thresh / 3,
         instantiate_options=instantiation_options,
         max_layer=14,
-        max_psols=5
+        max_psols=10
     )
 
     jiggle_pass = JiggleEnsemblePass(success_threshold=err_thresh, 
@@ -83,10 +85,8 @@ def get_ensemble_workflow(circ_name: str, tol: float, extra: str = "") -> Workfl
             [
                 synthesis_pass,
                 second_synthesis_pass,
-                FixGlobalPhasePass(),
             ],
-            allocate_error=True,
-            skip_file="ensemble_5_.qasms"
+            skip_file="ensemble_0_.qasms"
         ),
         create_ensemble_pass,
         jiggle_pass,
@@ -110,7 +110,7 @@ def check_if_finished(circ_name: str, tol: float, extra: str = "") -> tuple[bool
     if os.path.exists(final_file):
         return True, True, ""
     # Check if there is a jiggle .npy file in the checkpoint dir for at least 5
-    jiggle_file = os.path.join(checkpoint_dir, "*5_jiggles*.npy")
+    jiggle_file = os.path.join(checkpoint_dir, "*4_jiggles*.npy")
     jiggle_files = glob.glob(jiggle_file)
     if len(jiggle_files) == 0:
         return False, False, ""
@@ -158,23 +158,47 @@ def get_shortest_circuits(circ_data: list[tuple[str, str, float]], extra: str = 
         for circ_name, _, tol in circ_data
     ]
 
-    num_workers = os.cpu_count()
+    num_workers = min(os.cpu_count(), 200)
     compiler = Compiler(num_workers=num_workers)
     
     workflow_ind = 0
-    ids = []
-    for _, circ_file, _ in circ_data:
+    ids: list[tuple[SharedMemory, SharedMemory, int]] = []
+
+    shm_percentage = (1.0 / num_processes)
+
+    for circ_name, circ_file, tol in circ_data:
         workflow = workflows[workflow_ind]
         workflow_ind += 1
         if workflow:
             circ = Circuit.from_file(circ_file)
             print("Original CNOT Count: ", circ.count(CNOTGate()), flush=True)
-            ids.append(compiler.submit(circ, workflow))
+            # Also need a return shm for Generate Probs
+            if len(workflow) == 4:
+                # Create Shared Memory for the workflow
+                shm_name = f"{circ_name}_{tol}"
+                shm_size = int(MAX_SHM_SIZE * shm_percentage)
+                shm = SharedMemory(name=shm_name, create=True, size=shm_size)
+                print("Generating Probs for ", shm_name)
+                shm_ret_name = f"{circ_name}_{tol}_ret"
+                un_dim = 2 ** circ.num_qudits
+                # (M, un_dim, un_dim)
+                shm_ret_size = NUM_CIRCS_PER_PROB * un_dim * un_dim * np.dtype(np.complex128).itemsize
+                shm_ret = SharedMemory(name=shm_ret_name, create=True, size=shm_ret_size)
+            else:
+                shm = None
+                shm_ret = None
+            ids.append((shm, shm_ret, compiler.submit(circ, workflow)))
 
     ind = 0
-    for id in ids:
+    for shm, shm_ret, id in ids:
         compiler.result(id)
         print("Finished: ", circ_data[ind][0], flush=True)
+        if shm is not None:
+            print("Closing Shared Memory", flush=True)
+            shm.close()
+            shm.unlink()
+            shm_ret.close()
+            shm_ret.unlink()
         ind += 1
     return
 
@@ -220,7 +244,9 @@ def get_circ_data(circ_name: str, block_num: str | int,
         if block_num == "all_blocks":
             # Get all blocks
             good_circ_files = glob.glob(f"good_blocks{extra}/{circ_name}_*.qasm")
-            bad_circ_files = glob.glob(f"bad_blocks{extra}/{circ_name}_*.qasm")
+            # Ignore bad blocks for now
+            # bad_circ_files = glob.glob(f"bad_blocks{extra}/{circ_name}_*.qasm")
+            bad_circ_files = []
             all_circ_files = good_circ_files + bad_circ_files
             block_nums = [file.split('_')[-1].split('.')[0] for file in all_circ_files]
             circ_data = []
@@ -241,7 +267,7 @@ if __name__ == '__main__':
     circ_name = argv[1]
     block_num = argv[2] if len(argv) > 2 else ""
     tol = float(argv[3]) if len(argv) > 3 else -1.0
-    extra = argv[4] if len(argv) > 4 else "_tket"
+    extra = argv[4] if len(argv) > 4 else ""
     circ_data = get_circ_data(circ_name, block_num, tol, extra=extra)
     print(circ_data)
     get_shortest_circuits(circ_data, extra=extra)

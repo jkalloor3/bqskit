@@ -393,7 +393,7 @@ class CreateEnsemblePass(BasePass):
 
         # Deubgging ingo
         targets: list[UnitaryMatrix] = []
-        thresholds: list[float] = [[] for _ in block_data]
+        # thresholds: list[float] = [[] for _ in block_data]
 
         num_sols = 1
         # print("PARSING DATA", flush=True)
@@ -403,7 +403,7 @@ class CreateEnsemblePass(BasePass):
             targets.append(block["target"])
             exact_block: Circuit = blocked_circuit[pts[-1]].gate._circuit.copy()  # type: ignore  # noqa
             exact_block.set_params(blocked_circuit[pts[-1]].params)
-            thresholds.append(block["error_percentage_allocated"] * self.success_threshold)
+            # thresholds.append(block["error_percentage_allocated"] * self.success_threshold)
 
             if 'scan_sols' not in block:
                 print("NO SCAN SOLS")
@@ -420,7 +420,7 @@ class CreateEnsemblePass(BasePass):
 
         self.num_circs = min(self.num_circs, num_sols)
 
-        return psols, pts, dists, targets, thresholds
+        return psols, pts, dists, targets #, thresholds
 
     async def run(self, circuit: Circuit, data: PassData) -> None:
         """Perform the pass's operation, see :class:`BasePass` for more."""
@@ -449,7 +449,7 @@ class CreateEnsemblePass(BasePass):
         data["scan_sols"] = []
         data["ensemble"] = []
             
-        approx_circs, pts, dists, _, _ = self.parse_data(circuit, block_data)        
+        approx_circs, pts, dists, _ = self.parse_data(circuit, block_data)        
         all_ensembles: list[list[Circuit]] = await self.assemble_circuits(circuit, approx_circs, pts, dists=dists, target=data.target)
         
         if len(all_ensembles) == 0:
