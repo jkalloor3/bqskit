@@ -195,14 +195,20 @@ def load_ensemble(file_name: str) -> list[Circuit]:
 def load_ensemble_cx_counts(file_name: str, cliff_t: bool) -> float:
     with open(file_name, "r") as f:
         qasms = f.read().split("\nBREAK\n")
-    num_circs = len(qasms)
     if cliff_t:
         # Count RZs and U3s
         rz_counts = [qasm.count("rz") for qasm in qasms]
+        gg_counts = [qasm.count("gg") for qasm in qasms]
         u3_counts = [qasm.count("u3") for qasm in qasms]
-        print("RZ Count: ", np.mean(rz_counts), flush=True)
-        print("U3 Count: ", np.mean(u3_counts), flush=True)
-        counts = [rz + u3*3 for rz, u3 in zip(rz_counts, u3_counts)]
+        # Some U3s are just identity
+        id_string = "(0.0, 0.0, 0.0)"
+        id_counts = [qasm.count(id_string) for qasm in qasms]
+        u3_counts = [u3 - id for u3, id in zip(u3_counts, id_counts)]
+        # print("RZ Count: ", np.mean(rz_counts), flush=True)
+        # print("GG Count: ", np.mean(gg_counts), flush=True)
+        # print("U3 Count: ", np.mean(u3_counts), flush=True)
+        counts = [rz + u3*3 + gg for rz, u3, gg in zip(rz_counts,
+                                                       u3_counts, gg_counts)]
     else:
         # Count CX
         counts = [qasm.count("cx") for qasm in qasms]
@@ -299,9 +305,9 @@ def get_block_names(circ_name: str, extra: str= "") -> list[str]:
     block_nums = [file.split('_')[-1].split('.')[0] for file in all_circ_files]
     return block_nums
 
-def get_circ_names() -> list[str]:
-    good_circ_files = glob.glob(f"{good_block_dir}/*.qasm")
-    bad_circ_files = glob.glob(f"{bad_block_dir}/*.qasm")
+def get_circ_names(extra: str = "_tket") -> list[str]:
+    good_circ_files = glob.glob(f"{good_block_dir}{extra}/*.qasm")
+    bad_circ_files = glob.glob(f"{bad_block_dir}{extra}/*.qasm")
     all_circ_files = good_circ_files + bad_circ_files
 
     def extract_circ_name(circ_file: str):
