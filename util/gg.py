@@ -55,11 +55,20 @@ def get_approx_t_str(angle: float, precision: int) -> str:
     # Divid angle by pi and mod by 2
     mod_angle = (angle / np.pi) % 2.0
     tol = 10 ** (-precision)
-    # Just check absolute precisioon of angle w.r.t to 2 or 0
+
+    # Edge errors, does not include Z for some reason
     if np.allclose(mod_angle, 0, atol=tol, rtol=0):
         return "I"
     elif np.allclose(mod_angle, 2, atol=tol, rtol=0):
         return "I"
+    elif np.allclose(mod_angle, 1.25, atol=tol, rtol=0):
+        return "ZT"
+    elif np.allclose(mod_angle, 1.5, atol=tol, rtol=0):
+        return "ZS"
+    elif np.allclose(mod_angle, 0.75, atol=tol, rtol=0):
+        return "ZTd"
+    elif np.allclose(mod_angle, 1.75, atol=tol, rtol=0):
+        return "Td"
     
     # print("Orig Angle: ", orig_angle, " Angle: ", angle, flush=True)
     num, den = Fraction(mod_angle).as_integer_ratio()

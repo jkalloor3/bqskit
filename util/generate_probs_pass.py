@@ -11,12 +11,60 @@ from bqskit.compiler.basepass import BasePass
 from bqskit.compiler.passdata import PassData
 import numpy as np
 from multiprocessing import shared_memory
-from .check_ensemble_quality import calculate_unitaries, NUM_FINAL_CIRCS, BASE_SHM_NAME, MAX_SHM_SIZE
-from .common import load_jiggled_ensemble_separate
+from .common import load_jiggled_ensemble_separate, create_jiggled_unitaries_shm
 from .distance import frobenius_cost, normalized_frob_cost
 from qpsolvers import solve_ls
 import pickle
 import os
+
+NUM_CIRCS_PER_PROB = 1000
+
+async def generate_probs(circuits: list[Circuit], 
+                              params: np.ndarray, 
+                              target: UnitaryMatrix, 
+                              shm_name: str) -> np.ndarray:
+    # Check if circ_params are too large
+    assert len(circuits) == params.shape[0]
+
+    # Calculate in chunks of 20
+    num_chunks = 20
+    chunk_params = np.array_split(params, num_chunks, axis=1)
+
+    existing_shm = shared_memory.SharedMemory(name=shm_name)
+    existing_shm_ret = shared_memory.SharedMemory(name=shm_name + "_ret")
+
+    print(f"Sending {len(chunk_params)} times", flush=True)
+    all_probs = []
+    for chunk_ind, circ_param_chunk in enumerate(chunk_params):
+        # print("Chunk Size", shm_size, circ_param_chunk.shape, flush=True)
+        shared_array = np.ndarray(circ_param_chunk.shape, dtype=np.float64, buffer=existing_shm.buf)
+        shared_array[:] = circ_param_chunk[:]
+        print("Wrote to Shared Memory", flush=True)
+        param_inds = np.arange(circ_param_chunk.shape[0])
+        circ_inds = list(zip(circuits, param_inds))
+        # Create return array in shared memory
+        num_circs_ret = circ_param_chunk.shape[0] * circ_param_chunk.shape[1]
+        # Of Size (NUM_CIRCS_RET, dim, dim)
+        dim = target.shape[0]
+        shm_ret_shape = (num_circs_ret, dim, dim)
+        print("Shared Memory Ret Shape", shm_ret_shape, flush=True)
+        shared_array_ret = np.ndarray(shm_ret_shape, dtype=np.complex128, buffer=existing_shm_ret.buf)
+        # Load with zeros
+        shared_array_ret[:] = 0
+        await get_runtime().map(create_jiggled_unitaries_shm , circ_inds, 
+                                shm_name=shm_name, 
+                                shm_ret_name=shm_name + "_ret",
+                                shm_shape=circ_param_chunk.shape,
+                                shm_ret_shape=shm_ret_shape,
+                                target=target)
+        print("Put Unitaries into Shared Buffer")
+        probs = await GenerateProbabilityPass.calculate_probs(shm_name + "_ret", shm_ret_shape, target)
+        print(f"Calculated Probs for {len(probs)} circs", flush=True)
+        all_probs.append(probs)
+    existing_shm.close()
+    existing_shm_ret.close()
+    return all_probs
+
 
 class GenerateProbabilityPass(BasePass):
     
@@ -25,23 +73,19 @@ class GenerateProbabilityPass(BasePass):
         self.shm_percentage = shm_percentage
 
     @staticmethod
-    def calculate_probs(ensemble: np.ndarray, target: np.ndarray) -> np.ndarray:
+    async def calculate_probs(shm_name: str, shm_shape: tuple[int, int, int], target: np.ndarray) -> np.ndarray:
+        existing_shm = shared_memory.SharedMemory(name=shm_name)
+        ensemble = np.ndarray(shm_shape, dtype=np.complex128, buffer=existing_shm.buf)
         M = len(ensemble)
-
-        # tr_V_Us = np.zeros(M, dtype=np.complex128)
-        # tr_Us = np.zeros((M, M), dtype=np.complex128)
 
         print(ensemble.shape, flush=True)
 
         tr_V_Us = np.einsum("mij,ij->m", ensemble, target.conj())
         tr_Us = np.einsum("aij,bij->ab", ensemble.conj(), ensemble)
 
-        # for jj in range(M):
-        #     utry = ensemble[jj]
-        #     for kk in range(jj, M):
-        #         a = np.einsum("ij,ij->", ensemble[kk].conj(), utry)
-        #         tr_Us[jj, kk] = a
-        #         tr_Us[kk, jj] = a
+        sample_inds = np.random.choice(M, size=5, replace=True)
+        print("Sample Dists", [tr_V_Us[i] for i in sample_inds], flush=True)
+        print("Sample Covars", [tr_Us[i][0] for i in sample_inds], flush=True)
 
         print("Finished Calculating Ensemble Vectors", flush=True)
         print(tr_V_Us.shape, tr_Us.shape, flush=True)
@@ -78,6 +122,9 @@ class GenerateProbabilityPass(BasePass):
         s = -1 * np.linalg.inv(R) @ f
         probabilities = solve_ls(R.T, s, None, None, Aeq, beq, lbound, ubound, solver='clarabel')
 
+        sample_probs = np.random.choice(probabilities, size=10, replace=True)
+        print("Sample Probs", sample_probs, flush=True)
+
         return probabilities
 
     async def run(
@@ -97,38 +144,20 @@ class GenerateProbabilityPass(BasePass):
             print("Already calculated probabilities, skipping", flush=True)
             return
 
-        shm_name = checkpoint_dir.split("/")[-1] + "_" + BASE_SHM_NAME
+        shm_name = checkpoint_dir.split("/")[-1]
         print("Shared Memory Name: ", shm_name, flush=True)
-        shm = shared_memory.SharedMemory(create=True, size=MAX_SHM_SIZE * self.shm_percentage, name=shm_name)
 
         circuits, params = load_jiggled_ensemble_separate(final_ens_file, final_ens_jiggle_file)
-        best_ensemble_unitaries = await calculate_unitaries(circuits, params, 
-                                                            target=data.target,
-                                                            shm_name=shm_name,
-                                                            shm_percentage=self.shm_percentage)
-        
-        shm.close()
-        shm.unlink()
-        
-        if len(best_ensemble_unitaries) > NUM_FINAL_CIRCS:
-            rand_inds_file = f"{checkpoint_dir}/ensemble_final_rand_inds.npy"
-            rand_inds = np.load(rand_inds_file)
-            best_ensemble_unitaries = [best_ensemble_unitaries[i] for i in rand_inds]
-        
-        best_ensemble_unitaries: list[UnitaryMatrix] = [u for u, _ in best_ensemble_unitaries]
-        best_ensemble_unitaries = np.stack([x.numpy for x in best_ensemble_unitaries])
+        all_probs = await generate_probs(circuits, params,target=data.target, shm_name=shm_name)
 
-        print(f"Calculating Probs on {len(best_ensemble_unitaries)} unitaries", flush=True)
+        # Concatenate all probs
+        all_probs = np.concatenate(all_probs, axis=0)
+        # Divide by 20
+        all_probs /= 20
 
-        if len(best_ensemble_unitaries) < 5:
-            final_probs = [1 / len(best_ensemble_unitaries) for _ in best_ensemble_unitaries]
-        else:
-            # Now calculate the probability for this ensemble
-            final_probs = GenerateProbabilityPass.calculate_probs(best_ensemble_unitaries, data.target)
-
-        print("Calculated Probabilities", flush=True)
+        print("Calculated all probabilities", flush=True)
 
         if "checkpoint_dir" in data:
-            np.save(probs_file, final_probs)
+            np.save(probs_file, all_probs)
         return
 

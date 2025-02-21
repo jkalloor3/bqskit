@@ -111,9 +111,9 @@ class FixAnglesPass(BasePass):
             # print("Final Scan Sol Counts: ", [c.gate_counts for c, _ in data["scan_sols"]])
         else:
             FixAnglesPass.run_circ(circuit, self.precision)
-            print(circuit.gate_counts)
+            # print(circuit.gate_counts)
             print("Num Params after fixing angles: ", circuit.num_params)
-            print("Distance from target: ", normalized_gp_frob_cost(circuit.get_unitary(), data.target))
+            # print("Distance from target: ", normalized_gp_frob_cost(circuit.get_unitary(), data.target))
 
 class UnFixTPass(BasePass):
 

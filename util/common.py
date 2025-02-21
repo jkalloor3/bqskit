@@ -14,7 +14,7 @@ import multiprocessing as mp
 
 from .gg import gg_gate_def, GridSynthGate
 
-base_bqskit_dir = "/pscratch/sd/j/jkalloor/bqskit"
+base_bqskit_dir = "/home/jkalloor/bqskit"
 good_block_dir = f"{base_bqskit_dir}/good_blocks"
 bad_block_dir = f"{base_bqskit_dir}/bad_blocks"
 base_checkpoint_dir = f"{base_bqskit_dir}/block_checkpoints_final_paper"
@@ -99,7 +99,7 @@ def create_jiggled_unitaries(circ_params: tuple[Circuit, np.ndarray],
     # print("Ens Size: ", len(ens), flush=True)
     return ens
 
-def create_jiggled_unitaries_shm(circ_ind: tuple[Circuit, int],
+def calc_avg_unitary_shm(circ_ind: tuple[Circuit, int],
                                  shm_name: str, 
                                  shm_shape: tuple[int, int, int], 
                                  target: UnitaryMatrix = None) -> tuple[UnitaryMatrix, float]:
@@ -122,6 +122,30 @@ def create_jiggled_unitaries_shm(circ_ind: tuple[Circuit, int],
     avg_unitary = avg_unitary / len(params)
     avg_dist = avg_dist / len(params)
     return avg_unitary, avg_dist
+
+def create_jiggled_unitaries_shm(circ_ind: tuple[Circuit, int],
+                                 shm_name: str, 
+                                 shm_ret_name: str,
+                                 shm_shape: tuple[int, int, int], 
+                                 shm_ret_shape: tuple[int, int, int],
+                                 target: UnitaryMatrix) -> np.ndarray:
+    existing_shm = shared_memory.SharedMemory(name=shm_name)
+    existing_shm_ret = shared_memory.SharedMemory(name=shm_ret_name)
+    shared_array = np.ndarray(shm_shape, dtype=np.float64, buffer=existing_shm.buf)
+    shared_array_ret = np.ndarray(shm_ret_shape, dtype=np.complex128, buffer=existing_shm_ret.buf)
+    circ, param_ind = circ_ind
+    params: np.ndarray = shared_array[param_ind]
+
+    for i, param in enumerate(params.tolist()):
+        utry = circ.get_unitary(param)
+        gp_correction = target.get_target_correction_factor(utry)
+        utry: UnitaryMatrix = utry * gp_correction
+        shared_array_ret[i + param_ind * 4] = utry.numpy
+        
+
+    existing_shm.close()
+    existing_shm_ret.close()
+    return
 
 
 def create_jiggled_ensemble(circ_params: list[tuple[Circuit, np.ndarray]]) -> list[Circuit]:

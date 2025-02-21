@@ -23,7 +23,7 @@ good_instantiation_options = {
     'method': 'minimization'
 }
 
-base_checkpoint_dir_form = "/pscratch/sd/j/jkalloor/bqskit/block_checkpoints_final_paper{extra}"
+base_checkpoint_dir_form = "/home/jkalloor/bqskit/block_checkpoints_final_paper{extra}"
 NUM_UNIQUE_CIRCS = 250
 
 def get_ensemble_workflow(circ_name: str, tol: float, extra: str = "") -> WorkflowLike:

@@ -14,15 +14,13 @@ from bqskit.runtime import get_runtime
 import os
 import time
 import shutil
-from util.common import load_jiggled_ensemble_separate, create_jiggled_unitaries_shm, count_params
+from util.common import load_jiggled_ensemble_separate, calc_avg_unitary_shm, count_params
 
 from .distance import frobenius_cost, normalized_frob_cost
 
 norm_cost = GPNormalizedFrobeniusCostGenerator()
 frob_cost = GPNormalizedFrobeniusCostGenerator()
 
-BASE_SHM_NAME = "param_arr"
-NUM_FINAL_CIRCS = 4000
 NUM_UNIQUE_CIRCS = 250
 # MAX_SENDABLE_PARAMS = 150
 MAX_PARAMS_PER_CIRC = 80
@@ -66,7 +64,7 @@ async def calculate_unitaries(circuits: list[Circuit],
         print("Wrote to Shared Memory", flush=True)
         param_inds = np.arange(circ_param_chunk.shape[0])
         circ_inds = list(zip(circuit_chunk, param_inds))
-        avg_configs: list[tuple[UnitaryMatrix, float]] = await get_runtime().map(create_jiggled_unitaries_shm , circ_inds, 
+        avg_configs: list[tuple[UnitaryMatrix, float]] = await get_runtime().map(calc_avg_unitary_shm, circ_inds, 
                                 shm_name=shm_name, 
                                 shm_shape=circ_param_chunk.shape,
                                 target=target)
@@ -159,20 +157,18 @@ class CheckEnsembleQualityPass(BasePass):
         csv_dict = {}
         # Create Shared Memory
 
-        shm_name = checkpoint_dir.split("/")[-1] + "_" + BASE_SHM_NAME
+        shm_name = checkpoint_dir.split("/")[-1]
         print("Shared Memory Name: ", shm_name, flush=True)
-        shm_size = int(MAX_SHM_SIZE * self.shm_percentage)
-        try:
-            shm = shared_memory.SharedMemory(name=shm_name)
-            print("Shared Memory Exists", flush=True)
-            shm.close()
-            shm.unlink()
-        except:
-            print("Shared Memory Does Not Exist", flush=True)
+        # shm_size = int(MAX_SHM_SIZE * self.shm_percentage)
+        # try:
+        #     shm = shared_memory.SharedMemory(name=shm_name)
+        #     print("Shared Memory Exists", flush=True)
+        #     shm.close()
+        #     shm.unlink()
+        # except:
+        #     print("Shared Memory Does Not Exist", flush=True)
         
         # Create new shared memory
-        shm = shared_memory.SharedMemory(create=True, size=shm_size, name=shm_name)
-
         best_ind = 0
         best_ratio = float("inf")
         best_count = float("inf")
@@ -212,18 +208,6 @@ class CheckEnsembleQualityPass(BasePass):
                     start_ens_ind += 1
                     ens_file = ensemble_file_name.format(ind=start_ens_ind, extra=self.checkpoint_extra_str)
                     jiggle_file = jiggle_file_name.format(ind=start_ens_ind, extra=self.checkpoint_extra_str)
-
-        shm.close()
-        shm.unlink()
-
-        # Randomly sample 4000 circuits from the best ensemble
-        num_unitaries = 20000
-        if num_unitaries > NUM_FINAL_CIRCS:
-            rand_inds = np.random.choice(num_unitaries, 
-                                         NUM_FINAL_CIRCS, 
-                                         replace=False)
-            rand_inds_file = f"{checkpoint_dir}/ensemble_final_rand_inds.npy"
-            np.save(rand_inds_file, rand_inds)
         
         if "checkpoint_dir" in data:
             checkpoint_data_file: str = data["checkpoint_data_file"]

@@ -16,7 +16,7 @@ import os
 import time
 from sys import argv
 
-base_dir = "/pscratch/sd/j/jkalloor/bqskit"
+base_dir = "/home/jkalloor/bqskit"
 
 temp_file = "temp.qasm"
 

@@ -196,7 +196,6 @@ class ConvertToZXZXZSimple(BasePass):
         circuit.batch_replace(pts, cg_ops)
         # Unfold the circuit
         circuit.unfold_all()
-        print(circuit.gate_counts)
 
     async def run(
             self, 
