@@ -54,6 +54,8 @@ class FixAnglesPass(BasePass):
 
 
     def run_circ(circuit: Circuit, precision: int) -> None:
+
+        precision = precision * np.log10(circuit.num_params)
         for cycle, op in circuit.operations_with_cycles():
             if op.num_qudits == 1:
                 if isinstance(op.gate, RXGate):
@@ -112,7 +114,7 @@ class FixAnglesPass(BasePass):
         else:
             FixAnglesPass.run_circ(circuit, self.precision)
             # print(circuit.gate_counts)
-            print("Num Params after fixing angles: ", circuit.num_params)
+            # print("Num Params after fixing angles: ", circuit.num_params)
             # print("Distance from target: ", normalized_gp_frob_cost(circuit.get_unitary(), data.target))
 
 class UnFixTPass(BasePass):

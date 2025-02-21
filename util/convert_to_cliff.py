@@ -175,23 +175,32 @@ class ConvertToZXZXZ(BasePass):
             data["finished_zxzxz"] = True
             checkpoint_data_file = data["checkpoint_data_file"]
             pickle.dump(data, open(checkpoint_data_file, "wb"))
+
 class ConvertToZXZXZSimple(BasePass):
 
     def __init__(self, group: bool = False) -> None:
         self.group = group
 
-    def run_circuit(self, circuit: Circuit, group: bool = False) -> None:
+    async def run_circuit(self, circuit: Circuit, group: bool = False) -> None:
         # Group Single Qudit Gates
         if group:
             GroupSingleQuditGatePass.group(circuit)
         # For each CircuitGate, replace with correspond ZXZXZ
-        cg_ops = []
         pts = []
+        uns = []
+        locs = []
         for cycle, op in circuit.operations_with_cycles(reverse=True):
             if op.num_params >= 2:
-                circ = ZXZXZDecomposition.run_zxzxz_decomp_circ(utry=op.get_unitary())
-                cg_ops.append(Operation(CircuitGate(circ), op.location, circ.params))
+                locs.append(op.location)
+                uns.append(op.get_unitary())
                 pts.append(CircuitPoint(cycle, op.location[0]))
+        
+        if len(uns) == 0:
+            # Nothing to do
+            return
+        # print("Num U3s: ", len(uns))
+        circs = await get_runtime().map(ZXZXZDecomposition.run_zxzxz_decomp_circ, uns)
+        cg_ops = [Operation(CircuitGate(circ), loc) for circ, loc in zip(circs, locs)]
 
         circuit.batch_replace(pts, cg_ops)
         # Unfold the circuit
@@ -203,10 +212,13 @@ class ConvertToZXZXZSimple(BasePass):
             data: PassData
     ) -> None:
         # For every circuit in data["scan_sols"], run the circuit
+        if "scan_sols" not in data:
+            await self.run_circuit(circuit, self.group)
+            return
         scan_sols: list[tuple[Circuit, float]] = data["scan_sols"]
         for circ, _ in scan_sols:
             # orig_gate_count = circ.gate_counts
-            self.run_circuit(circ, self.group)
+            await self.run_circuit(circ, self.group)
             # print("ZXZXZPass: ", orig_gate_count, circ.gate_counts, flush=True)
             # global_phase_correction = target.get_target_correction_factor(circ.get_unitary())
             # final_dist = cost.calc_cost(circ, data.target)
