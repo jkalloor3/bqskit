@@ -335,13 +335,21 @@ class  JiggleEnsemblePass(BasePass):
         start_ens_ind = 0
         jiggle_file = jiggle_file_name.format(ind=start_ens_ind, extra=self.checkpoint_extra_str)
 
+
+        ens_file = ensemble_file_name.format(ind=0, 
+                                             extra=self.checkpoint_extra_str)
+        NUM_ENSEMBLES = 0
+        while os.path.exists(ens_file):
+            NUM_ENSEMBLES += 1
+            ens_file = ensemble_file_name.format(ind=NUM_ENSEMBLES, 
+                                             extra=self.checkpoint_extra_str)
         if os.path.exists(jiggle_file):
             # Check if ensemble has been loaded
             while os.path.exists(jiggle_file):
                 start_ens_ind += 1
                 jiggle_file = jiggle_file_name.format(ind=start_ens_ind, extra=self.checkpoint_extra_str)
 
-        if start_ens_ind >= 5:
+        if start_ens_ind >= NUM_ENSEMBLES:
             print("Finished Jiggle Ensemble Pass", flush=True)
             return
 
@@ -350,12 +358,12 @@ class  JiggleEnsemblePass(BasePass):
 
         # Reload ensembles
         ensembles = {}
-        for i in range(start_ens_ind, 5):
+        for i in range(start_ens_ind, NUM_ENSEMBLES):
             ens_file = ensemble_file_name.format(ind=i, extra=self.checkpoint_extra_str)
             print("Loading Ensemble", ens_file, flush=True)
             ensembles[i] = load_ensemble(ens_file)
 
-        for ens_ind in range(start_ens_ind, 5):
+        for ens_ind in range(start_ens_ind, NUM_ENSEMBLES):
             scan_sols = ensembles[ens_ind]
             print("Number of SCAN SOLS", len(scan_sols), flush=True)
             # For each params come up with nth root of num_circs number of extra params

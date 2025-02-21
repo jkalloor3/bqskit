@@ -166,7 +166,7 @@ class SecondLEAPSynthesisPass(BasePass):
         # Synthesize every circuit in the ensemble
         circs: list[Circuit] = [d[0] for d in data['scan_sols'][:-1]]
         block_id = f"Block {data.get('super_block_num', -1)}_{data.get('block_num', -1)}:"
-        factor = data["error_percentage_allocated"]
+        factor = data.get("error_percentage_allocated", 1)
         partial_success_threshold = self.partial_success_threshold * factor
         print(f"{block_id} Partial Success Threshold: ", partial_success_threshold, flush=True)
         print(f"{block_id} After Leap 1 distances: ", [d[1] for d in data['scan_sols']], flush=True)
