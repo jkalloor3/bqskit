@@ -11,8 +11,8 @@ from bqskit.ir.gates import *
 from .gg import GridSynthGate
 from .convert_to_cliff import ConvertToZXZXZSimple
 
-base_dir = "/home/jkalloor/bqskit"
-nisq_checkpoint_dir = f"{base_dir}/block_checkpoints_final_paper_tket"
+base_dir = "/pscratch/sd/j/jkalloor/bqskit"
+nisq_checkpoint_dir = f"{base_dir}/block_checkpoints_final_paper"
 clifft_checkpoint_dir = f"{base_dir}/block_checkpoints_final_paper_clifft_tket"
 
 def count(c: Circuit, cliff_t: bool = False) -> int:
@@ -32,19 +32,19 @@ def fix_angle_workflow(precision: int) -> list:
 
 def get_base_circ_counts(circ_files: list[tuple[str, int]] | list[str], cliff_t: bool = False) -> list[int]:
     circs = []
-    compiler = Compiler(num_workers=100)
     if cliff_t:
+        compiler = Compiler(num_workers=100)
         for circ_file, precision in circ_files:
             circ = Circuit.from_file(circ_file)
             workflow = fix_angle_workflow(precision)
             out_circ = compiler.compile(circ, workflow)
             circs.append(out_circ)
+        compiler.close()
     else:
         for circ_file in circ_files:
             circs.append(Circuit.from_file(circ_file))
-    compiler.close()
-    return [count(c, cliff_t=cliff_t) for c in circs]
 
+    return [count(c, cliff_t=cliff_t) for c in circs]
 
 def get_completed_blocks(cliff_t: bool = False) -> list[str]:
     # Check if there is at least one completed ensemble for each
@@ -75,7 +75,7 @@ def get_completed_blocks(cliff_t: bool = False) -> list[str]:
     return finished_circs
 
 def get_circ_data(circ_name: str, err_threshold: float, 
-                        cliff_t: bool = False) -> list[tuple[str, tuple[str, str, float]]]:
+                        cliff_t: bool = False, add_tket_count: bool = True) -> list[tuple[str, tuple[str, str, float]]]:
     '''
     Takes in a circ name and total error, and calculates the 
     best combination of blocks that minimizes the count
@@ -103,6 +103,9 @@ def get_circ_data(circ_name: str, err_threshold: float,
     orig_counts = get_base_circ_counts(circ_files_orig, cliff_t=cliff_t)
     tket_counts = get_base_circ_counts(circ_files_tket, cliff_t=cliff_t)
 
+    # print("Orig counts: ", orig_counts)
+    # print("Tket counts: ", tket_counts)
+
     for i, block_name in enumerate(block_names):
         orig_count = orig_counts[i]
         tket_count = tket_counts[i]
@@ -126,7 +129,7 @@ def get_circ_data(circ_name: str, err_threshold: float,
                 # print("No ensemble file found")
                 continue
             ensemble_file = ensemble_file[0]
-            final_threshold = (10 ** (-2 * tol)) * 20
+            final_threshold = (10 ** (-2 * tol))
         else:
             csv_file = csv_files[0]
             ensemble_file = glob.glob(os.path.join(folder_name, f"ensemble_final.qasms"))[0]
@@ -174,8 +177,10 @@ def get_circ_data(circ_name: str, err_threshold: float,
     block_counts = []
 
     # print("Avg count: ", min_count)
-
-    return [(block_nums[i], d) for i, d in enumerate(final_data)], min_count
+    if add_tket_count:
+        return [(block_nums[i], d) for i, d in enumerate(final_data)], min_count, np.sum(tket_counts)
+    else:
+        return [(block_nums[i], d) for i, d in enumerate(final_data)], min_count
 
 def get_counts(circ_name: str, err_threshold: float, cliff_t: bool = False) -> float:
     return get_circ_data(circ_name, err_threshold, cliff_t)[1]
