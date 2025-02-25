@@ -411,12 +411,13 @@ class CreateEnsemblePass(BasePass):
 
             psols[i] = [block['scan_sols'][j][0] for j in range(len(block['scan_sols']))]
             dists[i] = [block['scan_sols'][j][1] for j in range(len(block['scan_sols']))]
+            print("Block", i, len(psols[i]), num_sols, flush=True)
             # self.psol_unitaries.append([psol.get_unitary() for psol in psols[i]])
             num_sols *= len(psols[i])
 
 
         # print([len(psols[i]) for i in range(len(psols))])
-        print("Total Potential Solutions", num_sols)
+        print("Total Potential Solutions", num_sols, flush = True)
 
         self.num_circs = min(self.num_circs, num_sols)
 

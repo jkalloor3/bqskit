@@ -19,7 +19,7 @@ from bqskit.runtime import get_runtime
 from itertools import product
 import numpy as np
 
-import subprocess
+from .distance import normalized_gp_frob_cost
 
 from bqskit.ir.gates.constantgate import ConstantGate
 from bqskit.ir.gates.qubitgate import QubitGate
@@ -187,23 +187,14 @@ class ConvertToZXZXZSimple(BasePass):
             GroupSingleQuditGatePass.group(circuit)
         # For each CircuitGate, replace with correspond ZXZXZ
         pts = []
-        uns = []
-        locs = []
         for cycle, op in circuit.operations_with_cycles(reverse=True):
             if op.num_params >= 2:
-                locs.append(op.location)
-                uns.append(op.get_unitary())
+                pt = CircuitPoint(cycle, op.location[0])
+                new_circ = ZXZXZDecomposition.run_zxzxz_decomp_circ(op.get_unitary())
                 pts.append(CircuitPoint(cycle, op.location[0]))
+                circuit.replace_with_circuit(pt, new_circ, as_circuit_gate=True)
         
-        if len(uns) == 0:
-            # Nothing to do
-            return
         # print("Num U3s: ", len(uns))
-        circs = await get_runtime().map(ZXZXZDecomposition.run_zxzxz_decomp_circ, uns)
-        cg_ops = [Operation(CircuitGate(circ), loc) for circ, loc in zip(circs, locs)]
-
-        circuit.batch_replace(pts, cg_ops)
-        # Unfold the circuit
         circuit.unfold_all()
 
     async def run(
@@ -219,10 +210,3 @@ class ConvertToZXZXZSimple(BasePass):
         for circ, _ in scan_sols:
             # orig_gate_count = circ.gate_counts
             await self.run_circuit(circ, self.group)
-            # print("ZXZXZPass: ", orig_gate_count, circ.gate_counts, flush=True)
-            # global_phase_correction = target.get_target_correction_factor(circ.get_unitary())
-            # final_dist = cost.calc_cost(circ, data.target)
-            # circ_copy = circ.copy()
-            # circ_copy.append_gate(GlobalPhaseGate(1, global_phase=global_phase_correction), (0,))
-            # corrected_dist = cost.calc_cost(circ_copy, data.target)
-            # print("Global Phases Diff: ", global_phase_before - global_phase_after, "Dists: ", dist, final_dist, corrected_dist)

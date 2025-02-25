@@ -26,7 +26,7 @@ good_instantiation_options = {
 }
 
 extra = "_tket"
-base_checkpoint_dir = f"block_checkpoints_final_paper_clifft{extra}/"
+base_checkpoint_dir = f"block_checkpoints_final_paper_clifft_{extra}/"
 good_block_folder = f"good_blocks{extra}/"
 bad_block_folder = f"bad_blocks{extra}/"
 NUM_UNIQUE_CIRCS = 250
@@ -101,14 +101,14 @@ def get_ensemble_workflow(circ_name: str, tol: float, num_processes: int = 1) ->
         ForEachBlockPass(
             [
                 synthesis_pass,
-                FixAnglesPass(tol * 2 + 2, run_scan_sols=True),
+                FixAnglesPass(int(tol) * 2 + 2, run_scan_sols=True),
                 ConvertToZXZXZSimple(group=False),
                 WriteQasmPass(write=False),
                 NumericalTReductionPass(
                     full_loops=3,
                     success_threshold=err_thresh,
                     use_calculated_error=True),
-                FixAnglesPass(tol * 2 + 2, run_scan_sols=True),
+                FixAnglesPass(int(tol) * 2 + 2, run_scan_sols=True),
                 ToU3Pass(ensemble=True, group=True),
                 FixGlobalPhasePass(),
             ],
@@ -202,6 +202,7 @@ def get_shortest_circuits(circ_data: list[tuple[str, str, float]]) -> list[Circu
             shm_ret.close()
             shm_ret.unlink()
         ind += 1
+    compiler.close()
     return
 
 def find_file(circ_name: str, block_num: str) -> tuple[str, str]:

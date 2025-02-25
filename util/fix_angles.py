@@ -2,7 +2,6 @@ from bqskit.compiler.passdata import PassData
 from bqskit.compiler.basepass import BasePass
 from bqskit.ir import Circuit, CircuitPoint, Operation
 from bqskit.ir.gates import *
-from bqskit.passes import ZXZXZDecomposition, ToU3Pass
 import numpy as np
 
 from .distance import normalized_gp_frob_cost
@@ -105,17 +104,10 @@ class FixAnglesPass(BasePass):
 
     async def run(self, circuit: Circuit, data: PassData) -> None:
         if self.run_scan_sols:
-            # print("Original Scan Sol Counts: ", [c.gate_counts for c, _ in data["scan_sols"]])
             for circ, _ in data["scan_sols"]:
-                # orig_counts = circ.gate_counts
                 FixAnglesPass.run_circ(circ, self.precision)
-                # print(orig_counts, circ.gate_counts)
-            # print("Final Scan Sol Counts: ", [c.gate_counts for c, _ in data["scan_sols"]])
         else:
             FixAnglesPass.run_circ(circuit, self.precision)
-            # print(circuit.gate_counts)
-            # print("Num Params after fixing angles: ", circuit.num_params)
-            # print("Distance from target: ", normalized_gp_frob_cost(circuit.get_unitary(), data.target))
 
 class UnFixTPass(BasePass):
 

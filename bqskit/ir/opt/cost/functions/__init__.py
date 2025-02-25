@@ -8,9 +8,7 @@ from bqskit.ir.opt.cost.functions.cost import (HilbertSchmidtCostGenerator,
                                                GPNormalizedFrobeniusCostGenerator, 
                                                GPNormalizedFrobeniusCost, 
                                                FrobeniusNoPhaseCost, 
-                                               FrobeniusNoPhaseCostGenerator, 
-                                               HSCostGenerator, 
-                                               HSCost)
+                                               FrobeniusNoPhaseCostGenerator)
 from bqskit.ir.opt.cost.functions.residuals import HilbertSchmidtResiduals
 from bqskit.ir.opt.cost.functions.residuals import (
     HilbertSchmidtResidualsGenerator,
@@ -26,7 +24,5 @@ __all__ = [
     'GPNormalizedFrobeniusCost',
     'GPNormalizedFrobeniusCostGenerator',
     'FrobeniusNoPhaseCost',
-    'FrobeniusNoPhaseCostGenerator',
-    'HSCostGenerator',
-    'HSCost',
+    'FrobeniusNoPhaseCostGenerator'
 ]
