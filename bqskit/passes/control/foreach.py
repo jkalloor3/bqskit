@@ -317,11 +317,6 @@ class ForEachBlockPass(BasePass):
 
         # Unpack results
         completed_subcircuits, completed_block_datas = zip(*results)
-
-        if "scan_sols" in completed_block_datas[0]:
-            scan_sols = [data['scan_sols'] for data in completed_block_datas]
-            completed_subcircuits = await knapsack_solve(scan_sols)
-
         # print("Final len of completed subcircuits", len(completed_subcircuits), flush=True)
 
         # Postprocess blocks
@@ -387,77 +382,6 @@ class ForEachBlockPass(BasePass):
             time.sleep(0.3 * num_blocks)
         if exists(checkpoint_dir) and len(listdir(checkpoint_dir)) == 0:
             Path(checkpoint_dir).rmdir()
-
-async def knapsack_solve(scan_sols: list[list[tuple[Circuit, float]]]) -> list:
-    '''
-    Pick an ensemble of circuits that minimizes the total number of CNOTs while keeping the total distance below a threshold
-    You must pick one psol from each list of psol_diffs.
-
-    
-
-    Args:
-        psol_diffs: list of lists of differences in CNOT counts
-        dists: list of lists of distances
-        total_dist: total distance allowed
-
-    Returns:
-        list of list of indices to pick. Each list corresponds to a list of psols. 
-        There are `num_circs` lists in total.
-    
-    '''
-
-
-
-    psols = [[psol for psol, _ in scan_sol] for scan_sol in scan_sols]
-    dists = [[dist for _,dist in scan_sol] for scan_sol in scan_sols]
-
-    psol_diffs = [[circ.count(CNOTGate()) - psol[-1].count(CNOTGate()) for circ in psol] for psol in psols]
-
-
-    # print(psol_diffs)
-    # print(dists)
-
-
-    # print("LEN PSOL DIFFS", len(psol_diffs))
-
-    total_dist = 0.001
-
-
-    # Most greedy algorithm
-    # Pick the psol that minimizes the difference in CNOT counts
-
-    diffs = np.ones([len(psol_diffs),len(max(psol_diffs,key = lambda x: len(x)))])
-    for i,j in enumerate(psol_diffs):
-        diffs[i][0:len(j)] = j
-
-    # print("Diffs shape", diffs.shape)
-
-    # Sort by best CNOT count diff
-    orig_inds = np.argsort(diffs[:, 0])
-    greediest_inds = [-1 for _ in psol_diffs]
-    greediest_dist = 0
-    
-    # print("ORIG INDS", orig_inds)
-    # print("LEN ORIG INDS", len(orig_inds))
-
-    cnots_saved = 0
-
-    for ind in orig_inds:
-        for i, dist in enumerate(dists[ind]):
-            # Will work because last dist is always 0
-            if (greediest_dist + dist) < total_dist:
-                greediest_inds[ind] = i
-                greediest_dist += dist
-                cnots_saved += psol_diffs[ind][i]
-                # print("GREEDIEST DIST", greediest_dist)
-                break
-
-    # print("GREEDIEST INDS", greediest_inds)
-    # print("NUM GREEDIEST INDS", len(greediest_inds))
-    # print("CNOTS SAVED", cnots_saved, flush=True)
-
-    return [psols[i][greediest_inds[i]] for i in range(len(psol_diffs))]
-
 
 async def _sub_do_work(
     workflow: Workflow,

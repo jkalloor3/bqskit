@@ -14,7 +14,7 @@ import multiprocessing as mp
 
 from .gg import gg_gate_def, GridSynthGate
 
-base_bqskit_dir = "/pscratch/sd/j/jkalloor/bqskit"
+base_bqskit_dir = "/home/jkalloor/bqskit"
 good_block_dir = f"{base_bqskit_dir}/good_blocks"
 bad_block_dir = f"{base_bqskit_dir}/bad_blocks"
 base_checkpoint_dir = f"{base_bqskit_dir}/block_checkpoints_final_paper"
@@ -22,16 +22,6 @@ base_checkpoint_dir = f"{base_bqskit_dir}/block_checkpoints_final_paper"
 qlang = OPENQASM2Language(gate_defs=[("gg", gg_gate_def)])
 
 NUM_UNIQUE_CIRCS = 250
-
-def count_params(circ: Circuit) -> int:
-    """
-    Count the number of parameters in a circuit.
-    GG gates have 3 params when in realiyt they have 1.
-    """
-    num_ggs = circ.count(GridSynthGate())
-    num_params = circ.num_params
-    num_params -= num_ggs * 2
-    return num_params
 
 def stack_padding(it: list[np.ndarray], vertical: bool = True) -> np.ndarray:
     max_width = max(a.shape[1] for a in it)
@@ -190,28 +180,6 @@ def load_ensemble(file_name: str) -> list[Circuit]:
     circs = [qlang.decode(qasm, gate_defs = [("gg", gg_gate_def)]) for qasm in qasms]
     print("Decoded", flush=True)
     return circs
-
-def load_ensemble_cx_counts(file_name: str, cliff_t: bool) -> float:
-    with open(file_name, "r") as f:
-        qasms = f.read().split("\nBREAK\n")
-    if cliff_t:
-        # Count RZs and U3s
-        rz_counts = [qasm.count("rz") for qasm in qasms]
-        gg_counts = [qasm.count("gg") for qasm in qasms]
-        u3_counts = [qasm.count("u3") for qasm in qasms]
-        # Some U3s are just identity
-        id_string = "(0.0, 0.0, 0.0)"
-        id_counts = [qasm.count(id_string) for qasm in qasms]
-        u3_counts = [u3 - id for u3, id in zip(u3_counts, id_counts)]
-        # print("RZ Count: ", np.mean(rz_counts), flush=True)
-        # print("GG Count: ", np.mean(gg_counts), flush=True)
-        # print("U3 Count: ", np.mean(u3_counts), flush=True)
-        counts = [rz + u3*3 + gg for rz, u3, gg in zip(rz_counts,
-                                                       u3_counts, gg_counts)]
-    else:
-        # Count CX
-        counts = [qasm.count("cx") for qasm in qasms]
-    return np.mean(counts)
 
 def load_ensemble_mp(file_name: str) -> list[Circuit]:
     with open(file_name, "r") as f:
