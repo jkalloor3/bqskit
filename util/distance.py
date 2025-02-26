@@ -31,6 +31,13 @@ def get_average_density_matrix(vectors: list[np.ndarray[np.complex128]]) -> np.n
 Calculate the TVD between two probability distributions.
 '''
 
+def tvd_sv(p: np.ndarray[np.complex128], q: np.ndarray[np.complex128]) -> np.float64:
+    # Calculate the TVD between two probability distributions.
+    # p and q are vectors of complex numbers.
+    p_probs = np.abs(p) ** 2
+    q_probs = np.abs(q) ** 2
+    return 0.5 * np.sum(np.abs(p_probs - q_probs))
+
 def tvd(p: np.ndarray[np.complex128], q: np.ndarray[np.complex128]) -> np.float64:
     return 0.5 * np.sum(np.abs(p - q))
 

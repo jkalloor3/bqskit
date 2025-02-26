@@ -13,7 +13,10 @@ from .convert_to_cliff import ConvertToZXZXZSimple
 
 base_dir = "/pscratch/sd/j/jkalloor/bqskit"
 nisq_checkpoint_dir = f"{base_dir}/block_checkpoints_final_paper"
-clifft_checkpoint_dir = f"{base_dir}/block_checkpoints_final_paper_clifft_tket"
+clifft_checkpoint_dir = f"{base_dir}/block_checkpoints_final_paper_clifft"
+
+
+frob_factor = lambda dim: np.sqrt(dim * 2)
 
 def count(c: Circuit, cliff_t: bool = False) -> int:
     if cliff_t:
@@ -75,7 +78,9 @@ def get_completed_blocks(cliff_t: bool = False) -> list[str]:
     return finished_circs
 
 def get_circ_data(circ_name: str, err_threshold: float, 
-                        cliff_t: bool = False, add_tket_count: bool = True) -> list[tuple[str, tuple[str, str, float]]]:
+                        cliff_t: bool = False, 
+                        add_tket_count: bool = True,
+                        no_base: bool = False) -> list[tuple[str, tuple[str, str, float]]]:
     '''
     Takes in a circ name and total error, and calculates the 
     best combination of blocks that minimizes the count
@@ -89,6 +94,7 @@ def get_circ_data(circ_name: str, err_threshold: float,
     # print("Checkpoint dir: ", checkpoint_dir)
     # print("Circ name: ", circ_name)
     folder_files = glob.glob(os.path.join(checkpoint_dir, f"{circ_name}_*"))
+    print(folder_files)
 
     block_names = get_block_names(circ_name, extra="_tket")
     block_data = {}
@@ -96,23 +102,30 @@ def get_circ_data(circ_name: str, err_threshold: float,
     precision = int(np.ceil(precision))
     # print("Precision: ", precision)
     circ_files_orig = [load_block(circ_name, block_name) for block_name in block_names]
-    circ_files_tket = [load_block(circ_name, block_name, extra="_tket") for block_name in block_names]
-    if cliff_t:
-        circ_files_orig = [(circ_file, precision) for circ_file in circ_files_orig]
-        circ_files_tket = [(circ_file, precision) for circ_file in circ_files_tket]
-    orig_counts = get_base_circ_counts(circ_files_orig, cliff_t=cliff_t)
-    tket_counts = get_base_circ_counts(circ_files_tket, cliff_t=cliff_t)
+    if not no_base:
+        circ_files_tket = [load_block(circ_name, block_name, extra="_tket") for block_name in block_names]
+        if cliff_t:
+            circ_files_orig = [(circ_file, precision) for circ_file in circ_files_orig]
+            circ_files_tket = [(circ_file, precision) for circ_file in circ_files_tket]
+        orig_counts = get_base_circ_counts(circ_files_orig, cliff_t=cliff_t)
+        tket_counts = get_base_circ_counts(circ_files_tket, cliff_t=cliff_t)
 
     # print("Orig counts: ", orig_counts)
     # print("Tket counts: ", tket_counts)
 
     for i, block_name in enumerate(block_names):
-        orig_count = orig_counts[i]
-        tket_count = tket_counts[i]
         block_counts = []
-        block_counts.append((0, orig_count, ("orig", "", 0)))
-        block_counts.append((0, tket_count, ("tket", "", 0)))
+        if not no_base:
+            orig_count = orig_counts[i]
+            tket_count = tket_counts[i]
+            block_counts.append((0, orig_count, ("orig", "", 0)))
+            block_counts.append((0, tket_count, ("tket", "", 0)))
         block_data[block_name] = block_counts
+
+    num_qubits = {}
+    for block_name in block_names:
+        circ = Circuit.from_file(circ_files_orig[i])
+        num_qubits[block_name] = circ.num_qudits
 
     # print(folder_files)
 
@@ -121,6 +134,7 @@ def get_circ_data(circ_name: str, err_threshold: float,
         block_num = folder_name.split('_')[-2]
         # Read CSV
         csv_files = glob.glob(os.path.join(folder_name, f"*.csv"))
+
         if len(csv_files) == 0:
             # Just pick ensemble 0
             # print(folder_name)
@@ -129,17 +143,17 @@ def get_circ_data(circ_name: str, err_threshold: float,
                 # print("No ensemble file found")
                 continue
             ensemble_file = ensemble_file[0]
-            final_threshold = (10 ** (-2 * tol))
+            dim = 2 ** num_qubits[block_num]
+            final_threshold = (10 ** (-2 * tol)) * frob_factor(dim)
         else:
             csv_file = csv_files[0]
             ensemble_file = glob.glob(os.path.join(folder_name, f"ensemble_final.qasms"))[0]
             reader = csv.DictReader(open(csv_file, 'r'))
             min_value = float("inf")  # Initialize to a large number
             for row in reader:
-                if "Ratio" in row:  # Check if the column value is not empty
-                    min_value = min(min_value, float(row["Ratio"]))
-            ratio = min_value
-            final_threshold = (10 ** (-2 * tol)) * ratio
+                if "Norm. Bias" in row:  # Check if the column value is not empty
+                    min_value = min(min_value, float(row["Norm. Bias"]))
+            final_threshold = min_value
         # Get avg count of ensemble
         # print(ensemble_file)
         avg_count = load_ensemble_cx_counts(ensemble_file, cliff_t=cliff_t)
@@ -177,7 +191,7 @@ def get_circ_data(circ_name: str, err_threshold: float,
     block_counts = []
 
     # print("Avg count: ", min_count)
-    if add_tket_count:
+    if add_tket_count and not no_base:
         return [(block_nums[i], d) for i, d in enumerate(final_data)], min_count, np.sum(tket_counts)
     else:
         return [(block_nums[i], d) for i, d in enumerate(final_data)], min_count

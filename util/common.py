@@ -158,7 +158,6 @@ def create_jiggled_ensemble_mp(circ_params: list[tuple[Circuit, np.ndarray]]) ->
         ensemble = pool.map(create_single_jiggled_ensemble, circ_params)
     return list(chain.from_iterable(ensemble))
 
-
 def load_jiggled_ensemble_separate(file_name: str, jiggle_file_name: str) -> tuple[list[Circuit], np.ndarray]:
     circs = load_ensemble(file_name)
     print("Num Circs: ", len(circs), flush=True)
@@ -249,12 +248,38 @@ def load_circuit(circ_name: str, timestep: int = 0, opt: bool = False) -> Circui
     return Circuit.from_file(filename=file_name)
 
 def get_circ_dir(circ_name: int, block_num: int, tol: float, 
-                 cliff_t: bool = False) -> str:
+                 cliff_t: bool = False, extra: str="") -> str:
     if cliff_t:
-        circ_dir = f"{base_checkpoint_dir}_clifft/{circ_name}_{block_num}_{tol}"
+        circ_dir = f"{base_checkpoint_dir}_clifft{extra}/{circ_name}_{block_num}_{tol}"
     else:
-        circ_dir = f"{base_checkpoint_dir}/{circ_name}_{block_num}_{tol}"
+        circ_dir = f"{base_checkpoint_dir}{extra}/{circ_name}_{block_num}_{tol}"
     return circ_dir
+
+def check_param_shape(circ_name: str, block_num: int, tol: float) -> list[int]:
+    circ_dir = get_circ_dir(circ_name, block_num, tol)
+    print("Circ Dir: ", circ_dir, flush=True)
+    full_path = f"{circ_dir}/ensemble_final_jiggle.npy"
+    if not os.path.exists(full_path):
+        # Default to ensemble 0 for now
+        full_path = f"{circ_dir}/ensemble_0_jiggles_.npy"
+        print("Using default ensemble 0", flush=True)
+    params: np.ndarray = np.load(full_path)
+    return params.shape
+
+def load_compiled_circs_params_separate(circ_name: str, block_num: int, tol: float, extra: str = "") -> tuple[list[Circuit], 
+                                                                                             np.ndarray]:
+    circ_dir = get_circ_dir(circ_name, block_num, tol)
+    full_path = f"{circ_dir}/ensemble_final_jiggle.npy"
+    full_ens_path = f"{circ_dir}/ensemble_final.qasms"
+    if not os.path.exists(full_path):
+        # Default to ensemble 0 for now
+        full_path = f"{circ_dir}/ensemble_0_jiggles_.npy"
+        full_ens_path = f"{circ_dir}/ensemble_0_.qasms"
+        print("Using default ensemble 0", flush=True)
+    print("Full Path: ", full_path, flush=True)
+    params: np.ndarray = np.load(full_path)
+    circs = load_ensemble(full_ens_path)
+    return circs, params
 
 def load_compiled_block_circuits(circ_name: int, 
                                  block_num: int,  
