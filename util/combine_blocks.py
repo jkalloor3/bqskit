@@ -2,12 +2,16 @@ import os
 import glob
 import csv
 import numpy as np
+from bqskit.ir import Circuit
 from .common import load_block, get_block_names, get_circ_names
 from .counter import (load_avg_ensemble_counts_est, load_avg_ensemble_counts_full, get_circ_counts)
 
 base_dir = "/home/jkalloor/bqskit"
 nisq_checkpoint_dir = f"{base_dir}/block_checkpoints_final_paper"
-clifft_checkpoint_dir = f"{base_dir}/block_checkpoints_final_paper_clifft_tket"
+clifft_checkpoint_dir = f"{base_dir}/block_checkpoints_final_paper_clifft"
+
+
+frob_factor = lambda dim: np.sqrt(dim * 2)
 
 def get_completed_blocks(cliff_t: bool = False) -> list[str]:
     # Check if there is at least one completed ensemble for each
@@ -47,7 +51,7 @@ def get_circ_data(circ_name: str, err_threshold: float, use_base: bool = True,
     best combination of blocks that minimizes the count
     while being below the error threshold
     '''
-    if cliff_t:
+    if count_t or count_rz:
         checkpoint_dir = clifft_checkpoint_dir
     else:
         checkpoint_dir = nisq_checkpoint_dir
@@ -55,6 +59,7 @@ def get_circ_data(circ_name: str, err_threshold: float, use_base: bool = True,
     # print("Checkpoint dir: ", checkpoint_dir)
     # print("Circ name: ", circ_name)
     folder_files = glob.glob(os.path.join(checkpoint_dir, f"{circ_name}_*"))
+    print(folder_files)
 
     block_names = get_block_names(circ_name, extra="_tket")
     block_data = {}
@@ -80,18 +85,27 @@ def get_circ_data(circ_name: str, err_threshold: float, use_base: bool = True,
             block_counts.append((0, tket_count, ("tket", "", 0)))
         block_data[block_name] = block_counts
 
+    num_qubits = {}
+    for block_name in block_names:
+        circ = Circuit.from_file(circ_files_orig[i])
+        num_qubits[block_name] = circ.num_qudits
+
+    # print(folder_files)
+
     for folder_name in folder_files:
         tol = float(folder_name.split('_')[-1])
         block_num = folder_name.split('_')[-2]
         # Read CSV
         csv_files = glob.glob(os.path.join(folder_name, f"*.csv"))
+
         if len(csv_files) == 0:
             # Just pick ensemble 0
             ensemble_file = glob.glob(os.path.join(folder_name, f"ensemble_0_.qasms"))
             if len(ensemble_file) == 0:
                 continue
             ensemble_file = ensemble_file[0]
-            final_threshold = (10 ** (-2 * tol))
+            dim = 2 ** num_qubits[block_num]
+            final_threshold = (10 ** (-2 * tol)) * frob_factor(dim)
         else:
             csv_file = csv_files[0]
             ensemble_file = glob.glob(os.path.join(folder_name, f"ensemble_final.qasms"))[0]
@@ -143,7 +157,6 @@ def get_circ_data(circ_name: str, err_threshold: float, use_base: bool = True,
                             count_t=count_t, count_rz=count_rz) for file in final_files]
     min_count = np.sum(actual_counts)
 
-    # print("Avg count: ", min_count)
     if use_base:
         tket_count = min(np.sum(orig_counts), np.sum(tket_counts))
         return [(block_nums[i], d) for i, d in enumerate(final_data)], min_count, tket_count
@@ -155,7 +168,3 @@ def get_counts(circ_name: str, err_threshold: float, cliff_t: bool = False) -> f
 
 def get_circ_block_dirs(circ_name: str, err_threshold: float, cliff_t: bool = False):
     return get_circ_data(circ_name, err_threshold, cliff_t)[0]
-
-# if __name__ == "__main__":
-#     # print(get_circ_block_dirs("adder9", 0.3, False))
-#     print(get_completed_blocks(True))

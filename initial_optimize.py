@@ -16,7 +16,7 @@ import os
 import time
 from sys import argv
 
-base_dir = "/home/jkalloor/bqskit"
+base_dir = "/pscratch/sd/j/jkalloor/bqskit"
 
 temp_file = "temp.qasm"
 
@@ -99,7 +99,7 @@ if __name__ == '__main__':
 
     Path(output_dir).mkdir(parents=True, exist_ok=True)
 
-    unoptimized_circ_files = glob.glob(f"{input_dir}/*.qasm")
+    unoptimized_circ_files = glob.glob(f"{input_dir}/qaoa10*.qasm")
 
     for circ_file in unoptimized_circ_files:
         file_name = Path(circ_file).name
