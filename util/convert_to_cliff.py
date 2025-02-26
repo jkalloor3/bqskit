@@ -181,7 +181,9 @@ class ConvertToZXZXZSimple(BasePass):
     def __init__(self, group: bool = False) -> None:
         self.group = group
 
-    async def run_circuit(self, circuit: Circuit, group: bool = False) -> None:
+
+    @staticmethod
+    def run_circuit(circuit: Circuit, group: bool = False) -> None:
         # Group Single Qudit Gates
         if group:
             GroupSingleQuditGatePass.group(circuit)
@@ -204,9 +206,8 @@ class ConvertToZXZXZSimple(BasePass):
     ) -> None:
         # For every circuit in data["scan_sols"], run the circuit
         if "scan_sols" not in data:
-            await self.run_circuit(circuit, self.group)
+            ConvertToZXZXZSimple.run_circuit(circuit, self.group)
             return
         scan_sols: list[tuple[Circuit, float]] = data["scan_sols"]
         for circ, _ in scan_sols:
-            # orig_gate_count = circ.gate_counts
-            await self.run_circuit(circ, self.group)
+            ConvertToZXZXZSimple.run_circuit(circ, self.group)

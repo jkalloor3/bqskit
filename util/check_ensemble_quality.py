@@ -14,7 +14,8 @@ from bqskit.runtime import get_runtime
 import os
 import time
 import shutil
-from util.common import load_jiggled_ensemble_separate, calc_avg_unitary_shm, count_params
+from .common import load_jiggled_ensemble_separate, calc_avg_unitary_shm
+from .counter import count_params
 
 from .distance import frobenius_cost, normalized_frob_cost
 
@@ -150,7 +151,6 @@ class CheckEnsembleQualityPass(BasePass):
         start_ens_ind = 1
         ens_file = ensemble_file_name.format(ind=start_ens_ind, extra=self.checkpoint_extra_str)
         jiggle_file = jiggle_file_name.format(ind=start_ens_ind, extra=self.checkpoint_extra_str)
-        ensemble_unitaries = {}
         ensemble_counts = {}
 
         target = data.target
@@ -159,14 +159,6 @@ class CheckEnsembleQualityPass(BasePass):
 
         shm_name = checkpoint_dir.split("/")[-1]
         print("Shared Memory Name: ", shm_name, flush=True)
-        # shm_size = int(MAX_SHM_SIZE * self.shm_percentage)
-        # try:
-        #     shm = shared_memory.SharedMemory(name=shm_name)
-        #     print("Shared Memory Exists", flush=True)
-        #     shm.close()
-        #     shm.unlink()
-        # except:
-        #     print("Shared Memory Does Not Exist", flush=True)
         
         # Create new shared memory
         best_ind = 0

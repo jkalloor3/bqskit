@@ -28,7 +28,8 @@ from bqskit.utils.math import dot_product
 from bqskit.runtime import get_runtime
 
 import os
-from .common import (store_jiggled_ensemble, count_params, load_ensemble)
+from .common import store_jiggled_ensemble, load_ensemble
+from .counter import count_params
 from .gg import GridSynthGate, gg_gate_def, MIN_EPSILON
 from .distance import normalized_gp_frob_cost
 

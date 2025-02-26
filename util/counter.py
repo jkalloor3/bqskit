@@ -4,7 +4,6 @@ from math import ceil
 from bqskit.ir import Circuit
 from bqskit.ir.lang.qasm2 import OPENQASM2Language
 from bqskit.ir.gates import *
-from bqskit.compiler import Compiler
 import numpy as np
 from .fix_angles import FixAnglesPass
 from .convert_to_cliff import ConvertToZXZXZSimple
@@ -12,12 +11,10 @@ from .gg import GridSynthGate, gg_gate_def
 
 qlang = OPENQASM2Language(gate_defs=[("gg", gg_gate_def)])
 
-def fix_angle_workflow(precision: int) -> list:
-    return [
-        FixAnglesPass(15),
-        ConvertToZXZXZSimple(),
-        FixAnglesPass(precision),
-    ]
+def fix_angle_workflow(circ: Circuit, precision: int) -> None:
+    FixAnglesPass.run_circ(circ, 15)
+    ConvertToZXZXZSimple.run_circ(circ)
+    FixAnglesPass.run_circ(circ, precision)
 
 
 class GateCounter:
@@ -79,7 +76,8 @@ class GateCounter:
     def count_cx(self, circ: Circuit)  -> int:
         return circ.count(CNOTGate())
 
-    def count_rz(self, circ: Circuit, target_error: float)  -> int:
+    def count_rz(self, circ: Circuit, target_error: float = None, 
+                    skip_fix: bool = False)  -> int:
         if target_error is None:
             precision = 18
         else:
@@ -87,26 +85,32 @@ class GateCounter:
             precision = ceil(-np.log10(error_per_param))
         
         # Count RZ gates
-        if self.has_non_rz(circ):
-            compiler = Compiler(num_workers=1)
-            workflow = fix_angle_workflow(precision=precision)
-            out_circ = compiler.compile(circ, workflow)
-            compiler.close()
-        return out_circ.count(RZGate()) + out_circ.count(GridSynthGate())
+        if self.has_non_rz(circ) and not skip_fix:
+            out_circ = circ.copy()
+            fix_angle_workflow(out_circ, precision=precision)
+        else:
+            out_circ = circ
 
-    def count_t(self, circ: Circuit, target_error: float = None) -> int:
+        # U3 params
+        u3_params = 0
+        for op in out_circ.operations():
+            if isinstance(op.gate, U3Gate):
+                u3_params += len(np.nonzero(op.params))
+
+        return circ.count(RZGate()) + circ.count(GridSynthGate()) + u3_params
+
+    def count_t(self, circ: Circuit, target_error: float = None, skip_fix: bool = False) -> int:
         if target_error is None:
             precision = 18
         else:
             error_per_param = target_error / circ.num_params
             precision = ceil(-np.log10(error_per_param))
         
-        out_circ = circ.copy()
-        if GateCounter.has_non_rz(circ):
-            compiler = Compiler(num_workers=1)
-            workflow = fix_angle_workflow(precision=precision)
-            out_circ = compiler.compile(out_circ, workflow)
-            compiler.close()
+        if GateCounter.has_non_rz(circ) and not skip_fix:
+            out_circ = circ.copy()
+            workflow = fix_angle_workflow(out_circ, precision=precision)
+        else:
+            out_circ = circ
 
         print(out_circ.gate_counts)
 
@@ -184,3 +188,15 @@ def load_avg_ensemble_counts_full(ensemble_file: str, target_error: float,
     
     counts = load_ensemble_counts_full(ensemble_file, target_error, count_t, count_rz)
     return np.mean(counts)
+
+def count_params(circ: Circuit) -> int:
+    gate_counter_full.count_rz(circ, skip_fix=True)
+
+def count_curr_t(circ: Circuit) -> int:
+    gate_counter_full.count_t(circ, skip_fix=True)
+
+def count_all_t(circ: Circuit) -> int:
+    gate_counter_full.count_t(circ, skip_fix=False)
+
+def count_all_rz(circ: Circuit) -> int:
+    gate_counter_full.count_rz(circ, skip_fix=False)
