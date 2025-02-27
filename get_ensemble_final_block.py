@@ -2,8 +2,6 @@ from bqskit.ir.circuit import Circuit
 from sys import argv
 import glob
 import os
-from multiprocessing.shared_memory import SharedMemory
-import numpy as np
 from bqskit.compiler.compiler import Compiler, WorkflowLike
 from bqskit.ir.gates import CNOTGate
 # Generate a super ensemble for some error bounds
@@ -13,7 +11,7 @@ from util import JiggleEnsemblePass, CleanupBlockFiles
 from util import  LEAPSynthesisPass2, SecondLEAPSynthesisPass
 from util import CheckEnsembleQualityPass, FixGlobalPhasePass
 from util import GenerateProbabilityPass
-from util import CreateEnsemblePass, MAX_SHM_SIZE, NUM_CIRCS_PER_PROB
+from util import CreateEnsemblePass
 
 good_instantiation_options = {
     'multistarts': 8,
@@ -115,7 +113,7 @@ def check_if_finished(circ_name: str, tol: float, extra: str = "") -> tuple[bool
     if len(jiggle_files) == 0:
         return False, False, ""
     # Try to get extra_str from jiggle files
-    extra_str = jiggle_files[0].split("5_jiggles_")[1]
+    extra_str = jiggle_files[0].split("4_jiggles_")[1]
     # Remove everything after .
     extra_str = extra_str.split(".npy")[0]
     return False, True, extra_str
@@ -133,14 +131,12 @@ def get_final_workflow(circ_name: str, tol: float, extra: str = "", num_processe
     if not jiggle_finished:
         print(f"Jiggle not finished {circ_name} {tol}", flush=True)
         return get_ensemble_workflow(circ_name, tol, extra=extra)
-    # Else run the Final 2 passes
-    jiggle_pass = JiggleEnsemblePass(checkpoint_extra_str=extra_str)
+    print("Finding Final Ensemble for ", circ_name, flush=True)
     workflow = [
         CheckpointRestartPass(checkpoint_dir, 
                                 default_passes=[]),
-        jiggle_pass, # To reload jiggled unitaries
-        CheckEnsembleQualityPass(False, shm_percentage=(1.0 / num_processes)),
-        GenerateProbabilityPass(shm_percentage=(1.0 / num_processes))
+        CheckEnsembleQualityPass(False),
+        GenerateProbabilityPass()
     ]
     return workflow
 
@@ -162,44 +158,23 @@ def get_shortest_circuits(circ_data: list[tuple[str, str, float]], extra: str = 
     compiler = Compiler(num_workers=num_workers)
     
     workflow_ind = 0
-    ids: list[tuple[SharedMemory, SharedMemory, int]] = []
+    ids: list[int] = []
 
-    shm_percentage = (1.0 / num_processes)
-
-    for circ_name, circ_file, tol in circ_data:
+    for _, circ_file, _ in circ_data:
         workflow = workflows[workflow_ind]
         workflow_ind += 1
         if workflow:
             circ = Circuit.from_file(circ_file)
             print("Original CNOT Count: ", circ.count(CNOTGate()), flush=True)
-            # Also need a return shm for Generate Probs
-            if len(workflow) == 4:
-                # Create Shared Memory for the workflow
-                shm_name = f"{circ_name}_{tol}"
-                shm_size = int(MAX_SHM_SIZE * shm_percentage)
-                shm = SharedMemory(name=shm_name, create=True, size=shm_size)
-                print("Generating Probs for ", shm_name)
-                shm_ret_name = f"{circ_name}_{tol}_ret"
-                un_dim = 2 ** circ.num_qudits
-                # (M, un_dim, un_dim)
-                shm_ret_size = NUM_CIRCS_PER_PROB * un_dim * un_dim * np.dtype(np.complex128).itemsize
-                shm_ret = SharedMemory(name=shm_ret_name, create=True, size=shm_ret_size)
-            else:
-                shm = None
-                shm_ret = None
-            ids.append((shm, shm_ret, compiler.submit(circ, workflow)))
+            ids.append(compiler.submit(circ, workflow))
 
     ind = 0
-    for shm, shm_ret, id in ids:
+    for id in ids:
         compiler.result(id)
         print("Finished: ", circ_data[ind][0], flush=True)
-        if shm is not None:
-            print("Closing Shared Memory", flush=True)
-            shm.close()
-            shm.unlink()
-            shm_ret.close()
-            shm_ret.unlink()
         ind += 1
+    compiler.close()
+    print("Compiler Closed", flush=True)
     return
 
 def find_file(circ_name: str, block_num: str, extra="") -> tuple[str, str]:
@@ -233,11 +208,17 @@ def get_circ_data(circ_name: str, block_num: str | int,
             block_num = parts[-2]
             tol = float(parts[-1])
             circ_name = "_".join(parts[:-2])
+            if not circ_name.startswith("qae"):
+                continue
             circ_name, circ_file = find_file(circ_name, block_num, extra=extra)
             finished, jiggle_finished, _ = check_if_finished(circ_name, tol, extra=extra)
             if not finished and jiggle_finished:
                 for tol in tols:
                     circ_data.append((circ_name, circ_file, tol))
+
+        if len(circ_data) > 20:
+            circ_data = circ_data[:20]
+            print("Limiting to 20 circs", flush=True)
         return circ_data
     
     else:
@@ -267,7 +248,7 @@ if __name__ == '__main__':
     circ_name = argv[1]
     block_num = argv[2] if len(argv) > 2 else ""
     tol = float(argv[3]) if len(argv) > 3 else -1.0
-    extra = argv[4] if len(argv) > 4 else ""
+    extra = argv[4] if len(argv) > 4 else "_tket"
     circ_data = get_circ_data(circ_name, block_num, tol, extra=extra)
     print(circ_data)
     get_shortest_circuits(circ_data, extra=extra)

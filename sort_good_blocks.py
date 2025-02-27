@@ -22,8 +22,6 @@ bad_output_folder = 'bad_blocks'
 block_save_dir = "/pscratch/sd/j/jkalloor/bqskit/block_qasms_{circ_name}/"
 partitioned_circ_save_file = "/pscratch/sd/j/jkalloor/bqskit/partitioned_circs/{circ_name}.pickle"
 
-compiler = Compiler(num_workers=64)
-
 def partition_workflow(circ_name: str, num_qudits: int = 8) -> list:
     if num_qudits < 15:
         partitioner_1 = ScanPartitioner(3)
@@ -53,7 +51,7 @@ def partition_workflow(circ_name: str, num_qudits: int = 8) -> list:
     ])
 ]
 
-def process_files(circ_name: str, circ_file: str):
+def process_files(circ_name: str, circ_file: str, compiler: Compiler):
     circ = Circuit.from_file(circ_file)
     print("Running Partitioner on: ", circ_name, circ.num_qudits, flush=True)
     # compiler.compile(circ, partition_workflow)
@@ -87,26 +85,25 @@ def sort_blocks(circ_name: str, good_output_folder, bad_output_folder):
     # Delete block_save_dir
     os.rmdir(block_save_dir.format(circ_name=circ_name))
 
-# circ_types = ['qft_8', 'qml_19', 'heisenberg7', 'qft_30', 'tfim16'] 
-            #   'adder63', 'heisenberg64', 'qaoa12', 'qpe10', 'vqe14', 'qpe8', 
-            #   'mult64', 'hub18', 'heisenberg8', 'hub8']
-circ_types = ['qpe10', 'hub18']
-job_ids = []
-for circ_type in circ_types:
-    circ_files = glob.glob(os.path.join(input_folder, f"{circ_type}.qasm"))
-    circ_names = [circ_file.split('/')[-1].split('.')[0] for circ_file in circ_files]
-    circ_data = list(zip(circ_names, circ_files))
-    for name, file in circ_data:
-        job_ids.append((name, process_files(name, file)))
+if __name__ == '__main__':
+    compiler = Compiler(num_workers=64)
+    circ_types = ['qpe10', 'hub18']
+    job_ids = []
+    for circ_type in circ_types:
+        circ_files = glob.glob(os.path.join(input_folder, f"{circ_type}.qasm"))
+        circ_names = [circ_file.split('/')[-1].split('.')[0] for circ_file in circ_files]
+        circ_data = list(zip(circ_names, circ_files))
+        for name, file in circ_data:
+            job_ids.append((name, process_files(name, file, compiler)))
 
-# print(job_ids, flush=True)
+    # print(job_ids, flush=True)
 
-for name, job_id in job_ids:
-    if job_id == -1:
-        print("Partitioning failed for: ", name, flush=True)
-        continue
-    print("Awaiting: ", name, flush=True)
-    out_circ = compiler.result(job_id)
-    print("Finished: ", name, flush=True)
-    sort_blocks(name, good_output_folder, bad_output_folder)
-    pickle.dump(out_circ, open(partitioned_circ_save_file.format(circ_name=name), 'wb'))
+    for name, job_id in job_ids:
+        if job_id == -1:
+            print("Partitioning failed for: ", name, flush=True)
+            continue
+        print("Awaiting: ", name, flush=True)
+        out_circ = compiler.result(job_id)
+        print("Finished: ", name, flush=True)
+        sort_blocks(name, good_output_folder, bad_output_folder)
+        pickle.dump(out_circ, open(partitioned_circ_save_file.format(circ_name=name), 'wb'))

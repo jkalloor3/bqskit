@@ -17,7 +17,6 @@ from bqskit.ir.gates import CNOTGate
 from bqskit.qis import UnitaryMatrix
 import numpy as np
 import os
-import pickle
 
 from util import normalized_gp_frob_cost, count_params
 

@@ -13,15 +13,13 @@ from util import load_block, normalized_gp_frob_cost
 
 from bqskit import enable_logging
 
-enable_logging(True)
-
-compiler = Compiler(num_workers=128)
-
 base_dir = "/pscratch/sd/j/jkalloor/bqskit"
 input_dir = f"{base_dir}/bad_blocks"
 output_dir = f"{input_dir}_opt3"
+enable_logging(True)
 
 def full_compile(circ_name: str, block_num: str, tol: float = 10e-10):
+    compiler = Compiler(num_workers=128)
     circ_file = load_block(circ_name, block_num)
     circ = Circuit.from_file(circ_file)
     out_circ: Circuit = compile(circ, optimization_level=3, max_synthesis_size=3, synthesis_epsilon=tol, error_sim_size=8, compiler=compiler)

@@ -35,13 +35,16 @@ def stack_padding(it: list[np.ndarray], vertical: bool = True) -> np.ndarray:
         print("Final Param Arr Shape: ", result.shape, flush=True)
     return result
 
+def store_params(all_params: list[np.ndarray], jiggle_file_name: str):
+    # Get max param size
+    params = stack_padding(all_params, vertical=False)
+    np.save(jiggle_file_name, params)
+
 def store_jiggled_ensemble(ensemble: list[tuple[Circuit, np.ndarray]], file_name: str, jiggle_file_name: str):
     # Get circuits
     circs = [circ for circ, _ in ensemble ]
     store_ensemble(circs, file_name)
-    params = stack_padding([params for _, params in ensemble], vertical=False)
-    # params = np.stack([params for _, params in ensemble])
-    np.save(jiggle_file_name, params)
+    store_params([params for _, params in ensemble], jiggle_file_name)
 
 def create_single_jiggled_ensemble(circ_params: tuple[Circuit, np.ndarray], 
                                    target: UnitaryMatrix = None, phase_fix: bool = False,
@@ -63,6 +66,28 @@ def create_single_jiggled_ensemble(circ_params: tuple[Circuit, np.ndarray],
             ens.append(new_circ)
     return ens
 
+def create_avg_utry(circ_params: tuple[Circuit, np.ndarray], 
+                    target: UnitaryMatrix,  
+                    add_cost: bool = False) -> UnitaryMatrix | tuple[UnitaryMatrix, float]:
+    circ, params = circ_params
+    avg_utry = np.zeros_like(circ.get_unitary())
+    avg_dist = 0
+    for param in params.tolist():
+        new_circ = circ.copy()
+        new_circ.set_params(param)
+        fix_phase(new_circ, target)
+        un = new_circ.get_unitary()
+        avg_utry += un
+        if add_cost:
+            avg_dist += normalized_frob_cost(un, target)
+    avg_utry = avg_utry / len(params)
+    avg_dist = avg_dist / len(params)
+    if add_cost:
+        return (avg_utry, avg_dist)
+    else:
+        return avg_utry
+
+
 def creat_single_unitary(circ: Circuit, param: np.ndarray, target: UnitaryMatrix) -> tuple[UnitaryMatrix, float]:
     utry = circ.get_unitary(param)
     gp_correction = target.get_target_correction_factor(utry)
@@ -70,9 +95,17 @@ def creat_single_unitary(circ: Circuit, param: np.ndarray, target: UnitaryMatrix
     cost_1 = normalized_frob_cost(utry, target)
     return (utry, cost_1)
 
+def get_unitary(circ: Circuit, target: UnitaryMatrix) -> tuple[UnitaryMatrix, float]:
+    utry = circ.get_unitary()
+    gp_correction = target.get_target_correction_factor(utry)
+    utry = utry * gp_correction
+    cost_1 = normalized_frob_cost(utry, target)
+    return (utry, cost_1)
+
 
 def create_jiggled_unitaries(circ_params: tuple[Circuit, np.ndarray], 
-                                   target: UnitaryMatrix = None) -> list[tuple[UnitaryMatrix]] | list[tuple[UnitaryMatrix, float]]:
+                                   target: UnitaryMatrix = None,
+                                   add_cost: bool = True) -> np.ndarray[np.complex128] | list[tuple[UnitaryMatrix, float]]:
     circ, params = circ_params
     ens = []
     correct = target is not None
@@ -82,60 +115,63 @@ def create_jiggled_unitaries(circ_params: tuple[Circuit, np.ndarray],
         if correct:
             gp_correction = target.get_target_correction_factor(utry)
             utry = utry * gp_correction
+        if add_cost:
             cost_1 = normalized_frob_cost(utry, target)
             ens.append((utry, cost_1))
         else:
             ens.append(utry)
-    # print("Ens Size: ", len(ens), flush=True)
+    if not add_cost:
+        ens = np.array(ens, dtype=np.complex128)
+        return ens
     return ens
 
-def calc_avg_unitary_shm(circ_ind: tuple[Circuit, int],
-                                 shm_name: str, 
-                                 shm_shape: tuple[int, int, int], 
-                                 target: UnitaryMatrix = None) -> tuple[UnitaryMatrix, float]:
-    existing_shm = shared_memory.SharedMemory(name=shm_name)
-    shared_array = np.ndarray(shm_shape, dtype=np.float64, buffer=existing_shm.buf)
-    circ, param_ind = circ_ind
-    params: np.ndarray = shared_array[param_ind]
-    orig_unitary = circ.get_unitary()
-    avg_unitary = np.zeros_like(orig_unitary)
-    avg_dist = 0.0
-    for i, param in enumerate(params.tolist()):
-        utry = circ.get_unitary(param)
-        gp_correction = target.get_target_correction_factor(utry)
-        utry: UnitaryMatrix = utry * gp_correction
-        cost_1 = normalized_frob_cost(utry, target)
-        avg_unitary += utry.numpy
-        avg_dist += cost_1
+# def calc_avg_unitary_shm(circ_ind: tuple[Circuit, int],
+#                                  shm_name: str, 
+#                                  shm_shape: tuple[int, int, int], 
+#                                  target: UnitaryMatrix = None) -> tuple[UnitaryMatrix, float]:
+#     existing_shm = shared_memory.SharedMemory(name=shm_name)
+#     shared_array = np.ndarray(shm_shape, dtype=np.float64, buffer=existing_shm.buf)
+#     circ, param_ind = circ_ind
+#     params: np.ndarray = shared_array[param_ind]
+#     orig_unitary = circ.get_unitary()
+#     avg_unitary = np.zeros_like(orig_unitary)
+#     avg_dist = 0.0
+#     for i, param in enumerate(params.tolist()):
+#         utry = circ.get_unitary(param)
+#         gp_correction = target.get_target_correction_factor(utry)
+#         utry: UnitaryMatrix = utry * gp_correction
+#         cost_1 = normalized_frob_cost(utry, target)
+#         avg_unitary += utry.numpy
+#         avg_dist += cost_1
 
-    existing_shm.close()
-    avg_unitary = avg_unitary / len(params)
-    avg_dist = avg_dist / len(params)
-    return avg_unitary, avg_dist
+#     existing_shm.close()
+#     avg_unitary = avg_unitary / len(params)
+#     avg_dist = avg_dist / len(params)
+#     return avg_unitary, avg_dist
 
-def create_jiggled_unitaries_shm(circ_ind: tuple[Circuit, int],
-                                 shm_name: str, 
-                                 shm_ret_name: str,
-                                 shm_shape: tuple[int, int, int], 
-                                 shm_ret_shape: tuple[int, int, int],
-                                 target: UnitaryMatrix) -> np.ndarray:
-    existing_shm = shared_memory.SharedMemory(name=shm_name)
-    existing_shm_ret = shared_memory.SharedMemory(name=shm_ret_name)
-    shared_array = np.ndarray(shm_shape, dtype=np.float64, buffer=existing_shm.buf)
-    shared_array_ret = np.ndarray(shm_ret_shape, dtype=np.complex128, buffer=existing_shm_ret.buf)
-    circ, param_ind = circ_ind
-    params: np.ndarray = shared_array[param_ind]
+# def create_jiggled_unitaries_shm(circ_ind: tuple[Circuit, int],
+#                                  shm_name: str, 
+#                                  shm_ret_name: str,
+#                                  shm_shape: tuple[int, int, int], 
+#                                  shm_ret_shape: tuple[int, int, int],
+#                                  target: UnitaryMatrix) -> np.ndarray:
+#     existing_shm = shared_memory.SharedMemory(name=shm_name)
+#     existing_shm_ret = shared_memory.SharedMemory(name=shm_ret_name)
+#     shared_array = np.ndarray(shm_shape, dtype=np.float64, buffer=existing_shm.buf)
+#     shared_array_ret = np.ndarray(shm_ret_shape, dtype=np.complex128, buffer=existing_shm_ret.buf)
+#     circ, param_ind = circ_ind
+#     params: np.ndarray = shared_array[param_ind]
 
-    for i, param in enumerate(params.tolist()):
-        utry = circ.get_unitary(param)
-        gp_correction = target.get_target_correction_factor(utry)
-        utry: UnitaryMatrix = utry * gp_correction
-        shared_array_ret[i + param_ind * 4] = utry.numpy
+#     for i, param in enumerate(params.tolist()):
+#         utry = circ.get_unitary(param)
+#         gp_correction = target.get_target_correction_factor(utry)
+#         utry: UnitaryMatrix = utry * gp_correction
+#         shared_array_ret[i + param_ind * 4] = utry.numpy
         
 
-    existing_shm.close()
-    existing_shm_ret.close()
-    return
+#     existing_shm.close()
+#     existing_shm_ret.close()
+#     return
 
 
 def create_jiggled_ensemble(circ_params: list[tuple[Circuit, np.ndarray]]) -> list[Circuit]:

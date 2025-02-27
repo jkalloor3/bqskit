@@ -190,13 +190,13 @@ def load_avg_ensemble_counts_full(ensemble_file: str, target_error: float,
     return np.mean(counts)
 
 def count_params(circ: Circuit) -> int:
-    gate_counter_full.count_rz(circ, skip_fix=True)
+    return gate_counter_full.count_rz(circ, skip_fix=True)
 
 def count_curr_t(circ: Circuit) -> int:
-    gate_counter_full.count_t(circ, skip_fix=True)
+    return gate_counter_full.count_t(circ, skip_fix=True)
 
 def count_all_t(circ: Circuit) -> int:
-    gate_counter_full.count_t(circ, skip_fix=False)
+    return gate_counter_full.count_t(circ, skip_fix=False)
 
 def count_all_rz(circ: Circuit) -> int:
-    gate_counter_full.count_rz(circ, skip_fix=False)
+    return gate_counter_full.count_rz(circ, skip_fix=False)
