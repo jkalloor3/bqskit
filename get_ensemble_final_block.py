@@ -124,7 +124,7 @@ def get_final_workflow(circ_name: str, tol: float, extra: str = "", num_processe
     base_checkpoint_dir = base_checkpoint_dir_form.format(extra=extra)
     checkpoint_dir = os.path.join(base_checkpoint_dir, f"{circ_name}_{tol}")
     print(f"Checkpoint Dir: {checkpoint_dir}", flush=True)
-    finished, jiggle_finished, extra_str = check_if_finished(circ_name, tol, extra=extra)
+    finished, jiggle_finished, _ = check_if_finished(circ_name, tol, extra=extra)
     if finished:
         print(f"Already finished {circ_name} {tol}", flush=True)
         return None
@@ -211,9 +211,9 @@ def get_circ_data(circ_name: str, block_num: str | int,
             if not circ_name.startswith("qae"):
                 continue
             circ_name, circ_file = find_file(circ_name, block_num, extra=extra)
-            finished, jiggle_finished, _ = check_if_finished(circ_name, tol, extra=extra)
-            if not finished and jiggle_finished:
-                for tol in tols:
+            for tol in tols:
+                finished, jiggle_finished, _ = check_if_finished(circ_name, tol, extra=extra)
+                if not finished and jiggle_finished:
                     circ_data.append((circ_name, circ_file, tol))
 
         if len(circ_data) > 20:

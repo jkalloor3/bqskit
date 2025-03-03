@@ -6,7 +6,7 @@ from bqskit.ir import Circuit
 from .common import load_block, get_block_names, get_circ_names
 from .counter import (load_avg_ensemble_counts_est, load_avg_ensemble_counts_full, get_circ_counts)
 
-base_dir = "/home/jkalloor/bqskit"
+base_dir = "/pscratch/sd/j/jkalloor/bqskit"
 nisq_checkpoint_dir = f"{base_dir}/block_checkpoints_final_paper"
 clifft_checkpoint_dir = f"{base_dir}/block_checkpoints_final_paper_clifft"
 
@@ -52,14 +52,17 @@ def get_circ_data(circ_name: str, err_threshold: float, use_base: bool = True,
     while being below the error threshold
     '''
     if count_t or count_rz:
-        checkpoint_dir = clifft_checkpoint_dir
+        checkpoint_dir_1 = clifft_checkpoint_dir
+        checkpoint_dir_2 = clifft_checkpoint_dir + "_tket"
     else:
-        checkpoint_dir = nisq_checkpoint_dir
+        checkpoint_dir_1 = nisq_checkpoint_dir
+        checkpoint_dir_2 = nisq_checkpoint_dir + "_tket"
 
     # print("Checkpoint dir: ", checkpoint_dir)
     # print("Circ name: ", circ_name)
-    folder_files = glob.glob(os.path.join(checkpoint_dir, f"{circ_name}_*"))
-    print(folder_files)
+    folder_files = glob.glob(os.path.join(checkpoint_dir_1, f"{circ_name}_*"))
+    folder_files_2 = glob.glob(os.path.join(checkpoint_dir_2, f"{circ_name}_*"))
+    folder_files = folder_files + folder_files_2
 
     block_names = get_block_names(circ_name, extra="_tket")
     block_data = {}
@@ -98,6 +101,10 @@ def get_circ_data(circ_name: str, err_threshold: float, use_base: bool = True,
         # Read CSV
         csv_files = glob.glob(os.path.join(folder_name, f"*.csv"))
 
+        extra = ""
+        if "_tket" in folder_name:
+            extra = "_tket"
+
         if len(csv_files) == 0:
             # Just pick ensemble 0
             ensemble_file = glob.glob(os.path.join(folder_name, f"ensemble_0_.qasms"))
@@ -113,12 +120,12 @@ def get_circ_data(circ_name: str, err_threshold: float, use_base: bool = True,
             final_threshold = (10 ** -tol)
             for row in reader:
                 if "Norm. Bias" in row:  # Check if the column value is not empty
-                    min_value = min(min_value, float(row["Norm. Bias"]))
+                    final_threshold = min(final_threshold, float(row["Norm. Bias"]))
         avg_count = load_avg_ensemble_counts_est(ensemble_file, err_threshold, 
                                                     count_t=count_t, 
                                                     count_rz=count_rz)
         block_data[block_num].append((final_threshold, avg_count, 
-                                      (circ_name, block_num, tol), 
+                                      (circ_name, block_num, tol, extra), 
                                       ensemble_file))
 
     # Now for every block, try to select one folder name per block_num 

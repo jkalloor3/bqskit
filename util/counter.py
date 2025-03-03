@@ -43,9 +43,10 @@ class GateCounter:
         if self.est:
             # Count RZ gates
             # Just count the number of RZ gates from str
-            gg_count = qasm.count('gg ')
-            rz_count = qasm.count('rz ')
-            u3_count = qasm.count('u3 ')
+            gg_count = qasm.count('gg(') + qasm.count('gg (')
+            rz_count = qasm.count('rz(') + qasm.count('rz (')
+            u3_count = qasm.count('u3(') + qasm.count('u3 (')
+            # print(gg_count, rz_count, u3_count)
                 # Some U3s are just identity
             id_string = "(0.0, 0.0, 0.0)"
             id_count = qasm.count(id_string)
@@ -145,8 +146,8 @@ class GateCounter:
         
         return num_t
 
-gate_counter_est = GateCounter(est=False)
-gate_counter_full = GateCounter(est=True)
+gate_counter_est = GateCounter(est=True)
+gate_counter_full = GateCounter(est=False)
 
 def get_circ_counts(circ_files: list[str], 
                          count_t: bool = False,
@@ -192,6 +193,9 @@ def load_avg_ensemble_counts_full(ensemble_file: str, target_error: float,
 def count_params(circ: Circuit) -> int:
     return gate_counter_full.count_rz(circ, skip_fix=True)
 
+def count_params_str(qasm_str: str) -> int:
+    return gate_counter_est.count_qasm(qasm_str, target_error=1e-12, 
+                                       count_rz=True)
 def count_curr_t(circ: Circuit) -> int:
     return gate_counter_full.count_t(circ, skip_fix=True)
 

@@ -14,7 +14,7 @@ import multiprocessing as mp
 
 from .gg import gg_gate_def, GridSynthGate
 
-base_bqskit_dir = "/home/jkalloor/bqskit"
+base_bqskit_dir = "/pscratch/sd/j/jkalloor/bqskit"
 good_block_dir = f"{base_bqskit_dir}/good_blocks"
 bad_block_dir = f"{base_bqskit_dir}/bad_blocks"
 base_checkpoint_dir = f"{base_bqskit_dir}/block_checkpoints_final_paper"
@@ -209,6 +209,11 @@ def store_ensemble(ensemble: list[Circuit], file_name: str):
     with open(file_name, "w") as f:
         f.write("\nBREAK\n".join(qasms))
 
+def store_ensemble_strs(qasms: list[str], file_name: str):
+    # Store as list of qasm strings
+    with open(file_name, "w") as f:
+        f.write("\nBREAK\n".join(qasms))
+
 def load_ensemble(file_name: str) -> list[Circuit]:
     with open(file_name, "r") as f:
         qasms = f.read().split("\nBREAK\n")
@@ -216,6 +221,11 @@ def load_ensemble(file_name: str) -> list[Circuit]:
     circs = [qlang.decode(qasm, gate_defs = [("gg", gg_gate_def)]) for qasm in qasms]
     print("Decoded", flush=True)
     return circs
+
+def load_ensemble_strs(file_name: str) -> list[Circuit]:
+    with open(file_name, "r") as f:
+        qasms = f.read().split("\nBREAK\n")
+    return qasms
 
 def load_ensemble_mp(file_name: str) -> list[Circuit]:
     with open(file_name, "r") as f:
@@ -259,8 +269,8 @@ def get_circ_dir(circ_name: int, block_num: int, tol: float,
         circ_dir = f"{base_checkpoint_dir}{extra}/{circ_name}_{block_num}_{tol}"
     return circ_dir
 
-def check_param_shape(circ_name: str, block_num: int, tol: float) -> list[int]:
-    circ_dir = get_circ_dir(circ_name, block_num, tol)
+def check_param_shape(circ_name: str, block_num: int, tol: float, extra: str = "") -> list[int]:
+    circ_dir = get_circ_dir(circ_name, block_num, tol, extra=extra)
     print("Circ Dir: ", circ_dir, flush=True)
     full_path = f"{circ_dir}/ensemble_final_jiggle.npy"
     if not os.path.exists(full_path):
@@ -272,7 +282,7 @@ def check_param_shape(circ_name: str, block_num: int, tol: float) -> list[int]:
 
 def load_compiled_circs_params_separate(circ_name: str, block_num: int, tol: float, extra: str = "") -> tuple[list[Circuit], 
                                                                                              np.ndarray]:
-    circ_dir = get_circ_dir(circ_name, block_num, tol)
+    circ_dir = get_circ_dir(circ_name, block_num, tol, extra=extra)
     full_path = f"{circ_dir}/ensemble_final_jiggle.npy"
     full_ens_path = f"{circ_dir}/ensemble_final.qasms"
     if not os.path.exists(full_path):
@@ -311,13 +321,18 @@ def load_compiled_block_circuits(circ_name: int,
 
 def load_compiled_block_circuits_qp_inds(circ_name: int, 
                                          block_num: int,  
-                                         tol: int) -> tuple[np.ndarray, np.ndarray]:
-    circ_dir = get_circ_dir(circ_name, block_num, tol)
+                                         tol: float,
+                                         extra: str="") -> tuple[np.ndarray, np.ndarray]:
+    circ_dir = get_circ_dir(circ_name, block_num, tol, extra=extra)
     inds_file = f"{circ_dir}/ensemble_final_rand_inds.npy"
-    circ_inds = np.load(inds_file)
-    probs_file = f"{circ_dir}/ensemble_final_probs.npy"
-    circ_probs = np.load(probs_file)
-    return circ_inds, circ_probs
+    if os.path.exists(inds_file):
+        circ_inds = np.load(inds_file)
+        probs_file = f"{circ_dir}/ensemble_final_probs.npy"
+        circ_probs = np.load(probs_file)
+        return circ_inds, circ_probs
+    else:
+        print("No Indices found for circ", circ_name, block_num, tol, extra, flush=True)
+        return None, None
 
 def get_unitary(circ: Circuit):
     return circ.get_unitary()

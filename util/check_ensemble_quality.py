@@ -88,17 +88,13 @@ class CheckEnsembleQualityPass(BasePass):
         ensemble_file_name = os.path.join(checkpoint_dir, "ensemble_{ind}_{extra}.qasms")
         jiggle_file_name = os.path.join(checkpoint_dir, "ensemble_{ind}_jiggles_{extra}.npy")
         final_ens_file = os.path.join(checkpoint_dir, "ensemble_final.qasms")
-        start_ens_ind = 1
+        start_ens_ind = 0
         ens_file = ensemble_file_name.format(ind=start_ens_ind, extra=self.checkpoint_extra_str)
         jiggle_file = jiggle_file_name.format(ind=start_ens_ind, extra=self.checkpoint_extra_str)
         ensemble_counts = {}
 
         target = data.target
         csv_dict = {}
-        # Create Shared Memory
-
-        shm_name = checkpoint_dir.split("/")[-1]
-        print("Shared Memory Name: ", shm_name, flush=True)
         
         # Create new shared memory
         best_ind = 0
@@ -148,7 +144,7 @@ class CheckEnsembleQualityPass(BasePass):
             checkpoint_data_file: str = data["checkpoint_data_file"]
             csv_file = checkpoint_data_file.replace(".data", f"{self.csv_name}.csv")
             writer = csv.DictWriter(open(csv_file, "w", newline=""), 
-                                    fieldnames=csv_dict[1].keys())
+                                    fieldnames=csv_dict[0].keys())
             writer.writeheader()
             for row in csv_dict.values():
                 writer.writerow(row)
