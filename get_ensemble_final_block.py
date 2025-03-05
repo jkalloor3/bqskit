@@ -33,7 +33,7 @@ def get_ensemble_workflow(circ_name: str, tol: float, extra: str = "") -> Workfl
     err_thresh = 10 ** (-1 * tol)
 
     extra_err_thresh = err_thresh * 0.01
-    small_block_size = 4
+    small_block_size = 3
     print("Checkpoint Dir: ", checkpoint_dir, flush=True)
     print("Error Threshold: ", err_thresh, flush=True)
 
@@ -54,7 +54,8 @@ def get_ensemble_workflow(circ_name: str, tol: float, extra: str = "") -> Workfl
     synthesis_pass = LEAPSynthesisPass2(
         store_partial_solutions=True,
         success_threshold = extra_err_thresh,
-        partial_success_threshold=err_thresh / 3,
+        partial_success_threshold=err_thresh,
+        max_layer_factor=1.1,
         instantiate_options=instantiation_options,
         max_layer=14,
         max_psols=5
@@ -62,7 +63,8 @@ def get_ensemble_workflow(circ_name: str, tol: float, extra: str = "") -> Workfl
 
     second_synthesis_pass = SecondLEAPSynthesisPass(
         success_threshold = extra_err_thresh,
-        partial_success_threshold=err_thresh / 3,
+        partial_success_threshold=err_thresh,
+        max_layer_factor=1.5,
         instantiate_options=instantiation_options,
         max_layer=14,
         max_psols=10
@@ -208,7 +210,7 @@ def get_circ_data(circ_name: str, block_num: str | int,
             block_num = parts[-2]
             tol = float(parts[-1])
             circ_name = "_".join(parts[:-2])
-            if not circ_name.startswith("qae"):
+            if not circ_name.startswith("qaoa"):
                 continue
             circ_name, circ_file = find_file(circ_name, block_num, extra=extra)
             for tol in tols:

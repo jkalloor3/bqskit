@@ -21,7 +21,7 @@ if __name__ == '__main__':
         if len(blocks) > 0:
             circs.add(circ)
 
-    print(circs)
+    # print(circs)
     # circ_names = ["qae11"]
     err_thresholds = [1e-4, 1e-6, 1e-8]
     # print("Circ names: ", circs)

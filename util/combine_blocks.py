@@ -84,8 +84,8 @@ def get_circ_data(circ_name: str, err_threshold: float, use_base: bool = True,
         if use_base:
             orig_count = orig_counts[i]
             tket_count = tket_counts[i]
-            block_counts.append((0, orig_count, ("orig", "", 0)))
-            block_counts.append((0, tket_count, ("tket", "", 0)))
+            block_counts.append((0, orig_count, ("orig", "", 0), circ_files_orig[i]))
+            block_counts.append((0, tket_count, ("tket", "", 0), circ_files_tket[i]))
         block_data[block_name] = block_counts
 
     num_qubits = {}

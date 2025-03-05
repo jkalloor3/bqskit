@@ -251,13 +251,18 @@ def load_cliff_circ(circ_name, precision: int = 5) -> str:
 def load_circuit(circ_name: str, timestep: int = 0, opt: bool = False) -> Circuit:
     if "JW" in circ_name:
         circ_name = f"JWCircs/{circ_name}.qasm"
+
+    if opt:
+        extra = "_tket"
+    else:
+        extra = ""
     
-    file_name = f"{base_bqskit_dir}/ensemble_benchmarks/{circ_name}.qasm"
+    file_name = f"{base_bqskit_dir}/ensemble_benchmarks{extra}/{circ_name}.qasm"
     if not os.path.exists(file_name):
-        file_name = f"{base_bqskit_dir}/qce23_qfactor_benchmarks/{circ_name}.qasm"
+        file_name = f"{base_bqskit_dir}/qce23_qfactor_benchmarks{extra}/{circ_name}.qasm"
 
     if not os.path.exists(file_name):
-        file_name = f"{base_bqskit_dir}/ensemble_benchmarks_new/{circ_name}.qasm"
+        file_name = f"{base_bqskit_dir}/ensemble_benchmarks_new{extra}/{circ_name}.qasm"
 
     return Circuit.from_file(filename=file_name)
 

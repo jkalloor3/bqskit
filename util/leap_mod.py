@@ -50,6 +50,7 @@ class LEAPSynthesisPass2(BasePass):
         success_threshold: float = 1e-8,
         cost: CostFunctionGenerator = HilbertSchmidtResidualsGenerator(),
         max_layer: int | None = 40,
+        max_layer_factor: float = 2.0,
         store_partial_solutions: bool = False,
         partials_per_depth: int = 25,
         min_prefix_size: int = 3,
@@ -159,6 +160,7 @@ class LEAPSynthesisPass2(BasePass):
         self.partial_success_threshold = partial_success_threshold
         self.cost = cost
         self.max_layer = max_layer
+        self.max_layer_factor = max_layer_factor
         self.min_prefix_size = min_prefix_size
         self.instantiate_options: dict[str, Any] = {
             'cost_fn_gen': HilbertSchmidtResidualsGenerator(),
@@ -244,7 +246,9 @@ class LEAPSynthesisPass2(BasePass):
             scan_sols = data['scan_sols']
 
         default_count = default_circuit.count(CNOTGate())
-        max_layer = min(self.max_layer, default_count + 2)
+        max_layer = max(default_count + 2, int(default_count * self.max_layer_factor))
+        max_layer = min(self.max_layer, max_layer)
+        print("Max Layer: ", max_layer, flush=True)
 
         # Main loop
         step = 0
