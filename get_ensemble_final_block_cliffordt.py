@@ -12,8 +12,6 @@ from util import JiggleEnsemblePass, CreateEnsemblePass, WriteQasmPass, CleanupB
 from ntro import NumericalTReductionPass
 from util import LEAPSynthesisPass2, GenerateProbabilityPass, FixAnglesPass, UnFixTPass
 from util import CheckEnsembleQualityPass, FixGlobalPhasePass, ConvertToZXZXZSimple
-from util import MAX_SHM_SIZE, MAX_PARAMS_PER_CIRC, NUM_CIRCS_PER_PROB
-from multiprocessing.shared_memory import SharedMemory
 # enable_logging(True)
 good_instantiation_options = {
     'multistarts': 8,
@@ -26,7 +24,7 @@ good_instantiation_options = {
 }
 
 extra = "_tket"
-base_checkpoint_dir = f"block_checkpoints_final_paper_clifft_{extra}/"
+base_checkpoint_dir = f"block_checkpoints_final_paper_clifft{extra}/"
 good_block_folder = f"good_blocks{extra}/"
 bad_block_folder = f"bad_blocks{extra}/"
 NUM_UNIQUE_CIRCS = 250
@@ -117,6 +115,7 @@ def get_ensemble_workflow(circ_name: str, tol: float, num_processes: int = 1) ->
         ),
         create_ensemble_pass,
         jiggle_pass,
+        CleanupBlockFiles()
     ]
     return leap_workflow
 
@@ -132,18 +131,15 @@ def get_final_workflow(circ_name: str, tol: float, num_processes: int = 1) -> Wo
     if not jiggle_finished:
         print(f"Jiggle not finished {circ_name} {tol}", flush=True)
         return get_ensemble_workflow(circ_name, tol, num_processes)
-    print("Only doing Jiggling now", flush=True)
-    return None
-    # jiggle_pass = JiggleEnsemblePass()
-    # workflow = [
-    #     CheckpointRestartPass(checkpoint_dir, 
-    #                             default_passes=[]),
-    #     jiggle_pass, # To reload jiggled unitaries
-    #     CleanupBlockFiles(),
-    #     CheckEnsembleQualityPass(True, shm_percentage=(1.0 / num_processes)),
-    #     GenerateProbabilityPass(shm_percentage=(1.0 / num_processes))
-    # ]
-    # return workflow
+    jiggle_pass = JiggleEnsemblePass()
+    workflow = [
+        CheckpointRestartPass(checkpoint_dir, 
+                                default_passes=[]),
+        CleanupBlockFiles(),
+        CheckEnsembleQualityPass(True),
+        GenerateProbabilityPass()
+    ]
+    return workflow
 
 def get_shortest_circuits(circ_data: list[tuple[str, str, float]]) -> list[Circuit]:
     '''
@@ -160,13 +156,11 @@ def get_shortest_circuits(circ_data: list[tuple[str, str, float]]) -> list[Circu
         for circ_name, _, tol in circ_data
     ]
 
-    num_workers = min(os.cpu_count(), 100)
+    num_workers = os.cpu_count() - 2
     compiler = Compiler(num_workers=num_workers)
     
     workflow_ind = 0
-    ids: list[tuple[SharedMemory, SharedMemory, int]] = []
-
-    shm_percentage = (1.0 / num_processes)
+    ids: list[int] = []
 
     for circ_name, circ_file, tol in circ_data:
         workflow = workflows[workflow_ind]
@@ -174,33 +168,12 @@ def get_shortest_circuits(circ_data: list[tuple[str, str, float]]) -> list[Circu
         if workflow:
             circ = Circuit.from_file(circ_file)
             print("Original CNOT Count: ", circ.count(CNOTGate()), flush=True)
-            # Also need a return shm for Generate Probs
-            if len(workflow) == 5:
-                # Create Shared Memory for the workflow
-                shm_name = f"{circ_name}_{tol}"
-                shm_size = int(MAX_SHM_SIZE * shm_percentage)
-                shm = SharedMemory(name=shm_name, create=True, size=shm_size)
-                print("Generating Probs for ", shm_name)
-                shm_ret_name = f"{circ_name}_{tol}_ret"
-                un_dim = 2 ** circ.num_qudits
-                # (M, un_dim, un_dim)
-                shm_ret_size = NUM_CIRCS_PER_PROB * un_dim * un_dim * np.dtype(np.complex128).itemsize
-                shm_ret = SharedMemory(name=shm_ret_name, create=True, size=shm_ret_size)
-            else:
-                shm = None
-                shm_ret = None
-            ids.append((shm, shm_ret, compiler.submit(circ, workflow)))
+            ids.append(compiler.submit(circ, workflow))
 
     ind = 0
-    for shm, shm_ret, id in ids:
+    for id in ids:
         compiler.result(id)
         print("Finished: ", circ_data[ind][0], flush=True)
-        if shm is not None:
-            print("Closing Shared Memory", flush=True)
-            shm.close()
-            shm.unlink()
-            shm_ret.close()
-            shm_ret.unlink()
         ind += 1
     compiler.close()
     return
@@ -220,7 +193,7 @@ def find_file(circ_name: str, block_num: str) -> tuple[str, str]:
 def get_circ_data(circ_name: str, block_num: str | int, tol: float) -> list[tuple[str, str, float]]:
     # Categorize circs into different categories and run them
     if tol == -1.0:
-        tols = [3.0, 5.0]
+        tols = [3.0]
     else:
         tols = [tol]
     if circ_name == "all_probs":
@@ -234,11 +207,14 @@ def get_circ_data(circ_name: str, block_num: str | int, tol: float) -> list[tupl
             tol = float(parts[-1])
             circ_name = "_".join(parts[:-2])
             circ_name, circ_file = find_file(circ_name, block_num)
-            finished, jiggle_finished, _ = check_if_finished(circ_name, tol)
             # print(f"Checking {circ_name} {block_num} {tol} {finished} {jiggle_finished}", flush=True)
-            if not finished and jiggle_finished:
-                for tol in tols:
+            for tol in tols:
+                finished, jiggle_finished, _ = check_if_finished(circ_name, tol)
+                if not finished and jiggle_finished:
                     circ_data.append((circ_name, circ_file, tol))
+        if len(circ_data) > 1:
+            circ_data = circ_data[:1]
+            print("Limiting to 2 circs", flush=True)
         return circ_data
     
     else:
