@@ -4,7 +4,6 @@ from typing import Any
 
 from bqskit.compiler.passdata import PassData
 from bqskit.compiler.basepass import BasePass
-from multiprocessing import cpu_count, shared_memory
 from math import ceil
 from bqskit.ir.gates import CNOTGate, TGate, TdgGate
 from bqskit.ir import Circuit
@@ -14,72 +13,13 @@ from bqskit.runtime import get_runtime
 import os
 import time
 import shutil
-from util.common import load_jiggled_ensemble_separate, create_jiggled_unitaries_shm, count_params
+from .common import load_jiggled_ensemble, create_avg_utry
+from .counter import count_params
 
 from .distance import frobenius_cost, normalized_frob_cost
 
 norm_cost = GPNormalizedFrobeniusCostGenerator()
 frob_cost = GPNormalizedFrobeniusCostGenerator()
-
-BASE_SHM_NAME = "param_arr"
-NUM_FINAL_CIRCS = 4000
-NUM_UNIQUE_CIRCS = 250
-# MAX_SENDABLE_PARAMS = 150
-MAX_PARAMS_PER_CIRC = 80
-# Set to 16GB
-MAX_SHM_SIZE = 16 * 1024 * 1024 * 1024  # 16GB
-
-
-async def calculate_unitaries(circuits: list[Circuit], 
-                              params: np.ndarray, 
-                              target: UnitaryMatrix, 
-                              shm_name: str, 
-                              shm_percentage: float = 1.0) -> tuple[np.ndarray, float]:
-    # Check if circ_params are too large
-    assert len(circuits) == params.shape[0]
-
-    # Params is of shape (num_circuits, diff_params_per_circ, params_in_circ)
-    param_size = params.nbytes
-    # Wil return unitaries of size num_circuits * diff_params_per_circ * (4 ** circuit.num_qubits)
-    print("Param Size (Gs)", param_size / 1024 / 1024 / 1024, flush=True)
-    max_shm_size = int(MAX_SHM_SIZE * shm_percentage)
-    # Get num chunks
-    min_num_chunks = 8
-    param_chunks = ceil(param_size / max_shm_size)
-    # See how many of the total workers we can use
-    calc_num_chunks = ceil(250 / (256 * shm_percentage))
-    num_chunks = max(min_num_chunks, calc_num_chunks, param_chunks)
-    print("Num Chunks", num_chunks, flush=True)
-    chunk_params = np.array_split(params, num_chunks, axis=0)
-    circuit_chunks_inds = np.array_split(np.arange(len(circuits)), num_chunks, axis=0)
-
-    existing_shm = shared_memory.SharedMemory(name=shm_name)
-    print(f"Sending {len(chunk_params)} times", flush=True)
-    avg_utries: list[np.ndarray[np.complex128]] = []
-    avg_dists: list[float] = []
-    for chunk_ind, circ_param_chunk in enumerate(chunk_params):
-        circuit_chunk_inds = circuit_chunks_inds[chunk_ind]
-        circuit_chunk = [circuits[i] for i in circuit_chunk_inds]
-        # print("Chunk Size", shm_size, circ_param_chunk.shape, flush=True)
-        shared_array = np.ndarray(circ_param_chunk.shape, dtype=np.float64, buffer=existing_shm.buf)
-        shared_array[:] = circ_param_chunk[:]
-        print("Wrote to Shared Memory", flush=True)
-        param_inds = np.arange(circ_param_chunk.shape[0])
-        circ_inds = list(zip(circuit_chunk, param_inds))
-        avg_configs: list[tuple[UnitaryMatrix, float]] = await get_runtime().map(create_jiggled_unitaries_shm , circ_inds, 
-                                shm_name=shm_name, 
-                                shm_shape=circ_param_chunk.shape,
-                                target=target)
-        print("Length of avg_configs", len(avg_configs), flush=True)
-        new_avg_utry = np.mean([x[0] for x in avg_configs], axis=0)
-        new_avg_dist = np.mean([x[1] for x in avg_configs])
-        print("New Avg Dist", new_avg_dist, flush=True)
-        avg_utries.append(new_avg_utry)
-        avg_dists.append(new_avg_dist)
-        # Get the jiggled unitaries from the shared memory
-    existing_shm.close()
-    return np.mean(avg_utries, axis=0), np.mean(avg_dists)
-
 
 class CheckEnsembleQualityPass(BasePass):
     def __init__(self, 
@@ -129,7 +69,6 @@ class CheckEnsembleQualityPass(BasePass):
 
         return ensemble_data
 
-
     async def run(self, circuit: Circuit, data: PassData) -> None:
         # Check Ensemble Quality and output it to a CSV
         print("Check Ensemble Quality Pass", flush=True)
@@ -149,30 +88,15 @@ class CheckEnsembleQualityPass(BasePass):
         ensemble_file_name = os.path.join(checkpoint_dir, "ensemble_{ind}_{extra}.qasms")
         jiggle_file_name = os.path.join(checkpoint_dir, "ensemble_{ind}_jiggles_{extra}.npy")
         final_ens_file = os.path.join(checkpoint_dir, "ensemble_final.qasms")
-        start_ens_ind = 1
+        start_ens_ind = 0
         ens_file = ensemble_file_name.format(ind=start_ens_ind, extra=self.checkpoint_extra_str)
         jiggle_file = jiggle_file_name.format(ind=start_ens_ind, extra=self.checkpoint_extra_str)
-        ensemble_unitaries = {}
         ensemble_counts = {}
 
         target = data.target
         csv_dict = {}
-        # Create Shared Memory
-
-        shm_name = checkpoint_dir.split("/")[-1] + "_" + BASE_SHM_NAME
-        print("Shared Memory Name: ", shm_name, flush=True)
-        shm_size = int(MAX_SHM_SIZE * self.shm_percentage)
-        try:
-            shm = shared_memory.SharedMemory(name=shm_name)
-            print("Shared Memory Exists", flush=True)
-            shm.close()
-            shm.unlink()
-        except:
-            print("Shared Memory Does Not Exist", flush=True)
         
         # Create new shared memory
-        shm = shared_memory.SharedMemory(create=True, size=shm_size, name=shm_name)
-
         best_ind = 0
         best_ratio = float("inf")
         best_count = float("inf")
@@ -180,15 +104,18 @@ class CheckEnsembleQualityPass(BasePass):
         if os.path.exists(jiggle_file):
             # Load the ensemble from the checkpoint
             while os.path.exists(jiggle_file):
-                circuits, params = load_jiggled_ensemble_separate(ens_file, jiggle_file)
-                start = time.time()
-                avg_utry, avg_dist = await calculate_unitaries(circuits, 
-                                                              params, 
-                                                              target=data.target,
-                                                              shm_name=shm_name,
-                                                              shm_percentage=self.shm_percentage)
-                end = time.time()
-                print("Time to calculate unitaries: ", end - start, flush=True)
+                circ_params = load_jiggled_ensemble(ens_file, jiggle_file)
+                circuits = [circ for circ, _ in circ_params]
+                avg_utries_dists = await get_runtime().map(create_avg_utry, 
+                                                           circ_params, 
+                                                           target=data.target, 
+                                                           add_cost=True)
+                
+                utries = [avg_utry for avg_utry, _ in avg_utries_dists]
+                dists = [dist for _, dist in avg_utries_dists]
+                avg_utry = np.mean(utries, axis=0)
+                avg_dist = np.mean(dists)
+                print("Avg Dist: ", avg_dist, flush=True)
                 csv_dict[start_ens_ind] = self.get_ensemble_data(avg_utry, avg_dist, target, None)
                 csv_dict[start_ens_ind]["Ensemble Generation Method"] = self.ensemble_names[start_ens_ind]
                 ratio = csv_dict[start_ens_ind]["Ratio"]
@@ -212,24 +139,12 @@ class CheckEnsembleQualityPass(BasePass):
                     start_ens_ind += 1
                     ens_file = ensemble_file_name.format(ind=start_ens_ind, extra=self.checkpoint_extra_str)
                     jiggle_file = jiggle_file_name.format(ind=start_ens_ind, extra=self.checkpoint_extra_str)
-
-        shm.close()
-        shm.unlink()
-
-        # Randomly sample 4000 circuits from the best ensemble
-        num_unitaries = 20000
-        if num_unitaries > NUM_FINAL_CIRCS:
-            rand_inds = np.random.choice(num_unitaries, 
-                                         NUM_FINAL_CIRCS, 
-                                         replace=False)
-            rand_inds_file = f"{checkpoint_dir}/ensemble_final_rand_inds.npy"
-            np.save(rand_inds_file, rand_inds)
         
         if "checkpoint_dir" in data:
             checkpoint_data_file: str = data["checkpoint_data_file"]
             csv_file = checkpoint_data_file.replace(".data", f"{self.csv_name}.csv")
             writer = csv.DictWriter(open(csv_file, "w", newline=""), 
-                                    fieldnames=csv_dict[1].keys())
+                                    fieldnames=csv_dict[0].keys())
             writer.writeheader()
             for row in csv_dict.values():
                 writer.writerow(row)

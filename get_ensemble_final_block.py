@@ -47,7 +47,7 @@ def get_ensemble_workflow(circ_name: str, tol: float, extra: str = "") -> Workfl
             success_threshold=err_thresh, 
             use_calculated_error=False, 
             num_circs=NUM_UNIQUE_CIRCS,
-            num_random_ensembles=3,
+            num_random_ensembles=2,
             solve_exact_dists=True,
     )
 
@@ -55,17 +55,19 @@ def get_ensemble_workflow(circ_name: str, tol: float, extra: str = "") -> Workfl
         store_partial_solutions=True,
         success_threshold = extra_err_thresh,
         partial_success_threshold=err_thresh,
+        max_layer_factor=1.1,
         instantiate_options=instantiation_options,
         max_layer=14,
-        max_psols=10
+        max_psols=5
     )
 
     second_synthesis_pass = SecondLEAPSynthesisPass(
         success_threshold = extra_err_thresh,
         partial_success_threshold=err_thresh,
+        max_layer_factor=1.5,
         instantiate_options=instantiation_options,
         max_layer=14,
-        max_psols=5
+        max_psols=10
     )
 
     jiggle_pass = JiggleEnsemblePass(success_threshold=err_thresh, 
@@ -83,10 +85,8 @@ def get_ensemble_workflow(circ_name: str, tol: float, extra: str = "") -> Workfl
             [
                 synthesis_pass,
                 second_synthesis_pass,
-                FixGlobalPhasePass(),
             ],
-            allocate_error=True,
-            skip_file="ensemble_5_.qasms"
+            skip_file="ensemble_0_.qasms"
         ),
         create_ensemble_pass,
         jiggle_pass,
@@ -110,12 +110,12 @@ def check_if_finished(circ_name: str, tol: float, extra: str = "") -> tuple[bool
     if os.path.exists(final_file):
         return True, True, ""
     # Check if there is a jiggle .npy file in the checkpoint dir for at least 5
-    jiggle_file = os.path.join(checkpoint_dir, "*5_jiggles*.npy")
+    jiggle_file = os.path.join(checkpoint_dir, "*4_jiggles*.npy")
     jiggle_files = glob.glob(jiggle_file)
     if len(jiggle_files) == 0:
         return False, False, ""
     # Try to get extra_str from jiggle files
-    extra_str = jiggle_files[0].split("5_jiggles_")[1]
+    extra_str = jiggle_files[0].split("4_jiggles_")[1]
     # Remove everything after .
     extra_str = extra_str.split(".npy")[0]
     return False, True, extra_str
@@ -126,21 +126,19 @@ def get_final_workflow(circ_name: str, tol: float, extra: str = "", num_processe
     base_checkpoint_dir = base_checkpoint_dir_form.format(extra=extra)
     checkpoint_dir = os.path.join(base_checkpoint_dir, f"{circ_name}_{tol}")
     print(f"Checkpoint Dir: {checkpoint_dir}", flush=True)
-    finished, jiggle_finished, extra_str = check_if_finished(circ_name, tol, extra=extra)
+    finished, jiggle_finished, _ = check_if_finished(circ_name, tol, extra=extra)
     if finished:
         print(f"Already finished {circ_name} {tol}", flush=True)
         return None
     if not jiggle_finished:
         print(f"Jiggle not finished {circ_name} {tol}", flush=True)
         return get_ensemble_workflow(circ_name, tol, extra=extra)
-    # Else run the Final 2 passes
-    jiggle_pass = JiggleEnsemblePass(checkpoint_extra_str=extra_str)
+    print("Finding Final Ensemble for ", circ_name, flush=True)
     workflow = [
         CheckpointRestartPass(checkpoint_dir, 
                                 default_passes=[]),
-        jiggle_pass, # To reload jiggled unitaries
-        CheckEnsembleQualityPass(False, shm_percentage=(1.0 / num_processes)),
-        GenerateProbabilityPass(shm_percentage=(1.0 / num_processes))
+        CheckEnsembleQualityPass(False),
+        GenerateProbabilityPass()
     ]
     return workflow
 
@@ -158,11 +156,12 @@ def get_shortest_circuits(circ_data: list[tuple[str, str, float]], extra: str = 
         for circ_name, _, tol in circ_data
     ]
 
-    num_workers = os.cpu_count()
+    num_workers = min(os.cpu_count(), 200)
     compiler = Compiler(num_workers=num_workers)
     
     workflow_ind = 0
-    ids = []
+    ids: list[int] = []
+
     for _, circ_file, _ in circ_data:
         workflow = workflows[workflow_ind]
         workflow_ind += 1
@@ -176,6 +175,8 @@ def get_shortest_circuits(circ_data: list[tuple[str, str, float]], extra: str = 
         compiler.result(id)
         print("Finished: ", circ_data[ind][0], flush=True)
         ind += 1
+    compiler.close()
+    print("Compiler Closed", flush=True)
     return
 
 def find_file(circ_name: str, block_num: str, extra="") -> tuple[str, str]:
@@ -209,18 +210,26 @@ def get_circ_data(circ_name: str, block_num: str | int,
             block_num = parts[-2]
             tol = float(parts[-1])
             circ_name = "_".join(parts[:-2])
+            if not circ_name.startswith("qaoa"):
+                continue
             circ_name, circ_file = find_file(circ_name, block_num, extra=extra)
-            finished, jiggle_finished, _ = check_if_finished(circ_name, tol, extra=extra)
-            if not finished and jiggle_finished:
-                for tol in tols:
+            for tol in tols:
+                finished, jiggle_finished, _ = check_if_finished(circ_name, tol, extra=extra)
+                if not finished and jiggle_finished:
                     circ_data.append((circ_name, circ_file, tol))
+
+        if len(circ_data) > 20:
+            circ_data = circ_data[:20]
+            print("Limiting to 20 circs", flush=True)
         return circ_data
     
     else:
         if block_num == "all_blocks":
             # Get all blocks
             good_circ_files = glob.glob(f"good_blocks{extra}/{circ_name}_*.qasm")
-            bad_circ_files = glob.glob(f"bad_blocks{extra}/{circ_name}_*.qasm")
+            # Ignore bad blocks for now
+            # bad_circ_files = glob.glob(f"bad_blocks{extra}/{circ_name}_*.qasm")
+            bad_circ_files = []
             all_circ_files = good_circ_files + bad_circ_files
             block_nums = [file.split('_')[-1].split('.')[0] for file in all_circ_files]
             circ_data = []

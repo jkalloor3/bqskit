@@ -1,6 +1,7 @@
 from bqskit.ir.circuit import Circuit
 from sys import argv
 import os
+import numpy as np
 import glob
 from bqskit.compiler.compiler import Compiler, WorkflowLike
 from bqskit.ir.gates import CNOTGate
@@ -11,7 +12,6 @@ from util import JiggleEnsemblePass, CreateEnsemblePass, WriteQasmPass, CleanupB
 from ntro import NumericalTReductionPass
 from util import LEAPSynthesisPass2, GenerateProbabilityPass, FixAnglesPass, UnFixTPass
 from util import CheckEnsembleQualityPass, FixGlobalPhasePass, ConvertToZXZXZSimple
-
 # enable_logging(True)
 good_instantiation_options = {
     'multistarts': 8,
@@ -99,14 +99,14 @@ def get_ensemble_workflow(circ_name: str, tol: float, num_processes: int = 1) ->
         ForEachBlockPass(
             [
                 synthesis_pass,
-                FixAnglesPass(tol * 2 + 2, run_scan_sols=True),
+                FixAnglesPass(int(tol) * 2 + 2, run_scan_sols=True),
                 ConvertToZXZXZSimple(group=False),
                 WriteQasmPass(write=False),
                 NumericalTReductionPass(
                     full_loops=3,
                     success_threshold=err_thresh,
                     use_calculated_error=True),
-                FixAnglesPass(tol * 2 + 2, run_scan_sols=True),
+                FixAnglesPass(int(tol) * 2 + 2, run_scan_sols=True),
                 ToU3Pass(ensemble=True, group=True),
                 FixGlobalPhasePass(),
             ],
@@ -115,9 +115,7 @@ def get_ensemble_workflow(circ_name: str, tol: float, num_processes: int = 1) ->
         ),
         create_ensemble_pass,
         jiggle_pass,
-        # CleanupBlockFiles(),
-        CheckEnsembleQualityPass(True, shm_percentage=(1.0 / num_processes)),
-        GenerateProbabilityPass(shm_percentage=(1.0 / num_processes)),
+        CleanupBlockFiles()
     ]
     return leap_workflow
 
@@ -137,9 +135,9 @@ def get_final_workflow(circ_name: str, tol: float, num_processes: int = 1) -> Wo
     workflow = [
         CheckpointRestartPass(checkpoint_dir, 
                                 default_passes=[]),
-        jiggle_pass, # To reload jiggled unitaries
-        CheckEnsembleQualityPass(True, shm_percentage=(1.0 / num_processes)),
-        GenerateProbabilityPass(shm_percentage=(1.0 / num_processes))
+        CleanupBlockFiles(),
+        CheckEnsembleQualityPass(True),
+        GenerateProbabilityPass()
     ]
     return workflow
 
@@ -158,12 +156,13 @@ def get_shortest_circuits(circ_data: list[tuple[str, str, float]]) -> list[Circu
         for circ_name, _, tol in circ_data
     ]
 
-    num_workers = min(os.cpu_count(), 250)
+    num_workers = os.cpu_count() - 2
     compiler = Compiler(num_workers=num_workers)
     
     workflow_ind = 0
-    ids = []
-    for _, circ_file, _ in circ_data:
+    ids: list[int] = []
+
+    for circ_name, circ_file, tol in circ_data:
         workflow = workflows[workflow_ind]
         workflow_ind += 1
         if workflow:
@@ -176,6 +175,7 @@ def get_shortest_circuits(circ_data: list[tuple[str, str, float]]) -> list[Circu
         compiler.result(id)
         print("Finished: ", circ_data[ind][0], flush=True)
         ind += 1
+    compiler.close()
     return
 
 def find_file(circ_name: str, block_num: str) -> tuple[str, str]:
@@ -193,7 +193,7 @@ def find_file(circ_name: str, block_num: str) -> tuple[str, str]:
 def get_circ_data(circ_name: str, block_num: str | int, tol: float) -> list[tuple[str, str, float]]:
     # Categorize circs into different categories and run them
     if tol == -1.0:
-        tols = [3.0, 5.0]
+        tols = [3.0]
     else:
         tols = [tol]
     if circ_name == "all_probs":
@@ -207,11 +207,14 @@ def get_circ_data(circ_name: str, block_num: str | int, tol: float) -> list[tupl
             tol = float(parts[-1])
             circ_name = "_".join(parts[:-2])
             circ_name, circ_file = find_file(circ_name, block_num)
-            finished, jiggle_finished, _ = check_if_finished(circ_name, tol)
             # print(f"Checking {circ_name} {block_num} {tol} {finished} {jiggle_finished}", flush=True)
-            if not finished and jiggle_finished:
-                for tol in tols:
+            for tol in tols:
+                finished, jiggle_finished, _ = check_if_finished(circ_name, tol)
+                if not finished and jiggle_finished:
                     circ_data.append((circ_name, circ_file, tol))
+        if len(circ_data) > 1:
+            circ_data = circ_data[:1]
+            print("Limiting to 2 circs", flush=True)
         return circ_data
     
     else:
@@ -224,9 +227,18 @@ def get_circ_data(circ_name: str, block_num: str | int, tol: float) -> list[tupl
             circ_data = []
             for i, block_num in enumerate(block_nums):
                 name, circ_file = find_file(circ_name, block_num)
-                circ_file = all_circ_files[i]
-                for tol in tols:
-                    circ_data.append((name, circ_file, tol))
+                # Check if the circ is finished
+                finished, jiggle_finished, _ = check_if_finished(name, tols[0])
+                if finished:
+                    print(f"Already finished {name} {block_num} {tols[0]}", flush=True)
+                    continue
+                elif jiggle_finished:
+                    print(f"Jiggle finished {name} {block_num} {tols[0]}", flush=True)
+                    continue
+                else:
+                    circ_file = all_circ_files[i]
+                    for tol in tols:
+                        circ_data.append((name, circ_file, tol))
             return circ_data
         else:
             circ_name, circ_file = find_file(circ_name, block_num)

@@ -10,45 +10,32 @@ from bqskit.runtime import get_runtime
 from bqskit.compiler.basepass import BasePass
 from bqskit.compiler.passdata import PassData
 import numpy as np
-from multiprocessing import shared_memory
-from .check_ensemble_quality import calculate_unitaries, NUM_FINAL_CIRCS, BASE_SHM_NAME, MAX_SHM_SIZE
-from .common import load_jiggled_ensemble_separate
+from .common import load_jiggled_ensemble, create_jiggled_unitaries
 from .distance import frobenius_cost, normalized_frob_cost
-from qpsolvers import solve_ls
+from qpsolvers import solve_qp
 import pickle
 import os
 
+NUM_CIRCS_PER_PROB = 5000
+
 class GenerateProbabilityPass(BasePass):
     
-    def __init__(self, shm_percentage: float = 1.0) -> None:
-        super().__init__()
-        self.shm_percentage = shm_percentage
-
     @staticmethod
     def calculate_probs(ensemble: np.ndarray, target: np.ndarray) -> np.ndarray:
-        M = len(ensemble)
+        """Calculate the probabilities for the ensemble"""
+        M = ensemble.shape[0]
 
-        # tr_V_Us = np.zeros(M, dtype=np.complex128)
-        # tr_Us = np.zeros((M, M), dtype=np.complex128)
+        # ensemble is of size (20000, 256, 256) complex 128
+        tr_V_Us = np.einsum("mij,ij->m", ensemble, target.conj(), optimize=True)
+        tr_Us = np.einsum("aij,bij->ab", ensemble.conj(), ensemble, optimize=True)
 
-        print(ensemble.shape, flush=True)
-
-        tr_V_Us = np.einsum("mij,ij->m", ensemble, target.conj())
-        tr_Us = np.einsum("aij,bij->ab", ensemble.conj(), ensemble)
-
-        # for jj in range(M):
-        #     utry = ensemble[jj]
-        #     for kk in range(jj, M):
-        #         a = np.einsum("ij,ij->", ensemble[kk].conj(), utry)
-        #         tr_Us[jj, kk] = a
-        #         tr_Us[kk, jj] = a
-
-        print("Finished Calculating Ensemble Vectors", flush=True)
-        print(tr_V_Us.shape, tr_Us.shape, flush=True)
-
-        # Create f and H matrices
+        # f is of size (20000,)
+        # H is of size (20000, 20000) floats 64
         f = -2 * np.real(tr_V_Us)
         H = 2 * np.real(tr_Us)
+
+        del tr_Us
+        del tr_V_Us
 
         # Make pos definite
         isposdef = False
@@ -60,7 +47,7 @@ class GenerateProbabilityPass(BasePass):
             except np.linalg.LinAlgError:
                 # Off by a little
                 H += 1e-10 * np.eye(M)
-                print(f"Perturbing by a little to make pos def trial num: {trials}")
+                print(f"Perturbing a little to make pos def try #: {trials}")
                 isposdef = False
                 trials += 1
 
@@ -75,9 +62,13 @@ class GenerateProbabilityPass(BasePass):
         ubound = np.ones(M)
 
         # Solve with LS since it is convex
-        s = -1 * np.linalg.inv(R) @ f
-        probabilities = solve_ls(R.T, s, None, None, Aeq, beq, lbound, ubound, solver='clarabel')
-
+        # s = -1 * np.linalg.inv(R) @ f
+        probabilities = solve_qp(H, f, A=Aeq, b=beq, lb=lbound, ub=ubound, 
+                                 solver='clarabel')   
+        max = np.max(probabilities)
+        min = np.min(probabilities)
+        std = np.std(probabilities)
+        print (f"Max prob: {max}, Min prob: {min}, Std prob: {std}", flush=True)
         return probabilities
 
     async def run(
@@ -97,38 +88,26 @@ class GenerateProbabilityPass(BasePass):
             print("Already calculated probabilities, skipping", flush=True)
             return
 
-        shm_name = checkpoint_dir.split("/")[-1] + "_" + BASE_SHM_NAME
-        print("Shared Memory Name: ", shm_name, flush=True)
-        shm = shared_memory.SharedMemory(create=True, size=MAX_SHM_SIZE * self.shm_percentage, name=shm_name)
+        target = data.target
+        circ_params = load_jiggled_ensemble(final_ens_file, 
+                                            final_ens_jiggle_file)
+        ensemble = await get_runtime().map(create_jiggled_unitaries, circ_params, 
+                                           target=target, add_cost=False)
+        ensemble = np.concatenate(ensemble, axis=0)
 
-        circuits, params = load_jiggled_ensemble_separate(final_ens_file, final_ens_jiggle_file)
-        best_ensemble_unitaries = await calculate_unitaries(circuits, params, 
-                                                            target=data.target,
-                                                            shm_name=shm_name,
-                                                            shm_percentage=self.shm_percentage)
-        
-        shm.close()
-        shm.unlink()
-        
-        if len(best_ensemble_unitaries) > NUM_FINAL_CIRCS:
+        if len(ensemble) > NUM_CIRCS_PER_PROB:
+            rand_un_inds = np.random.choice(ensemble.shape[0], 
+                                            size=NUM_CIRCS_PER_PROB, 
+                                            replace=False)
+            # Save random indices
             rand_inds_file = f"{checkpoint_dir}/ensemble_final_rand_inds.npy"
-            rand_inds = np.load(rand_inds_file)
-            best_ensemble_unitaries = [best_ensemble_unitaries[i] for i in rand_inds]
-        
-        best_ensemble_unitaries: list[UnitaryMatrix] = [u for u, _ in best_ensemble_unitaries]
-        best_ensemble_unitaries = np.stack([x.numpy for x in best_ensemble_unitaries])
-
-        print(f"Calculating Probs on {len(best_ensemble_unitaries)} unitaries", flush=True)
-
-        if len(best_ensemble_unitaries) < 5:
-            final_probs = [1 / len(best_ensemble_unitaries) for _ in best_ensemble_unitaries]
-        else:
-            # Now calculate the probability for this ensemble
-            final_probs = GenerateProbabilityPass.calculate_probs(best_ensemble_unitaries, data.target)
-
-        print("Calculated Probabilities", flush=True)
+            np.save(rand_inds_file, rand_un_inds)
+            ensemble = ensemble[rand_un_inds]
+            
+        all_probs = GenerateProbabilityPass.calculate_probs(ensemble, 
+                                                            target=target)
 
         if "checkpoint_dir" in data:
-            np.save(probs_file, final_probs)
+            np.save(probs_file, all_probs)
         return
 

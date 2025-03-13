@@ -23,16 +23,6 @@ qlang = OPENQASM2Language(gate_defs=[("gg", gg_gate_def)])
 
 NUM_UNIQUE_CIRCS = 250
 
-def count_params(circ: Circuit) -> int:
-    """
-    Count the number of parameters in a circuit.
-    GG gates have 3 params when in realiyt they have 1.
-    """
-    num_ggs = circ.count(GridSynthGate())
-    num_params = circ.num_params
-    num_params -= num_ggs * 2
-    return num_params
-
 def stack_padding(it: list[np.ndarray], vertical: bool = True) -> np.ndarray:
     max_width = max(a.shape[1] for a in it)
     # Pad each 2D array with zeros to match the maximum width
@@ -45,13 +35,16 @@ def stack_padding(it: list[np.ndarray], vertical: bool = True) -> np.ndarray:
         print("Final Param Arr Shape: ", result.shape, flush=True)
     return result
 
+def store_params(all_params: list[np.ndarray], jiggle_file_name: str):
+    # Get max param size
+    params = stack_padding(all_params, vertical=False)
+    np.save(jiggle_file_name, params)
+
 def store_jiggled_ensemble(ensemble: list[tuple[Circuit, np.ndarray]], file_name: str, jiggle_file_name: str):
     # Get circuits
     circs = [circ for circ, _ in ensemble ]
     store_ensemble(circs, file_name)
-    params = stack_padding([params for _, params in ensemble], vertical=False)
-    # params = np.stack([params for _, params in ensemble])
-    np.save(jiggle_file_name, params)
+    store_params([params for _, params in ensemble], jiggle_file_name)
 
 def create_single_jiggled_ensemble(circ_params: tuple[Circuit, np.ndarray], 
                                    target: UnitaryMatrix = None, phase_fix: bool = False,
@@ -73,6 +66,28 @@ def create_single_jiggled_ensemble(circ_params: tuple[Circuit, np.ndarray],
             ens.append(new_circ)
     return ens
 
+def create_avg_utry(circ_params: tuple[Circuit, np.ndarray], 
+                    target: UnitaryMatrix,  
+                    add_cost: bool = False) -> UnitaryMatrix | tuple[UnitaryMatrix, float]:
+    circ, params = circ_params
+    avg_utry = np.zeros_like(circ.get_unitary())
+    avg_dist = 0
+    for param in params.tolist():
+        new_circ = circ.copy()
+        new_circ.set_params(param)
+        fix_phase(new_circ, target)
+        un = new_circ.get_unitary()
+        avg_utry += un
+        if add_cost:
+            avg_dist += normalized_frob_cost(un, target)
+    avg_utry = avg_utry / len(params)
+    avg_dist = avg_dist / len(params)
+    if add_cost:
+        return (avg_utry, avg_dist)
+    else:
+        return avg_utry
+
+
 def creat_single_unitary(circ: Circuit, param: np.ndarray, target: UnitaryMatrix) -> tuple[UnitaryMatrix, float]:
     utry = circ.get_unitary(param)
     gp_correction = target.get_target_correction_factor(utry)
@@ -80,9 +95,17 @@ def creat_single_unitary(circ: Circuit, param: np.ndarray, target: UnitaryMatrix
     cost_1 = normalized_frob_cost(utry, target)
     return (utry, cost_1)
 
+def get_unitary(circ: Circuit, target: UnitaryMatrix) -> tuple[UnitaryMatrix, float]:
+    utry = circ.get_unitary()
+    gp_correction = target.get_target_correction_factor(utry)
+    utry = utry * gp_correction
+    cost_1 = normalized_frob_cost(utry, target)
+    return (utry, cost_1)
+
 
 def create_jiggled_unitaries(circ_params: tuple[Circuit, np.ndarray], 
-                                   target: UnitaryMatrix = None) -> list[tuple[UnitaryMatrix]] | list[tuple[UnitaryMatrix, float]]:
+                                   target: UnitaryMatrix = None,
+                                   add_cost: bool = True) -> np.ndarray[np.complex128] | list[tuple[UnitaryMatrix, float]]:
     circ, params = circ_params
     ens = []
     correct = target is not None
@@ -92,36 +115,63 @@ def create_jiggled_unitaries(circ_params: tuple[Circuit, np.ndarray],
         if correct:
             gp_correction = target.get_target_correction_factor(utry)
             utry = utry * gp_correction
+        if add_cost:
             cost_1 = normalized_frob_cost(utry, target)
             ens.append((utry, cost_1))
         else:
             ens.append(utry)
-    # print("Ens Size: ", len(ens), flush=True)
+    if not add_cost:
+        ens = np.array(ens, dtype=np.complex128)
+        return ens
     return ens
 
-def create_jiggled_unitaries_shm(circ_ind: tuple[Circuit, int],
-                                 shm_name: str, 
-                                 shm_shape: tuple[int, int, int], 
-                                 target: UnitaryMatrix = None) -> tuple[UnitaryMatrix, float]:
-    existing_shm = shared_memory.SharedMemory(name=shm_name)
-    shared_array = np.ndarray(shm_shape, dtype=np.float64, buffer=existing_shm.buf)
-    circ, param_ind = circ_ind
-    params: np.ndarray = shared_array[param_ind]
-    orig_unitary = circ.get_unitary()
-    avg_unitary = np.zeros_like(orig_unitary)
-    avg_dist = 0.0
-    for i, param in enumerate(params.tolist()):
-        utry = circ.get_unitary(param)
-        gp_correction = target.get_target_correction_factor(utry)
-        utry: UnitaryMatrix = utry * gp_correction
-        cost_1 = normalized_frob_cost(utry, target)
-        avg_unitary += utry.numpy
-        avg_dist += cost_1
+# def calc_avg_unitary_shm(circ_ind: tuple[Circuit, int],
+#                                  shm_name: str, 
+#                                  shm_shape: tuple[int, int, int], 
+#                                  target: UnitaryMatrix = None) -> tuple[UnitaryMatrix, float]:
+#     existing_shm = shared_memory.SharedMemory(name=shm_name)
+#     shared_array = np.ndarray(shm_shape, dtype=np.float64, buffer=existing_shm.buf)
+#     circ, param_ind = circ_ind
+#     params: np.ndarray = shared_array[param_ind]
+#     orig_unitary = circ.get_unitary()
+#     avg_unitary = np.zeros_like(orig_unitary)
+#     avg_dist = 0.0
+#     for i, param in enumerate(params.tolist()):
+#         utry = circ.get_unitary(param)
+#         gp_correction = target.get_target_correction_factor(utry)
+#         utry: UnitaryMatrix = utry * gp_correction
+#         cost_1 = normalized_frob_cost(utry, target)
+#         avg_unitary += utry.numpy
+#         avg_dist += cost_1
 
-    existing_shm.close()
-    avg_unitary = avg_unitary / len(params)
-    avg_dist = avg_dist / len(params)
-    return avg_unitary, avg_dist
+#     existing_shm.close()
+#     avg_unitary = avg_unitary / len(params)
+#     avg_dist = avg_dist / len(params)
+#     return avg_unitary, avg_dist
+
+# def create_jiggled_unitaries_shm(circ_ind: tuple[Circuit, int],
+#                                  shm_name: str, 
+#                                  shm_ret_name: str,
+#                                  shm_shape: tuple[int, int, int], 
+#                                  shm_ret_shape: tuple[int, int, int],
+#                                  target: UnitaryMatrix) -> np.ndarray:
+#     existing_shm = shared_memory.SharedMemory(name=shm_name)
+#     existing_shm_ret = shared_memory.SharedMemory(name=shm_ret_name)
+#     shared_array = np.ndarray(shm_shape, dtype=np.float64, buffer=existing_shm.buf)
+#     shared_array_ret = np.ndarray(shm_ret_shape, dtype=np.complex128, buffer=existing_shm_ret.buf)
+#     circ, param_ind = circ_ind
+#     params: np.ndarray = shared_array[param_ind]
+
+#     for i, param in enumerate(params.tolist()):
+#         utry = circ.get_unitary(param)
+#         gp_correction = target.get_target_correction_factor(utry)
+#         utry: UnitaryMatrix = utry * gp_correction
+#         shared_array_ret[i + param_ind * 4] = utry.numpy
+        
+
+#     existing_shm.close()
+#     existing_shm_ret.close()
+#     return
 
 
 def create_jiggled_ensemble(circ_params: list[tuple[Circuit, np.ndarray]]) -> list[Circuit]:
@@ -133,7 +183,6 @@ def create_jiggled_ensemble_mp(circ_params: list[tuple[Circuit, np.ndarray]]) ->
     with mp.Pool(processes=5) as pool:
         ensemble = pool.map(create_single_jiggled_ensemble, circ_params)
     return list(chain.from_iterable(ensemble))
-
 
 def load_jiggled_ensemble_separate(file_name: str, jiggle_file_name: str) -> tuple[list[Circuit], np.ndarray]:
     circs = load_ensemble(file_name)
@@ -160,6 +209,11 @@ def store_ensemble(ensemble: list[Circuit], file_name: str):
     with open(file_name, "w") as f:
         f.write("\nBREAK\n".join(qasms))
 
+def store_ensemble_strs(qasms: list[str], file_name: str):
+    # Store as list of qasm strings
+    with open(file_name, "w") as f:
+        f.write("\nBREAK\n".join(qasms))
+
 def load_ensemble(file_name: str) -> list[Circuit]:
     with open(file_name, "r") as f:
         qasms = f.read().split("\nBREAK\n")
@@ -168,21 +222,10 @@ def load_ensemble(file_name: str) -> list[Circuit]:
     print("Decoded", flush=True)
     return circs
 
-def load_ensemble_cx_counts(file_name: str, cliff_t: bool) -> float:
+def load_ensemble_strs(file_name: str) -> list[Circuit]:
     with open(file_name, "r") as f:
         qasms = f.read().split("\nBREAK\n")
-    num_circs = len(qasms)
-    if cliff_t:
-        # Count RZs and U3s
-        rz_counts = [qasm.count("rz") for qasm in qasms]
-        u3_counts = [qasm.count("u3") for qasm in qasms]
-        print("RZ Count: ", np.mean(rz_counts), flush=True)
-        print("U3 Count: ", np.mean(u3_counts), flush=True)
-        counts = [rz + u3*3 for rz, u3 in zip(rz_counts, u3_counts)]
-    else:
-        # Count CX
-        counts = [qasm.count("cx") for qasm in qasms]
-    return np.mean(counts)
+    return qasms
 
 def load_ensemble_mp(file_name: str) -> list[Circuit]:
     with open(file_name, "r") as f:
@@ -208,23 +251,54 @@ def load_cliff_circ(circ_name, precision: int = 5) -> str:
 def load_circuit(circ_name: str, timestep: int = 0, opt: bool = False) -> Circuit:
     if "JW" in circ_name:
         circ_name = f"JWCircs/{circ_name}.qasm"
+
+    if opt:
+        extra = "_tket"
+    else:
+        extra = ""
     
-    file_name = f"{base_bqskit_dir}/ensemble_benchmarks/{circ_name}.qasm"
+    file_name = f"{base_bqskit_dir}/ensemble_benchmarks{extra}/{circ_name}.qasm"
     if not os.path.exists(file_name):
-        file_name = f"{base_bqskit_dir}/qce23_qfactor_benchmarks/{circ_name}.qasm"
+        file_name = f"{base_bqskit_dir}/qce23_qfactor_benchmarks{extra}/{circ_name}.qasm"
 
     if not os.path.exists(file_name):
-        file_name = f"{base_bqskit_dir}/ensemble_benchmarks_new/{circ_name}.qasm"
+        file_name = f"{base_bqskit_dir}/ensemble_benchmarks_new{extra}/{circ_name}.qasm"
 
     return Circuit.from_file(filename=file_name)
 
 def get_circ_dir(circ_name: int, block_num: int, tol: float, 
-                 cliff_t: bool = False) -> str:
+                 cliff_t: bool = False, extra: str="") -> str:
     if cliff_t:
-        circ_dir = f"{base_checkpoint_dir}_clifft/{circ_name}_{block_num}_{tol}"
+        circ_dir = f"{base_checkpoint_dir}_clifft{extra}/{circ_name}_{block_num}_{tol}"
     else:
-        circ_dir = f"{base_checkpoint_dir}/{circ_name}_{block_num}_{tol}"
+        circ_dir = f"{base_checkpoint_dir}{extra}/{circ_name}_{block_num}_{tol}"
     return circ_dir
+
+def check_param_shape(circ_name: str, block_num: int, tol: float, extra: str = "") -> list[int]:
+    circ_dir = get_circ_dir(circ_name, block_num, tol, extra=extra)
+    print("Circ Dir: ", circ_dir, flush=True)
+    full_path = f"{circ_dir}/ensemble_final_jiggle.npy"
+    if not os.path.exists(full_path):
+        # Default to ensemble 0 for now
+        full_path = f"{circ_dir}/ensemble_0_jiggles_.npy"
+        print("Using default ensemble 0", flush=True)
+    params: np.ndarray = np.load(full_path)
+    return params.shape
+
+def load_compiled_circs_params_separate(circ_name: str, block_num: int, tol: float, extra: str = "") -> tuple[list[Circuit], 
+                                                                                             np.ndarray]:
+    circ_dir = get_circ_dir(circ_name, block_num, tol, extra=extra)
+    full_path = f"{circ_dir}/ensemble_final_jiggle.npy"
+    full_ens_path = f"{circ_dir}/ensemble_final.qasms"
+    if not os.path.exists(full_path):
+        # Default to ensemble 0 for now
+        full_path = f"{circ_dir}/ensemble_0_jiggles_.npy"
+        full_ens_path = f"{circ_dir}/ensemble_0_.qasms"
+        print("Using default ensemble 0", flush=True)
+    print("Full Path: ", full_path, flush=True)
+    params: np.ndarray = np.load(full_path)
+    circs = load_ensemble(full_ens_path)
+    return circs, params
 
 def load_compiled_block_circuits(circ_name: int, 
                                  block_num: int,  
@@ -252,13 +326,18 @@ def load_compiled_block_circuits(circ_name: int,
 
 def load_compiled_block_circuits_qp_inds(circ_name: int, 
                                          block_num: int,  
-                                         tol: int) -> tuple[np.ndarray, np.ndarray]:
-    circ_dir = get_circ_dir(circ_name, block_num, tol)
+                                         tol: float,
+                                         extra: str="") -> tuple[np.ndarray, np.ndarray]:
+    circ_dir = get_circ_dir(circ_name, block_num, tol, extra=extra)
     inds_file = f"{circ_dir}/ensemble_final_rand_inds.npy"
-    circ_inds = np.load(inds_file)
-    probs_file = f"{circ_dir}/ensemble_final_probs.npy"
-    circ_probs = np.load(probs_file)
-    return circ_inds, circ_probs
+    if os.path.exists(inds_file):
+        circ_inds = np.load(inds_file)
+        probs_file = f"{circ_dir}/ensemble_final_probs.npy"
+        circ_probs = np.load(probs_file)
+        return circ_inds, circ_probs
+    else:
+        print("No Indices found for circ", circ_name, block_num, tol, extra, flush=True)
+        return None, None
 
 def get_unitary(circ: Circuit):
     return circ.get_unitary()
@@ -275,9 +354,9 @@ def get_block_names(circ_name: str, extra: str= "") -> list[str]:
     block_nums = [file.split('_')[-1].split('.')[0] for file in all_circ_files]
     return block_nums
 
-def get_circ_names() -> list[str]:
-    good_circ_files = glob.glob(f"{good_block_dir}/*.qasm")
-    bad_circ_files = glob.glob(f"{bad_block_dir}/*.qasm")
+def get_circ_names(extra: str = "_tket") -> list[str]:
+    good_circ_files = glob.glob(f"{good_block_dir}{extra}/*.qasm")
+    bad_circ_files = glob.glob(f"{bad_block_dir}{extra}/*.qasm")
     all_circ_files = good_circ_files + bad_circ_files
 
     def extract_circ_name(circ_file: str):

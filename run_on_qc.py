@@ -1,246 +1,283 @@
 from bqskit.ir.circuit import Circuit
-from bqskit.ir.gates import CNOTGate
+from bqskit.ir.gates import CNOTGate, CircuitGate
 from sys import argv
-from scipy.stats import entropy
 import numpy as np
 import pickle
-
 import matplotlib.pyplot as plt
-import random
-from bqskit.ir.gates.parameterized import U3Gate, VariableUnitaryGate
+import seaborn as sns
+from multiprocessing.shared_memory import SharedMemory
+
+from qiskit import QuantumCircuit
+from qiskit.quantum_info import Statevector
+
+from bqskit.qis import UnitaryMatrix
+
 from bqskit.ir.point import CircuitPoint
-from bqskit.compiler.passdata import PassData
+from bqskit.ir.lang.qasm2 import OPENQASM2Language
+from bqskit.ext import bqskit_to_qiskit
 
-from itertools import chain
-from qiskit import QuantumCircuit, transpile
-from qiskit.circuit.library import UnitaryGate
-from qiskit_ibm_runtime import SamplerV2 as Sampler, IBMBackend
-from qiskit.primitives import BackendSamplerV2 as BackendSampler
-from qiskit_ibm_runtime import QiskitRuntimeService
-from qiskit_aer import AerSimulator, StatevectorSimulator
-from qiskit_aer.primitives import SamplerV2 as Sampler
-from qiskit.quantum_info import Statevector, DensityMatrix
-from qiskit_aer.noise import NoiseModel, pauli_error
+from qiskit_aer import AerSimulator
+from qiskit_aer.noise import (NoiseModel, depolarizing_error, coherent_unitary_error)
 
-from bqskit.ext import bqskit_to_qiskit, qiskit_to_bqskit
+from util import (load_circuit, get_circ_data, check_param_shape, 
+                  load_block, load_compiled_circs_params_separate,
+                  get_average_density_matrix, trace_distance,
+                  get_density_matrix)
+from util.distance import normalized_gp_frob_cost
 
-from util import load_circuit, load_compiled_circuits
-
-import multiprocessing as mp
-
-shots = 100
-
-def tvd(p: dict[str, int], q: dict[str, int], shots: int):
-    p = {k: v/shots for k, v in p.items()}
-    q = {k: v/shots for k, v in q.items()}
-    return 0.5 * sum(abs(p.get(k, 0) - q.get(k, 0)) for k in set(p) | set(q))
-
-def run_circuits(all_circs: list[list[QuantumCircuit]], shots: int, backend: IBMBackend = None) -> list[list[dict[str, int]]]:
+def over_rotated_cnot(two_q_error: float) -> UnitaryMatrix:
     '''
-    Run a set of noisy circuits on a given backend
+    Overrotated CNOT gate with depolarizing error.
+
     '''
-    if backend is None:
-        sampler = Sampler()
-    else:
-        sampler = BackendSampler(backend=backend)
-    all_results = []
-    for circs in all_circs:
-        job = sampler.run(circs, shots=shots)
-        print(f">>> Job ID: {job.job_id()}")
-        print(f">>> Job Status: {job.status()}")
-        result = job.result()
-        results = [result[j].data.meas.get_counts() for j in range(len(circs))]
-        all_results.append(results)
-    # final_sv = aggregate_results(results)
-    return all_results
 
-def run_noisy_ensemble(ens_size, shots: int = 1, random_states: list[np.ndarray] = None, backend: IBMBackend = None) -> tuple[list[list[dict[str, int]]], np.ndarray]:
+    utry = [
+        [1, 0, 0, 0],
+        [0, 1, 0, 0],
+        [0, 0, -1j * np.sin(two_q_error), np.cos(two_q_error)],
+        [0, 0, np.cos(two_q_error), -1j * np.sin(two_q_error)]
+    ]
+    return UnitaryMatrix(utry)
+
+
+assert np.allclose(over_rotated_cnot(0), CNOTGate().get_unitary())
+# print("Unitary Diff: ",  normalized_gp_frob_cost(over_rotated_cnot(1e-4), CNOTGate().get_unitary()))
+
+def create_noise_model(one_q_err: float, 
+                             two_q_err: float) -> NoiseModel:
     '''
-    Run an ensemble of size `ens_size` on a noisy backend.
+    Noise Model with overrotated CNOT and stochastic depolarizing noise.
 
-    Returns a list of list of TVDs with shape (ens_size, num_random_states)
-
-    Also, if the number of qubits is less than 10, returns the mean unitary of the ensemble.
     '''
-    global all_qcircs
-    global circs
 
-    ensemble_inds: list[int] = np.random.choice(len(all_qcircs), ens_size)
-    ensemble: list[QuantumCircuit] = [all_qcircs[i] for i in ensemble_inds]
+
+    # Create an empty noise model
+    noise_model = NoiseModel()
+
+    # Add depolarizing error to all single qubit u1, u2, u3 gates
+    one_q_error = depolarizing_error(one_q_err, 1)
+    two_q_error = depolarizing_error(two_q_err, 2)
+    # two_q_error = one_q_error.tensor(one_q_error)
+    noise_model.add_all_qubit_quantum_error(one_q_error, ['u', 'u3'])
+    noise_model.add_all_qubit_quantum_error(two_q_error, ['cx'])
+
+    # cnot_utry = over_rotated_cnot(1e-6).numpy
+    # cnot_error = coherent_unitary_error(cnot_utry)
+    # noise_model.add_all_qubit_quantum_error(cnot_error, ['cx'])
+
+    return noise_model
+
+noise_model = create_noise_model(1e-4, 6e-3)
+backend = AerSimulator(method="density_matrix", noise_model=noise_model)
+ensemble_sizes = [1, 5, 10, 20, 40, 80, 160]
+TOTAL_SHOTS = 100 * max(ensemble_sizes)
+partitioned_circ_save_file = "/pscratch/sd/j/jkalloor/bqskit/partitioned_circs/{circ_name}.pickle"
+
+circ_name = "qaoa10"
+
+lang = OPENQASM2Language()
+
+def get_random_circs(num_circs: int,
+                    block_circs: list[Circuit], 
+                    shm_name: str,
+                    param_shape: np.ndarray = None) -> list[str]:
+    '''
+    Generate a random circuit from the block_circs.
+    '''
+    if len(block_circs) == 1:
+        return [block_circs[0].to("qasm")] * num_circs
     
-    if ensemble[0].num_qubits <= 10:
-        if ens_size < 10:
-            print([normalized_frob_dist(circs[i].get_unitary()) for i in ensemble_inds])
-        mean_un = np.mean(np.array([circs[i].get_unitary().numpy for i in ensemble_inds]), axis=0)
-    else:
-        mean_un = None
+    shm = SharedMemory(name=shm_name, create=False)
+    # Now pick a random param from the shared memory
+    shm_array = np.ndarray(param_shape, dtype=np.float64, buffer=shm.buf)
 
-    print("Avg CNOT count: ", np.mean([c.count_ops()['cx'] for c in ensemble]))
-    all_circs = [get_random_init_state_circuits(c, random_states, backend=backend) for c in ensemble]
-    final_svs = run_circuits(all_circs, shots=shots, backend=backend)
-    return final_svs, mean_un
+    # Else, we are using an ensemble
+    rand_circ_inds = np.random.randint(0, len(block_circs), size=num_circs)
+    rand_param_inds = np.random.randint(0, shm_array.shape[1], size=num_circs)
+    circ_strs = []
+    for c_ind, p_ind in zip(rand_circ_inds, rand_param_inds):
+        # Now we need to get the random circuits
+        rand_circ: Circuit = block_circs[c_ind]
+        circ_param = shm_array[c_ind][p_ind]
 
-def get_qcirc(circ: Circuit):
-    for cycle, op in circ.operations_with_cycles():
-        if op.num_qudits == 1 and not isinstance(op.gate, U3Gate):
-            params = U3Gate().calc_params(op.get_unitary())
-            point = CircuitPoint(cycle, op.location[0])
-            circ.replace_gate(point, U3Gate(), op.location, params)
-        if op.num_qudits == 2 and isinstance(op.gate, VariableUnitaryGate):
-            # get decomp 
-            mini_qcirc = QuantumCircuit(2)
-            mini_qcirc.append(UnitaryGate(op.get_unitary()), [0, 1])
-            trans_qcirc = transpile(mini_qcirc, basis_gates=['cx', 'u3'])
-            # print(trans_qcirc.count_ops())
-            bqskit_circ = qiskit_to_bqskit(trans_qcirc)
-            circ.replace_with_circuit((cycle, op.location[0]), bqskit_circ, as_circuit_gate=True)
-    circ.unfold_all()
-    # print(circ.gate_counts)
-    q_circ = bqskit_to_qiskit(circ)
-    q_circ.measure_all()
-    # (time.time() - start)
-    return q_circ
+        # Now we need to set the params of the circuit
+        rand_circ.set_params(circ_param)
+        # fix_phase(rand_circ, target)
+        circ_strs.append(rand_circ.to("qasm"))
+    return circ_strs
 
-def normalized_frob_dist(mat: np.ndarray):
-    global target
-    frob_dist = target.get_frobenius_distance(mat) / np.sqrt(mat.shape[0] * 2)
-    return frob_dist
+def sim_full_circuits(block_circs: dict[str, list[Circuit]], 
+                           block_names: list,
+                           param_shapes: dict[str, tuple[int]],
+                           pcirc: Circuit,
+                           max_tol: float, 
+                           ens_size: int) -> dict[str, int]:
+    all_circs = []
 
-def get_random_states(num_qubits: int, num_random_states: int = 4) -> list[np.ndarray]:
-    states = []
-    for i in range(4):
-        state = np.random.randint(0, 2, num_qubits)
-        states.append(state)
-    return states
+    circ_blocks = {}
 
-def get_random_init_state_circuits(qcirc: QuantumCircuit, random_states: list[np.ndarray], backend: IBMBackend) -> list[QuantumCircuit]:
-    circs = []
-    for state in random_states:
-        init_circ = qcirc.copy()
-        for i in range(init_circ.num_qubits):
-            if state[i] == 1:
-                init_circ.h(i)
-        init_circ.compose(qcirc, inplace=True)
-        circs.append(transpile(init_circ, backend=backend, optimization_level=0))
-    return circs
+    for block_name in block_names:
+        shm_name = circ_name + "_" + str(max_tol) + "_" + block_name
+        param_shape = param_shapes.get(block_name, None)
+        circ_blocks[block_name] = get_random_circs(ens_size,
+                                                  block_circs[block_name], 
+                                                  shm_name=shm_name, 
+                                                  param_shape=param_shape)
+    for i in range(ens_size):
+        circ = pcirc.copy()
+        ind = 0
+        for cycle, op in circ.operations_with_cycles():
+            pt = CircuitPoint(cycle, op.location[0])
+            circ_str = circ_blocks[block_names[ind]][i]
+            new_block_circ = lang.decode(circ_str)
+            ind += 1
+            assert isinstance(op.gate, CircuitGate)
+            assert isinstance(op.gate._circuit, Circuit)
+            assert isinstance(new_block_circ, Circuit)
+            if op.gate._circuit.num_qudits != new_block_circ.num_qudits:
+                print("Replacing circuit with different number of qudits")
+                print("Old Circuit: ", op.gate._circuit)
+                print("New Circuit: ", new_block_circ)
+                print("Block Name: ", block_names[ind - 1])
+            assert op.gate._circuit.num_qudits == new_block_circ.num_qudits
+            circ.replace_with_circuit(pt, new_block_circ, as_circuit_gate=True)
+        circ.unfold_all()
+        qc = bqskit_to_qiskit(circ)
+        # qc.measure_all()
+        qc.save_density_matrix()
+        all_circs.append(qc)
 
-def aggregate_results(results: list[dict[str, int]]) -> dict[str, int]:
-    total_dict = {}
-    for y in results:
-        x = total_dict
-        total_dict = {k: x.get(k, 0) + y.get(k, 0) for k in set(x) | set(y)}
-    return total_dict
-
-def setup_ibm(num_qubits: int) -> tuple[QiskitRuntimeService, IBMBackend]:
-    '''
-    Set up the IBM Quantum account and get the least busy backend with the required number of qubits.
-    '''
-    # service = QiskitRuntimeService.save_account(
-    #                                 channel="ibm_quantum", 
-    #                                 token="c04b6dfb98ed86857ab1b56cc7aeffeab68467dc0d61f60ad5b47a7797f30a55af880991a02859f88165e1cdf7d3c23161f5384ecbb54cc6e68e4588a695e36b",
-    #                                 set_as_default=True,
-    #                                 overwrite=True
-    #                                )
-    
-    service = QiskitRuntimeService()
-    backend = service.least_busy(operational=True, simulator=False, min_num_qubits=num_qubits)
-    print(backend.name, backend.status())
-    return service, backend
-
+    # Now we need to sim the circuits
+    shots = TOTAL_SHOTS / ens_size
+    results = backend.run(all_circs, shots=shots).result()
+    # Aggregate the results
+    all_dms = [np.array(results.data(i)['density_matrix']) for i in range(len(all_circs))]
+    average_dm = np.mean(all_dms, axis=0)
+    # agg_results = aggregate_results(all_dicts)
+    return average_dm
 
 # Circ 
 if __name__ == '__main__':
-
-    # print(get_oneq_rb(device_backend))
-    # print(get_twoq_rb(device_backend))
-    global basic_circ
-    global all_qcircs
-    global calc_func
-    global circs
-    global target
-
-    # circ_type = argv[1]
+    block_circs = {}
+    block_names = []
 
     np.set_printoptions(precision=2, threshold=np.inf, linewidth=np.inf)
+    max_tol = float(argv[1]) if len(argv) > 1 else 0.01
 
-
-    # circ_name = argv[1]
-    # timestep = int(argv[2])
-    # tol = int(argv[3])
-
-    # initial_circ = load_circuit(circ_name, opt=True)
-    initial_circ = Circuit.from_file(
-        '/pscratch/sd/j/jkalloor/bqskit/fixed_block_checkpoints_min' + 
-        '/adder9_0_2_8_3/block_2.qasm')
-    service, backend = setup_ibm(initial_circ.num_qudits)
-
+    initial_circ = load_circuit(circ_name, opt=False)
     print("Original CX Count: ", initial_circ.count(CNOTGate()))
-    if initial_circ.num_qudits <= 10:
-        target = initial_circ.get_unitary()
+    target = initial_circ.get_unitary()
+    initial_qcirc = bqskit_to_qiskit(initial_circ)
 
-    # num_unique_circs = int(argv[4])
-    # opt_str = "_post_opt" if int(argv[5]) == 1 else ""
-    # circs = load_compiled_circuits(circ_name, tol, timestep, 
-    #                                ignore_timestep=True, 
-    #                                extra_str=f"_{num_unique_circs}_circ_final_min{opt_str}")
+    initial_qcirc = bqskit_to_qiskit(initial_circ)
+    initial_qcirc.save_density_matrix()
+    perfect_result = AerSimulator(method="density_matrix", shots=TOTAL_SHOTS).run(initial_qcirc).result()
+    # print(perfect_result.data(0)['density_matrix'])
+    perfect_dm = perfect_result.data(0)['density_matrix']
+    noisy_result = backend.run(initial_qcirc, shots=TOTAL_SHOTS).result()
+    noisy_dm = noisy_result.data(0)['density_matrix']
 
-    data: PassData = pickle.load(open("/pscratch/sd/j/jkalloor/bqskit/hamiltonian_perturbation_checkpoints_zxzxz/adder9_hard_0.0001_1e-06_32/" + 
-                                      "data.data", 
-                                      "rb"))
-    circs = data.get("ensemble")
+    initial_dist = trace_distance(perfect_dm, noisy_dm)
 
-    all_qcircs = [get_qcirc(c) for c in circs]
-    print("Got MAP", flush=True)
+    print("Initial Trace Distance: ", initial_dist)
+
+    block_dirs, count, tket_count = get_circ_data(circ_name, max_tol, False)
+    block_names = sorted([x[0] for x in block_dirs])
+    print("Avg Count: ", count, "TKET Count: ", tket_count)
+
+    # Figure out how many ensembles we need, and calculate shared memory space
+    param_shapes = {}
+    shm_names = {}
+    for block_name, block_data in block_dirs:
+        if block_data[0] == 'orig' or block_data[0] == "tket":
+            continue
+        else:
+            print(block_data)
+            param_shape = check_param_shape(*block_data)
+            shm_names[block_name] = shm_name = circ_name + "_" + str(max_tol) + "_" + block_name
+            param_shapes[block_name] = param_shape
+    
+    # Now for the shared memory
+    # We will use a different shared memory space for each block
+    float_size = np.dtype(np.float64).itemsize
+    # Handles to shared memory objects
+    shms: dict[str, SharedMemory] = {}
+    for block_name in block_names:
+        if block_name not in shm_names:
+            continue
+        param_shape = param_shapes[block_name]
+        shm_name = shm_names[block_name]
+        shm = SharedMemory(name=shm_name, 
+                           create=True, 
+                           size=np.prod(param_shape)*float_size)
+        print("Shared Memory: ", shm_name, shm.size)
+        # Now we need to create a numpy array in the shared memory
+        shm_array = np.ndarray(param_shape, dtype=np.float64, buffer=shm.buf)
+        # Now we need to fill the array with the parameters
+        shm_array.fill(0)
+        shms[block_name] = shm
+
+    print("Created Shared Memories: ", shms.keys())
+
+    # Get all the circuits
+    for block_name, block_data in block_dirs:
+        if block_data[0] == 'orig':
+            bc_file = load_block(circ_name, block_name)
+            block_target = Circuit.from_file(bc_file) 
+            block_circs[block_name] = [block_target]
+        elif block_data[0] == "tket":
+            circ_file = load_block(circ_name, block_name, extra="_tket")
+            block_circs[block_name] = [Circuit.from_file(circ_file)]
+        else:
+            print(block_name, block_data)
+            # inds, probs = load_compiled_block_circuits_qp_inds(*block_data)
+            circuits, params = load_compiled_circs_params_separate(*block_data)
+            print("Num Circuits: ", len(circuits), flush=True)
+            # Now we need to load params into shared memory
+            shm = shms[block_name]
+            param_shape = params.shape
+            shm_array = np.ndarray(param_shape, dtype=np.float64, buffer=shm.buf)
+            # Now we need to fill the array with the parameters
+            shm_array[:] = params
+            block_circs[block_name] = circuits
+
+    # print("Num Circuits: ", [len(ens) for ens in block_ensembles.values()], flush=True)
 
     print("LOADED CIRCUITS", flush=True)
-    print("NUM Circs: ", len(circs), flush=True)
 
-    # Store approximate solutions
-    all_utries = []
-    basic_circs = []
-    circ_files = []
-    base_excitations = []
-    noisy_excitations = []
+    pcirc_file = partitioned_circ_save_file.format(circ_name=circ_name)
+    partitioned_circ: Circuit = pickle.load(open(pcirc_file, 'rb'))
+    # print("Partitioned Circuit: ", partitioned_circ.gate_counts)
+    # print(partitioned_circ_save_file)
 
-    ensemble_sizes = [1, 10, 32] #, 1000] #, 2000, 4000]
-    shot_ratio = max(ensemble_sizes)
+    # ensemble_sizes = [2, 10, 20]
 
-    num_random_states = 2
-    random_states = get_random_states(initial_circ.num_qudits, num_random_states=num_random_states)
-    qiskit_circ = bqskit_to_qiskit(initial_circ)
-    qiskit_circ.measure_all()
-    qiskit_circs = get_random_init_state_circuits(qiskit_circ, random_states, backend=backend)
+    ensemble_circuits = []
+    num_trials = 6
+    ensemble_costs = []
 
-    # Get the base results
-    base_svs = run_circuits([qiskit_circs], shots=shots*shot_ratio)[0]
-    noisy_svs = run_circuits([qiskit_circs], shots=shots*shot_ratio, 
-                            backend=backend)[0]
+    # Get avg cost
+    target = initial_circ.get_unitary()
+    for ens_size in ensemble_sizes:
+        mean_costs = []
+        print("Ensemble Size: ", ens_size, flush=True)
+        for i in range(num_trials):
+            # print("Trial: ", i, flush=True)
+            avg_dm = sim_full_circuits(block_circs, 
+                                         block_names,
+                                         param_shapes,
+                                         partitioned_circ,
+                                         max_tol=max_tol, 
+                                         ens_size=ens_size)
+            mean_tvd = trace_distance(perfect_dm, avg_dm)
+            mean_costs.append(mean_tvd)
+        ensemble_costs.append(mean_costs)
+        print("Avg Trace Distance: ", np.mean(mean_costs))
+    
 
-    noisy_tvds = [tvd(base_svs[i], noisy_svs[i], shots=shots*shot_ratio) for i in range(num_random_states)]
+    for block_name, shm in shms.items():
+        print("Closing Shared Memory: ", shm_name)
+        shm.close()
+        shm.unlink()
 
-    print("Noisy TVD: ", noisy_tvds)
-
-    '''
-    Calculate values for ensemble sizes
-    '''
-    # ensemble_mags = [0,0,0,0,0,0]
-
-    print("Runing Noisy ENSEMBLES: ")
-    # print(f"Base TVD: {base_excitations[0]}, Noisy TVD {noisy_excitations[0]}")
-    for j, ens_size in enumerate(ensemble_sizes):
-        shots_per_circuit = shots * (shot_ratio // ens_size)
-        final_svs, mean_un = run_noisy_ensemble(ens_size, shots=shots_per_circuit, random_states=random_states, backend=backend)
-        print("Final SVS Shape: ", len(final_svs), len(final_svs[0]))
-        aggregated_svs = [aggregate_results([final_svs[j][i] for j in range(ens_size)]) for i in range(num_random_states)]
-        avg_noisy_tvds = np.array([tvd(base_svs[i], aggregated_svs[j][i],
-                                    shots=shots_per_circuit*ens_size) 
-                                    for i in range(num_random_states)])
-        if mean_un is not None:
-            frob_dist = normalized_frob_dist(mean_un)
-            print(f"Ensemble Size: {ens_size}, Frobenius Distance Normalized: {frob_dist}")
-        else:
-            print(f"Ensemble Size: {ens_size}")
-
-        print("Avg Noisy TVD: ", avg_noisy_tvds)
-
-
+    pickle.dump(ensemble_costs, open(f"ensemble_trace_dist_{circ_name}_{max_tol}.pickle", 'wb'))

@@ -17,7 +17,6 @@ from bqskit.ir.gates import CNOTGate
 from bqskit.qis import UnitaryMatrix
 import numpy as np
 import os
-import pickle
 
 from util import normalized_gp_frob_cost, count_params
 
@@ -393,7 +392,7 @@ class CreateEnsemblePass(BasePass):
 
         # Deubgging ingo
         targets: list[UnitaryMatrix] = []
-        thresholds: list[float] = [[] for _ in block_data]
+        # thresholds: list[float] = [[] for _ in block_data]
 
         num_sols = 1
         # print("PARSING DATA", flush=True)
@@ -403,7 +402,7 @@ class CreateEnsemblePass(BasePass):
             targets.append(block["target"])
             exact_block: Circuit = blocked_circuit[pts[-1]].gate._circuit.copy()  # type: ignore  # noqa
             exact_block.set_params(blocked_circuit[pts[-1]].params)
-            thresholds.append(block["error_percentage_allocated"] * self.success_threshold)
+            # thresholds.append(block["error_percentage_allocated"] * self.success_threshold)
 
             if 'scan_sols' not in block:
                 print("NO SCAN SOLS")
@@ -411,16 +410,17 @@ class CreateEnsemblePass(BasePass):
 
             psols[i] = [block['scan_sols'][j][0] for j in range(len(block['scan_sols']))]
             dists[i] = [block['scan_sols'][j][1] for j in range(len(block['scan_sols']))]
+            print("Block", i, len(psols[i]), num_sols, flush=True)
             # self.psol_unitaries.append([psol.get_unitary() for psol in psols[i]])
             num_sols *= len(psols[i])
 
 
         # print([len(psols[i]) for i in range(len(psols))])
-        print("Total Potential Solutions", num_sols)
+        print("Total Potential Solutions", num_sols, flush = True)
 
         self.num_circs = min(self.num_circs, num_sols)
 
-        return psols, pts, dists, targets, thresholds
+        return psols, pts, dists, targets #, thresholds
 
     async def run(self, circuit: Circuit, data: PassData) -> None:
         """Perform the pass's operation, see :class:`BasePass` for more."""
@@ -449,32 +449,12 @@ class CreateEnsemblePass(BasePass):
         data["scan_sols"] = []
         data["ensemble"] = []
             
-        approx_circs, pts, dists, _, _ = self.parse_data(circuit, block_data)        
+        approx_circs, pts, dists, _ = self.parse_data(circuit, block_data)        
         all_ensembles: list[list[Circuit]] = await self.assemble_circuits(circuit, approx_circs, pts, dists=dists, target=data.target)
         
         if len(all_ensembles) == 0:
             _logger.error("No ensembles found!!!!")
             return
-        
-        # if self.save_as_scan:
-
-        #     min_params = np.inf
-        #     min_ind = 0
-
-        #     for i in range(start_ens_ind, all_ensembles):
-        #         all_circs = all_ensembles[i]
-        #         all_circs = sorted(all_circs, key=lambda x: x.num_params)
-        #         avg_params = np.mean([circ.num_params for circ in all_circs])
-        #         if avg_params < min_params:
-        #             min_ind = i
-        #     # Pick the 30 circuits with the lowest number of parameters
-        #     all_circs = all_ensembles[min_ind]
-        #     all_circs = all_circs[:30]
-        #     dists = [normalized_gp_frob_cost(circ.get_unitary(), data.target) for circ in all_circs]
-        #     scan_sols = list(zip(all_circs, dists))
-        #     data["scan_sols"] = scan_sols
-        #     data.pop("ensemble")
-        #     return
 
         if "checkpoint_dir" in data:
             # Store ensembles separately

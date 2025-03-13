@@ -7,7 +7,7 @@ from .calculate_error_pass import CalculateErrorBoundPass
 from .second_qsearch import SecondQSearchSynthesisPass
 from .subselect_ensemble_pass import SubselectEnsemblePass
 from .analyze_distribution import AnalyzeDistributionPass
-from .generate_probs_pass import GenerateProbabilityPass
+from .generate_probs_pass import GenerateProbabilityPass, NUM_CIRCS_PER_PROB
 from .select_ensemble_pass import SelectFinalEnsemblePass
 from .jiggle_circ_pass import JiggleCircPass, GetErrorsPass
 from .convert_to_cliff import ConvertToZXZXZ, ConvertToZXZXZSimple
@@ -27,4 +27,5 @@ from .fix_angles import FixAnglesPass, UnFixTPass
 from .convert_to_clifft import *
 from .gg import *
 from .pauli_twirl import PauliTwirlPass
-from .combine_blocks import get_circ_block_dirs
+from .combine_blocks import *
+from .counter import *

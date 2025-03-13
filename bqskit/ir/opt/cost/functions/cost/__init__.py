@@ -10,9 +10,7 @@ from bqskit.ir.opt.cost.functions.cost.hilbertschmidt import (
     GPNormalizedFrobeniusCostGenerator,
     GPNormalizedFrobeniusCost,
     FrobeniusNoPhaseCost,
-    FrobeniusNoPhaseCostGenerator,
-    HSCostGenerator,
-    HSCost
+    FrobeniusNoPhaseCostGenerator
 )
 
 __all__ = ['HilbertSchmidtCost', 'HilbertSchmidtCostGenerator', 

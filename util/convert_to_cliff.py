@@ -19,7 +19,7 @@ from bqskit.runtime import get_runtime
 from itertools import product
 import numpy as np
 
-import subprocess
+from .distance import normalized_gp_frob_cost
 
 from bqskit.ir.gates.constantgate import ConstantGate
 from bqskit.ir.gates.qubitgate import QubitGate
@@ -175,28 +175,29 @@ class ConvertToZXZXZ(BasePass):
             data["finished_zxzxz"] = True
             checkpoint_data_file = data["checkpoint_data_file"]
             pickle.dump(data, open(checkpoint_data_file, "wb"))
+
 class ConvertToZXZXZSimple(BasePass):
 
     def __init__(self, group: bool = False) -> None:
         self.group = group
 
-    def run_circuit(self, circuit: Circuit, group: bool = False) -> None:
+
+    @staticmethod
+    def run_circuit(circuit: Circuit, group: bool = False) -> None:
         # Group Single Qudit Gates
         if group:
             GroupSingleQuditGatePass.group(circuit)
         # For each CircuitGate, replace with correspond ZXZXZ
-        cg_ops = []
         pts = []
         for cycle, op in circuit.operations_with_cycles(reverse=True):
             if op.num_params >= 2:
-                circ = ZXZXZDecomposition.run_zxzxz_decomp_circ(utry=op.get_unitary())
-                cg_ops.append(Operation(CircuitGate(circ), op.location, circ.params))
+                pt = CircuitPoint(cycle, op.location[0])
+                new_circ = ZXZXZDecomposition.run_zxzxz_decomp_circ(op.get_unitary())
                 pts.append(CircuitPoint(cycle, op.location[0]))
-
-        circuit.batch_replace(pts, cg_ops)
-        # Unfold the circuit
+                circuit.replace_with_circuit(pt, new_circ, as_circuit_gate=True)
+        
+        # print("Num U3s: ", len(uns))
         circuit.unfold_all()
-        print(circuit.gate_counts)
 
     async def run(
             self, 
@@ -204,14 +205,9 @@ class ConvertToZXZXZSimple(BasePass):
             data: PassData
     ) -> None:
         # For every circuit in data["scan_sols"], run the circuit
+        if "scan_sols" not in data:
+            ConvertToZXZXZSimple.run_circuit(circuit, self.group)
+            return
         scan_sols: list[tuple[Circuit, float]] = data["scan_sols"]
         for circ, _ in scan_sols:
-            # orig_gate_count = circ.gate_counts
-            self.run_circuit(circ, self.group)
-            # print("ZXZXZPass: ", orig_gate_count, circ.gate_counts, flush=True)
-            # global_phase_correction = target.get_target_correction_factor(circ.get_unitary())
-            # final_dist = cost.calc_cost(circ, data.target)
-            # circ_copy = circ.copy()
-            # circ_copy.append_gate(GlobalPhaseGate(1, global_phase=global_phase_correction), (0,))
-            # corrected_dist = cost.calc_cost(circ_copy, data.target)
-            # print("Global Phases Diff: ", global_phase_before - global_phase_after, "Dists: ", dist, final_dist, corrected_dist)
+            ConvertToZXZXZSimple.run_circuit(circ, self.group)

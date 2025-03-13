@@ -54,6 +54,7 @@ class SecondLEAPSynthesisPass(BasePass):
         success_threshold: float = 1e-8,
         cost: CostFunctionGenerator = HilbertSchmidtResidualsGenerator(),
         max_layer: int = 40,
+        max_layer_factor: float = 2.0,
         min_prefix_size: int = 3,
         instantiate_options: dict[str, Any] = {},
         partial_success_threshold: float = 1e-3,
@@ -154,6 +155,7 @@ class SecondLEAPSynthesisPass(BasePass):
         self.partial_success_threshold = partial_success_threshold
         self.cost = cost
         self.max_layer = max_layer
+        self.max_layer_factor = max_layer_factor
         self.min_prefix_size = min_prefix_size
         self.instantiate_options: dict[str, Any] = {
             'cost_fn_gen': HilbertSchmidtResidualsGenerator(),
@@ -166,10 +168,10 @@ class SecondLEAPSynthesisPass(BasePass):
         # Synthesize every circuit in the ensemble
         circs: list[Circuit] = [d[0] for d in data['scan_sols'][:-1]]
         block_id = f"Block {data.get('super_block_num', -1)}_{data.get('block_num', -1)}:"
-        factor = data["error_percentage_allocated"]
+        factor = data.get("error_percentage_allocated", 1)
         partial_success_threshold = self.partial_success_threshold * factor
-        print(f"{block_id} Partial Success Threshold: ", partial_success_threshold, flush=True)
-        print(f"{block_id} After Leap 1 distances: ", [d[1] for d in data['scan_sols']], flush=True)
+        # print(f"{block_id} Partial Success Threshold: ", partial_success_threshold, flush=True)
+        # print(f"{block_id} After Leap 1 distances: ", [d[1] for d in data['scan_sols']], flush=True)
         if len(circs) > 0:
             for c in circs:
                 assert(isinstance(c, Circuit))
@@ -203,17 +205,17 @@ class SecondLEAPSynthesisPass(BasePass):
         # Randomly choose up to 12 circuits
         if len(new_circs) > 8:
             # Weight by count, less gates is more likely
-            print(f"{block_id} Subselecting 8 circuits", flush=True)
-            print(f"{block_id} Original Distances: ", [c[1] for c in new_circs], flush=True)
-            print(f"{block_id} Original Counts: ", [c[0].count(CNOTGate()) for c in new_circs], flush=True)
+            # print(f"{block_id} Subselecting 8 circuits", flush=True)
+            # print(f"{block_id} Original Distances: ", [c[1] for c in new_circs], flush=True)
+            # print(f"{block_id} Original Counts: ", [c[0].count(CNOTGate()) for c in new_circs], flush=True)
             counts = np.array([1 / (c[0].count(CNOTGate()) ** 2 + 1) for c in new_circs])
             counts = counts / np.sum(counts)
-            print("Probabilities: ", counts, flush=True)
+            # print("Probabilities: ", counts, flush=True)
             inds = np.random.choice(len(new_circs), 8, replace=False, p=counts)
             new_circs = [new_circs[i] for i in inds]
-            print(f"{block_id} Success Threshold: ", partial_success_threshold, flush=True)
-            print(f"{block_id} Final Distances: ", [c[1] for c in new_circs], flush=True)
-            print(f"{block_id} Final Counts: ", [c[0].count(CNOTGate()) for c in new_circs], flush=True)    
+            # print(f"{block_id} Success Threshold: ", partial_success_threshold, flush=True)
+            # print(f"{block_id} Final Distances: ", [c[1] for c in new_circs], flush=True)
+            # print(f"{block_id} Final Counts: ", [c[0].count(CNOTGate()) for c in new_circs], flush=True)    
 
         new_circs.append((default_circuit, 0))
 
@@ -250,7 +252,8 @@ class SecondLEAPSynthesisPass(BasePass):
         # Get layer generator for search
         layer_gen = self._get_layer_gen(data)
 
-        max_layer = min(self.max_layer, default_count + 2)
+        max_layer = max(default_count + 2, int(default_count * self.max_layer_factor))
+        max_layer = min(self.max_layer, max_layer)
 
         # Begin the search with an initial layer
         frontier = Frontier(utry, self.heuristic_function)
@@ -421,6 +424,13 @@ class SecondLEAPSynthesisPass(BasePass):
         save_file: str = data.get("checkpoint_data_file", None)
         if "finished_second_leap" in data:
             print("Already finished second leap!", flush=True)
+            return
+        
+        if circuit.num_qudits == 1:
+            print("Terribly small circuit, skipping", save_file, flush=True)
+            data["finished_second_leap"] = True
+            if save_file:
+                pickle.dump(data, open(save_file, "wb"))
             return
 
         await self.synthesize(data, target=data.target, default_circuit=data['scan_sols'][-1][0])
