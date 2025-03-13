@@ -39,8 +39,8 @@ class CRXGate(
         """Return the unitary for this gate, see :class:`Unitary` for more."""
         self.check_parameters(params)
 
-        cos = np.cos(params[0] / 2)
-        sin = -1j * np.sin(params[0] / 2)
+        cos = 1j * np.cos(params[0] / 2)
+        sin =  np.sin(params[0] / 2)
 
         return UnitaryMatrix(
             [
@@ -59,8 +59,8 @@ class CRXGate(
         """
         self.check_parameters(params)
 
-        dcos = -np.sin(params[0] / 2) / 2
-        dsin = -1j * np.cos(params[0] / 2) / 2
+        dcos = -1j * np.sin(params[0] / 2) / 2
+        dsin =  np.cos(params[0] / 2) / 2
 
         return np.array(
             [
