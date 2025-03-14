@@ -1,172 +1,164 @@
 import numpy as np
-import scipy.io
+from bqskit.runtime import get_runtime
 from qpsolvers import solve_qp, solve_ls
 import matplotlib.pyplot as plt
-from util import load_circuit, load_sent_unitaries
-from sys import argv
+from util import load_jiggled_ensemble, create_jiggled_unitaries
 import time
+# from scipy.linalg.blas import zgemm
+
+from bqskit.ir.circuit import Circuit
+from bqskit.ir.gates import U3Gate
+from bqskit.compiler import Compiler
+from bqskit.passes import ForEachBlockPass, UpdateDataPass
+
+from bqskit.compiler.basepass import BasePass
+from bqskit.compiler.passdata import PassData
+
+
+def quad_program(ensemble: np.ndarray, target: np.ndarray) -> np.ndarray:
+    """Calculate the probabilities for the ensemble"""
+    M = ensemble.shape[0]
+
+    # ensemble is of size (20000, 256, 256) complex 128
+    start = time.time()
+    tr_V_Us = np.einsum("mij,ij->m", ensemble, target.conj(), optimize=True)
+    dist_calc = time.time() - start
+    print("Time to calculate dist", dist_calc, flush=True)
+    start = time.time()
+    tr_Us = np.einsum("aij,bij->ab", ensemble.conj(), ensemble, optimize=True)
+    covar_calc = time.time() - start
+    print(tr_Us.shape, flush=True)
+    print("Time to calculate covar", covar_calc, flush=True)
+
+    # tr_V_Us is of size (20000,)
+    # tr_Us is of size (20000, 20000) floats 64
+
+    # sample_inds = np.random.choice(M, size=5, replace=True)
+    # print("Sample Dists", [tr_V_Us[i] for i in sample_inds], flush=True)
+    # print("Sample Covars", [tr_Us[i][0] for i in sample_inds], flush=True)
+
+    # print("Finished Calculating Ensemble Vectors", flush=True)
+    # print(tr_V_Us.shape, tr_Us.shape, flush=True)
+    start = time.time()
+    # Create f and H matrices
+    f = -2 * np.real(tr_V_Us)
+    H = 2 * np.real(tr_Us)
+
+    # Make pos definite
+    isposdef = False
+    trials = 0
+    while not isposdef and trials < 20:
+        try:
+            R = np.linalg.cholesky(H)
+            isposdef = True
+        except np.linalg.LinAlgError:
+            # Off by a little
+            H += 1e-10 * np.eye(M)
+            print(f"Perturbing by a little to make pos def trial num: {trials}")
+            isposdef = False
+            trials += 1
+
+    if not isposdef:
+        print('H not positive definite by a lot! Returning uniform dist')
+        return [1 / len(ensemble) for _ in ensemble]
+    
+    total_time = time.time() - start
+    print("Time to create f and H", total_time, flush=True)
+
+    # Constraints, probabilities should sum to 1 and be between 0 and 1
+    Aeq = np.ones((1, M))
+    beq = np.array([1])
+    lbound = np.zeros(M)
+    ubound = np.ones(M)
+
+    # Solve with LS since it is convex
+    start = time.time()
+    # s = -1 * np.linalg.inv(R) @ f
+    # probabilities = solve_ls(R.T, s, None, None, Aeq, beq, lbound, ubound, solver='clarabel')
+    probabilities = solve_qp(H, f, A=Aeq, b=beq, lb=lbound, ub=ubound, solver='clarabel')
+    total_time = time.time() - start
+    print("Time to solve", total_time, flush=True)
+
+    # sample_probs = np.random.choice(probabilities, size=10, replace=True)
+    # print("Sample Probs", sample_probs, flush=True)
+
+    return probabilities
+
+
+def kl_divergence(p: np.ndarray, q: np.ndarray) -> float:
+    return np.sum(p * np.log(p / q))
+
+def js_divergence(p: np.ndarray, q: np.ndarray) -> float:
+    m = 0.5 * (p + q)
+    return 0.5 * kl_divergence(p, m) + 0.5 * kl_divergence(q, m)
+
+class Temp(BasePass):
+    def __init__(
+        self,
+        ensemble_file: str,
+        jiggle_file: str,
+    ) -> None:
+        self.ensemble_file = ensemble_file
+        self.jiggle_file = jiggle_file
+     
+    async def run(
+            self, 
+            circ : Circuit, 
+            data: PassData
+    ) -> None:
+        circ_params = load_jiggled_ensemble(self.ensemble_file, 
+                                            self.jiggle_file)
+        # Load target
+        target = circ.get_unitary()
+
+        # Get all unitaries
+        print("Calculating Unitaries", flush=True)
+        start = time.time()
+        ensemble = await get_runtime().map(create_jiggled_unitaries, circ_params, target=target, add_cost=False)
+        ensemble = np.concatenate(ensemble, axis=0)
+        # ensemble = np.array(ensemble, dtype=np.complex128)
+        total_time = time.time() - start
+        print("Total Time for Unitaries: ", total_time, flush=True)
+        print("Ensemble Shape: ", ensemble.shape, flush=True)
+        print("Ensemble Bytes (GB): ", ensemble.nbytes / 1024 / 1024 / 1024, flush=True)
+        # print("Finished Calculating Unitaries", flush=True)
+
+        # Now calculate the probabilities for 1000
+        rand_un_inds = np.random.choice(ensemble.shape[0], size=10000, replace=False)
+        rand_ensemble = ensemble[rand_un_inds]
+
+        # Calculate the probabilities
+        print("Calculating Probabilities", flush=True)
+        start = time.time()
+        p = quad_program(rand_ensemble, target=target)
+        total_time = time.time() - start
+        print("Total Time for Probabilities: ", total_time, flush=True)
+
+        q = np.ones(len(rand_un_inds)) / len(rand_un_inds)
+        # print JS Divergence between two distributions
+        p = np.clip(p, 1e-12, 1)
+        q = np.clip(q, 1e-12, 1)
+        js_div= js_divergence(p, q)
+        print("JS Divergence: ", js_div, flush=True)
+        print(np.sum(p), np.sum(q), flush=True)
+        print(np.max(p), np.min(p), np.std(p), flush=True)
 
 
 
 if __name__ == '__main__':
-    circ_name = argv[1]
-    timestep = int(argv[2])
-    tol = int(argv[3])
 
-
-    rep = 2
-    Ms = [10000]
-
-    circ = load_circuit(circ_name, timestep=timestep)
-    Us = load_sent_unitaries(circ_name, tol)
-    N = len(Us)
-    # Us = np.array([U.numpy for U in Us_raw])
-
-    V = circ.get_unitary().numpy
-    d = V.shape[1]
-    # Us = [U.numpy for U in Us_raw]
+    # Load ensemble
+    ens_file = "block_checkpoints_final_paper_tket/qae11_1_0.5/ensemble_final.qasms"
+    jiggle_file = "block_checkpoints_final_paper_tket/qae11_1_0.5/ensemble_final_jiggle.npy"
     
-    print(f'Calculating error statistics for {N} unitaries')
+    # Load file
+    circ = Circuit.from_file("good_blocks/qae11_1.qasm")
 
-    epsi = np.array([np.trace((Us[jj] - V).conj().T @ (Us[jj] - V)) for jj in range(N)])
-    mean_epsi = np.mean(epsi)
+    print("Num Qubits: ", circ.num_qudits, flush=True)
 
-    fig, ax = plt.subplots(1, 1, figsize=(10, 10))
-    ax.hist(epsi, 200)
-    ax.set_xlabel('eps')
-    ax.set_ylabel('count')
-    ax.set_title(f'eps dist {tol}', fontsize=20)
+    workflow = [
+        Temp(ens_file, jiggle_file),
+    ]
 
-    fig.savefig(f'{circ_name}_eps_dist.png')
-
-    print('Calculating population mean')
-
-    EU = np.mean(Us, axis=0)
-
-    print('Computing optimized subensemble error statistics')
-
-    optim_val = np.zeros(len(Ms))
-    optim_var = np.zeros(len(Ms))
-    avg_chi1 = np.zeros(len(Ms))
-    avg_chi2 = np.zeros(len(Ms))
-
-    for mm, M in enumerate(Ms):
-        error = np.zeros(rep)
-        chi1 = np.zeros(rep)
-        chi2 = np.zeros(rep)
-
-        avg_qp_time = 0
-        avg_ls_time_lib = 0
-        avg_ls_time_np = 0
-        avg_get_r_time = 0
-        
-        for rr in range(rep):
-            tr_V_Us = np.zeros(M)
-            tr_Us = np.zeros((M, M))
-            sample = np.random.choice(N, M, replace=False)
-
-            for jj in range(M):
-                tr_V_Us[jj] = np.trace(V.conj().T @ Us[sample[jj]])
-                for kk in range(M):
-                    tr_Us[jj, kk] = np.trace(Us[sample[jj]].conj().T @ Us[sample[kk]])
-
-            f = -2 * np.real(tr_V_Us)
-            H = 2 * np.real(tr_Us)
-
-
-            start = time.time()
-            # ev = np.linalg.eigvals(H)
-            ev = np.linalg.eigvalsh(H)
-            isposdef = np.all(ev > 0)
-            trials = 0
-            while not isposdef and trials < 20:
-                if np.abs(np.min(ev)) < 1e-10:
-                    print(f'H not positive definite. Perturbing... {trials}')
-                    H += 1e-10 * np.eye(M)
-                    trials += 1
-                else:
-                    print('H not positive definite by a lot!')
-                    break
-                ev = np.linalg.eigvals(H)
-                isposdef = np.all(ev > 0)
-
-            if not isposdef:
-                print('H not positive definite by a lot!')
-                break
-
-            Aeq = np.ones((1, M))
-            beq = np.array([1])
-            lbound = np.zeros(M)
-            ubound = np.ones(M)
-
-            x = solve_qp(H, f, None, None, Aeq, beq, lbound, ubound, solver='clarabel')
-            avg_qp_time += (time.time() - start) / rep
-
-            H = 2 * np.real(tr_Us)
-            # Now try with LS
-            start = time.time()
-            trials = 0
-            isposdef = False
-            while not isposdef and trials < 20:
-                try:
-                    R = np.linalg.cholesky(H)
-                    isposdef = True
-                except np.linalg.LinAlgError:
-                    H += 1e-10 * np.eye(M)
-                    isposdef = False
-                    trials += 1
-
-            if not isposdef:
-                print('H not positive definite by a lot!')
-                break
-            
-
-            avg_get_r_time += (time.time() - start) / rep
-            start = time.time()
-
-            s = -1 * np.linalg.inv(R) @ f
-
-            x_2 = solve_ls(R.T, s, None, None, Aeq, beq, lbound, ubound, solver='clarabel')
-
-            avg_ls_time_lib += (time.time() - start) / rep + avg_get_r_time
-
-            assert np.allclose(R @ R.T, H)
-
-            if not np.allclose(x, x_2, rtol=1e-2, atol=1e-3):
-                print('Solutions do not match!')
-                fval = f @ x + 0.5 * x @ H @ x
-                fval_2 = f @ x_2 + 0.5 * x_2 @ H @ x_2
-                print(fval)
-                print(fval_2)
-                print(x)
-                print(x_2)
-
-
-            assert np.allclose(x, x_2, rtol=1e-2, atol=1e-3)
-            assert np.allclose(np.array(np.sum(x)), [1])
-
-            fval = f @ x + 0.5 * x @ H @ x
-
-            # print("FVal = ", fval)
-            # print("p= ", x)
-
-            div1 = np.zeros(len(sample))
-            div2 = np.zeros(len(sample) * (len(sample) - 1) // 2)
-            cnt = 0
-            for jj in range(len(sample)):
-                div1[jj] =  np.trace(EU.conj().T @ Us[sample[jj]]) ** 2
-                for kk in range(jj + 1, len(sample)):
-                    div2[cnt] = np.linalg.norm(Us[sample[jj]] - Us[sample[kk]], 'fro') ** 2
-                    div2[cnt] = np.trace(Us[sample[kk]].conj().T @ Us[sample[jj]]) ** 2
-                    cnt += 1
-
-            error[rr] = d
-            chi1[rr] = np.mean(div1) / mean_epsi
-            chi2[rr] = np.mean(div2) / mean_epsi
-
-
-        print("M: ", M, " Avg QP Time: ", avg_qp_time, " Avg LS Time: ", avg_ls_time_lib, "Avg Chol Decomp Time: ", avg_get_r_time)
-        optim_val[mm] = np.mean(error)
-        optim_var[mm] = np.var(error)
-        avg_chi1[mm] = np.mean(chi1)
-        avg_chi2[mm] = np.mean(chi2)
+    compiler = Compiler(num_workers=256)
+    compiler.compile(circ, workflow)

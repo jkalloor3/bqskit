@@ -93,11 +93,15 @@ class GenerateProbabilityPass(BasePass):
             print("Already Generated Unitaries")
             ensemble = data["final_unitaries"]
         else:
-            circ_params = load_jiggled_ensemble(final_ens_file, 
-                                final_ens_jiggle_file)
+            try:
+                circ_params = load_jiggled_ensemble(final_ens_file, 
+                                                    final_ens_jiggle_file)
+            except:
+                print("Corrupted ensemble files, skipping", checkpoint_dir, flush=True)
+                return
             ensemble = await get_runtime().map(create_jiggled_unitaries, circ_params, 
-                                            target=target, add_cost=False)
-        ensemble = np.concatenate(ensemble, axis=0)
+                                               target=target, add_cost=False)
+            ensemble = np.concatenate(ensemble, axis=0)
 
         if len(ensemble) > NUM_CIRCS_PER_PROB:
             rand_un_inds = np.random.choice(ensemble.shape[0], 

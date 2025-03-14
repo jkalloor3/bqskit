@@ -31,6 +31,7 @@ from bqskit.utils.typing import is_integer
 from bqskit.utils.typing import is_real_number
 from itertools import chain, zip_longest
 from .distance import normalized_frob_cost
+from .generate_probs_pass import GenerateProbabilityPass
 
 _logger = logging.getLogger(__name__)
 
@@ -54,11 +55,13 @@ class SecondLEAPSynthesisPass(BasePass):
         success_threshold: float = 1e-8,
         cost: CostFunctionGenerator = HilbertSchmidtResidualsGenerator(),
         max_layer: int = 40,
+        max_layer_factor: float = 2.0,
         min_prefix_size: int = 3,
         instantiate_options: dict[str, Any] = {},
         partial_success_threshold: float = 1e-3,
         use_calculated_error: bool = False,
         max_psols: int = 5,
+        maximize_diversity: bool = False,
     ) -> None:
         """
         Construct a search-based synthesis pass.
@@ -154,6 +157,7 @@ class SecondLEAPSynthesisPass(BasePass):
         self.partial_success_threshold = partial_success_threshold
         self.cost = cost
         self.max_layer = max_layer
+        self.max_layer_factor = max_layer_factor
         self.min_prefix_size = min_prefix_size
         self.instantiate_options: dict[str, Any] = {
             'cost_fn_gen': HilbertSchmidtResidualsGenerator(),
@@ -161,6 +165,9 @@ class SecondLEAPSynthesisPass(BasePass):
         self.use_calculated_error = use_calculated_error
         self.instantiate_options.update(instantiate_options)
         self.max_psols = max_psols
+        self.maximize_diversity = maximize_diversity
+        if self.maximize_diversity:
+            self.max_layer_factor = 2.0
 
     async def synthesize(self, data: PassData, target: UnitaryMatrix, default_circuit: Circuit) -> Circuit:
         # Synthesize every circuit in the ensemble
@@ -168,8 +175,8 @@ class SecondLEAPSynthesisPass(BasePass):
         block_id = f"Block {data.get('super_block_num', -1)}_{data.get('block_num', -1)}:"
         factor = data.get("error_percentage_allocated", 1)
         partial_success_threshold = self.partial_success_threshold * factor
-        print(f"{block_id} Partial Success Threshold: ", partial_success_threshold, flush=True)
-        print(f"{block_id} After Leap 1 distances: ", [d[1] for d in data['scan_sols']], flush=True)
+        # print(f"{block_id} Partial Success Threshold: ", partial_success_threshold, flush=True)
+        # print(f"{block_id} After Leap 1 distances: ", [d[1] for d in data['scan_sols']], flush=True)
         if len(circs) > 0:
             for c in circs:
                 assert(isinstance(c, Circuit))
@@ -200,20 +207,31 @@ class SecondLEAPSynthesisPass(BasePass):
         else:
             new_circs = []
 
-        # Randomly choose up to 12 circuits
-        if len(new_circs) > 8:
-            # Weight by count, less gates is more likely
-            print(f"{block_id} Subselecting 8 circuits", flush=True)
-            print(f"{block_id} Original Distances: ", [c[1] for c in new_circs], flush=True)
-            print(f"{block_id} Original Counts: ", [c[0].count(CNOTGate()) for c in new_circs], flush=True)
-            counts = np.array([1 / (c[0].count(CNOTGate()) ** 2 + 1) for c in new_circs])
-            counts = counts / np.sum(counts)
-            print("Probabilities: ", counts, flush=True)
-            inds = np.random.choice(len(new_circs), 8, replace=False, p=counts)
-            new_circs = [new_circs[i] for i in inds]
-            print(f"{block_id} Success Threshold: ", partial_success_threshold, flush=True)
-            print(f"{block_id} Final Distances: ", [c[1] for c in new_circs], flush=True)
-            print(f"{block_id} Final Counts: ", [c[0].count(CNOTGate()) for c in new_circs], flush=True)    
+        # Randomly choose up to 8 circuits
+
+        if self.maximize_diversity:
+            # Run mini QP on unitaries to select
+            non_zero_circs: list[Circuit] = [c for c,d in new_circs if d != 0]
+            non_zero_dists = [d for c,d in new_circs if d != 0]
+            uns = np.array([c.get_unitary() for c in non_zero_circs])
+            if len(uns) > 0:
+                probs = GenerateProbabilityPass.calculate_probs(uns, data.target)
+                # Choose according to probability but add zero-dist circs
+                new_circs = [(c,d) for c,d in new_circs if d == 0]
+                size = min(8, len(probs))
+                rand_ens_inds = np.random.choice(len(probs), size=size, p=probs, replace=False)
+                new_circs = [(non_zero_circs[i].copy(), non_zero_dists[i]) for i in rand_ens_inds] + new_circs
+        else:
+            if len(new_circs) > 8:
+                # Weight by count, less gates is more likely
+                # print(f"{block_id} Subselecting 8 circuits", flush=True)
+                # print(f"{block_id} Original Distances: ", [c[1] for c in new_circs], flush=True)
+                # print(f"{block_id} Original Counts: ", [c[0].count(CNOTGate()) for c in new_circs], flush=True)
+                counts = np.array([1 / (c[0].count(CNOTGate()) ** 2 + 1) for c in new_circs])
+                counts = counts / np.sum(counts)
+                # print("Probabilities: ", counts, flush=True)
+                inds = np.random.choice(len(new_circs), 8, replace=False, p=counts)
+                new_circs = [new_circs[i] for i in inds]
 
         new_circs.append((default_circuit, 0))
 
@@ -250,7 +268,8 @@ class SecondLEAPSynthesisPass(BasePass):
         # Get layer generator for search
         layer_gen = self._get_layer_gen(data)
 
-        max_layer = min(self.max_layer, default_count + 2)
+        max_layer = max(default_count + 2, int(default_count * self.max_layer_factor))
+        max_layer = min(self.max_layer, max_layer)
 
         # Begin the search with an initial layer
         frontier = Frontier(utry, self.heuristic_function)
@@ -421,6 +440,13 @@ class SecondLEAPSynthesisPass(BasePass):
         save_file: str = data.get("checkpoint_data_file", None)
         if "finished_second_leap" in data:
             print("Already finished second leap!", flush=True)
+            return
+        
+        if circuit.num_qudits == 1:
+            print("Terribly small circuit, skipping", save_file, flush=True)
+            data["finished_second_leap"] = True
+            if save_file:
+                pickle.dump(data, open(save_file, "wb"))
             return
 
         await self.synthesize(data, target=data.target, default_circuit=data['scan_sols'][-1][0])

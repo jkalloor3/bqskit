@@ -101,44 +101,60 @@ class CheckEnsembleQualityPass(BasePass):
         best_ratio = float("inf")
         best_count = float("inf")
 
+        ensemble_files = []
         if os.path.exists(jiggle_file):
-            # Load the ensemble from the checkpoint
             while os.path.exists(jiggle_file):
+                ensemble_files.append((ens_file, jiggle_file))
+                start_ens_ind += 1
+                ens_file = ensemble_file_name.format(ind=start_ens_ind, extra=self.checkpoint_extra_str)
+                jiggle_file = jiggle_file_name.format(ind=start_ens_ind, extra=self.checkpoint_extra_str)
+
+        print("Ensemble Files: ", ensemble_files, flush=True)
+        print(data.get("ensemble", None))
+
+        ensemble = data.get("ensemble", ensemble_files)
+
+
+        for ens in ensemble:
+            if len(ens) > 0 and isinstance(ens[0], str):
+                ens_file, jiggle_file = ens
                 circ_params = load_jiggled_ensemble(ens_file, jiggle_file)
-                circuits = [circ for circ, _ in circ_params]
-                avg_utries_dists = await get_runtime().map(create_avg_utry, 
-                                                           circ_params, 
-                                                           target=data.target, 
-                                                           add_cost=True)
-                
-                utries = [avg_utry for avg_utry, _ in avg_utries_dists]
-                dists = [dist for _, dist in avg_utries_dists]
-                avg_utry = np.mean(utries, axis=0)
-                avg_dist = np.mean(dists)
-                print("Avg Dist: ", avg_dist, flush=True)
-                csv_dict[start_ens_ind] = self.get_ensemble_data(avg_utry, avg_dist, target, None)
-                csv_dict[start_ens_ind]["Ensemble Generation Method"] = self.ensemble_names[start_ens_ind]
-                ratio = csv_dict[start_ens_ind]["Ratio"]
-                print("Ratio: ", ratio, flush=True)
-                count = np.mean([count_params(c) for c in circuits])
-                csv_dict[start_ens_ind]["Avg. Count"] = count
-                ensemble_counts[start_ens_ind] = count
-                print("Avg Count Post Jiggle Load: ", count, flush=True)
-                if ratio < 10:
+            else:
+                circ_params = ens
+            circuits = [circ for circ, _ in circ_params]
+            avg_utries_dists = await get_runtime().map(create_avg_utry, 
+                                                        circ_params, 
+                                                        target=data.target, 
+                                                        add_cost=True)
+            
+            utries = [avg_utry for avg_utry, _ in avg_utries_dists]
+            dists = [dist for _, dist in avg_utries_dists]
+            avg_utry = np.mean(utries, axis=0)
+            avg_dist = np.mean(dists)
+            print("Avg Dist: ", avg_dist, flush=True)
+            csv_dict[start_ens_ind] = self.get_ensemble_data(avg_utry, avg_dist, target, None)
+            csv_dict[start_ens_ind]["Ensemble Generation Method"] = self.ensemble_names[start_ens_ind]
+            ratio = csv_dict[start_ens_ind]["Ratio"]
+            print("Ratio: ", ratio, flush=True)
+            count = np.mean([count_params(c) for c in circuits])
+            csv_dict[start_ens_ind]["Avg. Count"] = count
+            ensemble_counts[start_ens_ind] = count
+            print("Avg Count Post Jiggle Load: ", count, flush=True)
+            if ratio < 1:
+                best_ind = start_ens_ind
+                best_ratio = ratio
+                best_count = count
+                print("FOUND GOOD ENSEMBLE", flush=True)
+                break
+            else:
+                if ratio < best_ratio and count < best_count:
                     best_ind = start_ens_ind
                     best_ratio = ratio
                     best_count = count
-                    print("FOUND GOOD ENSEMBLE", flush=True)
-                    break
-                else:
-                    if ratio < best_ratio and count < best_count:
-                        best_ind = start_ens_ind
-                        best_ratio = ratio
-                        best_count = count
-                    # Keep Looking
-                    start_ens_ind += 1
-                    ens_file = ensemble_file_name.format(ind=start_ens_ind, extra=self.checkpoint_extra_str)
-                    jiggle_file = jiggle_file_name.format(ind=start_ens_ind, extra=self.checkpoint_extra_str)
+                # Keep Looking
+                start_ens_ind += 1
+                ens_file = ensemble_file_name.format(ind=start_ens_ind, extra=self.checkpoint_extra_str)
+                jiggle_file = jiggle_file_name.format(ind=start_ens_ind, extra=self.checkpoint_extra_str)
         
         if "checkpoint_dir" in data:
             checkpoint_data_file: str = data["checkpoint_data_file"]
@@ -151,6 +167,7 @@ class CheckEnsembleQualityPass(BasePass):
             # Copy best jiggled ensemble file to new file name
             best_ensemble_file_name = f"{checkpoint_dir}/ensemble_{best_ind}_{self.checkpoint_extra_str}.qasms"
             best_file_name = f"{checkpoint_dir}/ensemble_{best_ind}_jiggles_{self.checkpoint_extra_str}.npy"
-            shutil.copyfile(best_ensemble_file_name, final_ens_file)
-            shutil.copyfile(best_file_name, final_ens_jiggle_file)
+            if os.path.exists(best_ensemble_file_name):
+                shutil.copyfile(best_ensemble_file_name, final_ens_file)
+                shutil.copyfile(best_file_name, final_ens_jiggle_file)
 

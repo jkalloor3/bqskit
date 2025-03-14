@@ -446,8 +446,6 @@ class CreateEnsemblePass(BasePass):
         if self.use_calculated_error:
             self.success_threshold = self.success_threshold * data["error_percentage_allocated"]
 
-        data["scan_sols"] = []
-        data["ensemble"] = []
             
         approx_circs, pts, dists, _ = self.parse_data(circuit, block_data)        
         all_ensembles: list[list[Circuit]] = await self.assemble_circuits(circuit, approx_circs, pts, dists=dists, target=data.target)
@@ -455,26 +453,6 @@ class CreateEnsemblePass(BasePass):
         if len(all_ensembles) == 0:
             _logger.error("No ensembles found!!!!")
             return
-        
-        # if self.save_as_scan:
-
-        #     min_params = np.inf
-        #     min_ind = 0
-
-        #     for i in range(start_ens_ind, all_ensembles):
-        #         all_circs = all_ensembles[i]
-        #         all_circs = sorted(all_circs, key=lambda x: x.num_params)
-        #         avg_params = np.mean([circ.num_params for circ in all_circs])
-        #         if avg_params < min_params:
-        #             min_ind = i
-        #     # Pick the 30 circuits with the lowest number of parameters
-        #     all_circs = all_ensembles[min_ind]
-        #     all_circs = all_circs[:30]
-        #     dists = [normalized_gp_frob_cost(circ.get_unitary(), data.target) for circ in all_circs]
-        #     scan_sols = list(zip(all_circs, dists))
-        #     data["scan_sols"] = scan_sols
-        #     data.pop("ensemble")
-        #     return
 
         if "checkpoint_dir" in data:
             # Store ensembles separately

@@ -29,11 +29,11 @@ def full_optimization(circ_file: str, new_circ_file: str) -> bool:
     '''
     circ = circuit_from_qasm(circ_file)
     bqskit_circ = BQCircuit.from_file(circ_file)
-    if bqskit_circ.num_qudits > 12:
-        print(f"{circ_file} has too many qudits, skipping", flush=True)
-        return False
-    un = bqskit_circ.get_unitary()
     print("Original Gate Counts: ", bqskit_circ.gate_counts, flush=True)
+    # if bqskit_circ.num_qudits > 12:
+    #     print(f"{circ_file} has too many qudits, skipping", flush=True)
+    #     return False
+    # un = bqskit_circ.get_unitary()
     # Cannot swap for now as blocks must connect as normal -> Further Optimization
     FullPeepholeOptimise(allow_swaps=False).apply(circ)
     print("Optimized CX Count: ", circ.n_gates_of_type(OpType.CX), flush=True)
@@ -42,24 +42,24 @@ def full_optimization(circ_file: str, new_circ_file: str) -> bool:
     circuit_to_qasm(circ, temp_file)
     # opt_circ = lang.decode(circuit_to_qasm_str(circ))
     time.sleep(2)
-    opt_circ = BQCircuit.from_file(temp_file)
+    # opt_circ = BQCircuit.from_file(temp_file)
     opt_tket_circ = circuit_from_qasm(temp_file)
     # print(opt_circ.gate_counts)
-    opt_un = opt_circ.get_unitary()
+    # opt_un = opt_circ.get_unitary()
     print(opt_tket_circ.n_gates)
-    opt_tket_un = opt_tket_circ.get_unitary()
-    dist = normalized_gp_frob_cost(opt_un, un)
-    dist_2 = normalized_gp_frob_cost(opt_tket_un, un)
-    print("Normalized Distance: ", dist, flush=True)
-    print("TKET Unitary Distance: ", dist_2, flush=True)
-    if dist < 1e-8:
-        file_name = Path(circ_file).name
-        new_circ_file = os.path.join(output_dir, file_name)
-        circuit_to_qasm(circ, new_circ_file)
-        print(f"Optimized {circ_file}", flush=True)
-        return True
-    else:
-        return False
+    # opt_tket_un = opt_tket_circ.get_unitary()
+    # dist = normalized_gp_frob_cost(opt_un, un)
+    # dist_2 = normalized_gp_frob_cost(opt_tket_un, un)
+    # print("Normalized Distance: ", dist, flush=True)
+    # print("TKET Unitary Distance: ", dist_2, flush=True)
+    # if dist < 1e-8:
+    file_name = Path(circ_file).name
+    new_circ_file = os.path.join(output_dir, file_name)
+    circuit_to_qasm(circ, new_circ_file)
+    print(f"Optimized {circ_file}", flush=True)
+    return True
+    # else:
+    #     return False
 
 def faster_opt(circ_file: str, new_circ_file: str) -> bool:
     '''
@@ -99,7 +99,9 @@ if __name__ == '__main__':
 
     Path(output_dir).mkdir(parents=True, exist_ok=True)
 
-    unoptimized_circ_files = glob.glob(f"{input_dir}/qaoa10*.qasm")
+    unoptimized_circ_files = glob.glob(f"{input_dir}/qml_16_*.qasm")
+
+    print(unoptimized_circ_files, flush=True)
 
     for circ_file in unoptimized_circ_files:
         file_name = Path(circ_file).name

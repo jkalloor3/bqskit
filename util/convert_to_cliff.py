@@ -24,8 +24,8 @@ from .distance import normalized_gp_frob_cost
 from bqskit.ir.gates.constantgate import ConstantGate
 from bqskit.ir.gates.qubitgate import QubitGate
 
-from bqskit.ir.opt.cost.functions import  HilbertSchmidtResidualsGenerator
-cost = HilbertSchmidtResidualsGenerator()
+from bqskit.ir.opt.cost.functions import  GPNormalizedFrobeniusCostGenerator
+cost = GPNormalizedFrobeniusCostGenerator()
 
 _logger = logging.getLogger(__name__)
 

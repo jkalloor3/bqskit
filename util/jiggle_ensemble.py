@@ -357,7 +357,7 @@ class  JiggleEnsemblePass(BasePass):
             mod_time = time.time() - mod_start
             print("Modified Circuits", mod_time, flush=True)
 
-            param_fut = get_runtime().map(JiggleEnsemblePass.single_jiggle_ham, 
+            all_params = await get_runtime().map(JiggleEnsemblePass.single_jiggle_ham, 
                                           circuit_strs, 
                                           target=data.target,
                                           num = ceil(self.num_circs / len(circuit_strs)), 
@@ -366,26 +366,13 @@ class  JiggleEnsemblePass(BasePass):
             ens_file = ensemble_file_name.format(ind=ens_ind, extra=self.checkpoint_extra_str)
             store_start = time.time()
             store_ensemble_strs(circuit_strs, ens_file)
-            store_time = time.time() - store_start
-            print("Stored Ensemble", store_time, flush=True)
-            
-            futs.append((ens_ind, param_fut, circuit_strs))
-
-        for ens_ind, param_fut, circuit_strs in futs:
-            all_params: list[np.ndarray] = await param_fut
-            del circuit_strs
             print("Finished Jiggling Ensemble", flush=True)
             print("Total Bytes", sum(p.nbytes for p in all_params) / 1024 / 1024 / 1024, flush=True)
-            # if self.count_t:
-            #     counts = [count_params(c) for c in circuits]
-            # else:
-            #     counts = [c.count(CNOTGate()) for c in circuits]
-
-            print("Num Circ Params Post Jiggle", len(all_params) * all_params[0].shape[0], flush=True)
-            # print("Avg Count Post Jiggle", np.mean(counts), flush=True)
+            del circuit_strs
+            store_time = time.time() - store_start
             jiggle_file = jiggle_file_name.format(ind=ens_ind, extra=self.checkpoint_extra_str)
             store_params(all_params, jiggle_file)
-            del all_params
+            print("Stored Ensemble", store_time, flush=True)
 
         total_time = time.time() - start
         print("Total Time for Jiggling Params: ", total_time, flush=True)

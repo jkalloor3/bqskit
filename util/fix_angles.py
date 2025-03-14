@@ -107,8 +107,18 @@ class FixAnglesPass(BasePass):
 
     async def run(self, circuit: Circuit, data: PassData) -> None:
         if self.run_scan_sols:
+            init_dists = [x[1] for x in data["scan_sols"]]
+            orig_gate_counts = [x[0].gate_counts for x in data["scan_sols"]]
             for circ, _ in data["scan_sols"]:
                 FixAnglesPass.run_circ(circ, self.precision)
+            final_dists = np.array([normalized_gp_frob_cost(c.get_unitary(), data.target) for c, _ in data["scan_sols"]])
+            if np.any(final_dists > 0.001):
+                print("Circ Gates: ", orig_gate_counts, 
+                      [x[0].gate_counts for x in data["scan_sols"]], flush=True)
+                print("Orig Gate Counts: ", circuit.gate_counts, flush=True)
+                print("Orig Unitary: ", circuit.get_unitary(), flush=True)
+                print("Target Unitary: ", data.target, flush=True)
+                print("Dists: ", init_dists, final_dists, flush=True)
         else:
             FixAnglesPass.run_circ(circuit, self.precision)
 
@@ -131,6 +141,6 @@ class UnFixTPass(BasePass):
         
         circuit.batch_replace(pts, new_ops)
         circuit.unfold_all()
-        print("Unfixing Params: ", circuit.num_params, flush=True)
-        print("Distance from target: ", normalized_gp_frob_cost(circuit.get_unitary(), data.target))
+        # print("Unfixing Params: ", circuit.num_params, flush=True)
+        # print("Distance from target: ", normalized_gp_frob_cost(circuit.get_unitary(), data.target))
         return

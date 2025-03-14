@@ -27,6 +27,7 @@ from bqskit.qis.unitary import UnitaryMatrix
 from bqskit.runtime import get_runtime
 from bqskit.utils.typing import is_integer
 from bqskit.utils.typing import is_real_number
+from .distance import normalized_gp_frob_cost
 
 _logger = logging.getLogger(__name__)
 
@@ -50,13 +51,15 @@ class LEAPSynthesisPass2(BasePass):
         success_threshold: float = 1e-8,
         cost: CostFunctionGenerator = HilbertSchmidtResidualsGenerator(),
         max_layer: int | None = 40,
-        store_partial_solutions: bool = False,
+        max_layer_factor: float = 2.0,
+        store_partial_solutions: bool = True,
         partials_per_depth: int = 25,
         min_prefix_size: int = 3,
         instantiate_options: dict[str, Any] = {},
         partial_success_threshold: float = 1e-3,
         use_calculated_error: bool = False,
         max_psols: int = 10,
+        maximize_diversity: bool = False,
     ) -> None:
         """
         Construct a search-based synthesis pass.
@@ -159,6 +162,7 @@ class LEAPSynthesisPass2(BasePass):
         self.partial_success_threshold = partial_success_threshold
         self.cost = cost
         self.max_layer = max_layer
+        self.max_layer_factor = max_layer_factor
         self.min_prefix_size = min_prefix_size
         self.instantiate_options: dict[str, Any] = {
             'cost_fn_gen': HilbertSchmidtResidualsGenerator(),
@@ -168,6 +172,10 @@ class LEAPSynthesisPass2(BasePass):
         self.store_partial_solutions = store_partial_solutions
         self.partials_per_depth = partials_per_depth
         self.max_psols = max_psols
+        if maximize_diversity:
+            self.max_layer_factor = 2.0
+            self.max_psols *= 2
+        self.maximize_diversity = maximize_diversity
 
 
     async def synthesize_circ(
@@ -232,7 +240,7 @@ class LEAPSynthesisPass2(BasePass):
                     # Dump data and circuit with empty Frontier
                     data["leap_finished"] = True
                     pickle.dump(data, open(save_data_file, "wb"))
-                return initial_layer
+                return
             
         else:
             best_dist = data['best_dist']
@@ -244,10 +252,15 @@ class LEAPSynthesisPass2(BasePass):
             scan_sols = data['scan_sols']
 
         default_count = default_circuit.count(CNOTGate())
-        max_layer = min(self.max_layer, default_count + 2)
+        max_layer = max(default_count + 2, int(default_count * self.max_layer_factor))
+        max_layer = min(self.max_layer, max_layer)
+        print("Max Layer: ", max_layer, flush=True)
 
         # Main loop
         step = 0
+
+        cur_bias = 0
+        cur_avg_un = None
 
         while not frontier.empty():
             # print("CHECKPOINTING!", best_layer, data["block_num"])
@@ -288,10 +301,12 @@ class LEAPSynthesisPass2(BasePass):
             for circuit in circuits:
                 dist = self.cost.calc_cost(circuit, utry)
                 if dist < partial_success_threshold:
-                    # print(f"{block_id} Partial Success at layer {layer + 1} with cost: {dist:.12e}", flush=True)
                     scan_sols.append((circuit.copy(), dist))
                     data['scan_sols'] = scan_sols
                     if len(scan_sols) >= self.max_psols:
+                        if self.maximize_diversity:
+                            # Remove half of the solutions
+                            scan_sols = scan_sols[::2]
                         scan_sols.append((default_circuit.copy(), 0))
                         data['scan_sols'] = scan_sols
                         # Save data and circuit
@@ -477,6 +492,9 @@ class LEAPSynthesisPass2(BasePass):
         # Remove large increases
         scan_sols = [x for x in scan_sols if x[0].num_params <= (orig_num_params * 2)]
         data['scan_sols'] = scan_sols
+        final_dists = [x[1] for x in scan_sols]
+        print("Final Distances: ", final_dists, flush=True)
+
 
         if save_data_file is not None:
             # Dump data and circuit
