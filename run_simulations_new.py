@@ -13,7 +13,8 @@ from bqskit.ir.point import CircuitPoint
 from bqskit.ir.lang.qasm2 import OPENQASM2Language
 
 from util import (load_circuit, get_circ_data, check_param_shape, 
-                  load_block, load_compiled_circs_params_separate)
+                  load_block, load_compiled_circs_params_separate, 
+                  load_compiled_block_circuits_qp_inds)
 from util.distance import normalized_gp_frob_cost, trace_distance, tvd, get_density_matrix, get_average_density_matrix
 from util.fix_global_phase import fix_phase
 
@@ -29,6 +30,8 @@ partitioned_circ_save_file = "/pscratch/sd/j/jkalloor/bqskit/partitioned_circs/{
 
 circ_name = "qae11"
 
+USE_QP = False
+
 lang = OPENQASM2Language()
 
 def get_qcirc(circ: Circuit) -> QuantumCircuit:
@@ -39,7 +42,9 @@ def get_qcirc(circ: Circuit) -> QuantumCircuit:
 
 
 def get_random_circs(num_circs: int,
-                    block_circs: list[Circuit], 
+                    block_circs: list[Circuit],
+                    inds: np.ndarray,
+                    probs: np.ndarray, 
                     shm_name: str,
                     param_shape: np.ndarray = None,
                     target: UnitaryMatrix = None) -> list[Circuit]:
@@ -54,8 +59,14 @@ def get_random_circs(num_circs: int,
     shm_array = np.ndarray(param_shape, dtype=np.float64, buffer=shm.buf)
 
     # Else, we are using an ensemble
-    rand_circ_inds = np.random.randint(0, len(block_circs), size=num_circs)
-    rand_param_inds = np.random.randint(0, shm_array.shape[1], size=num_circs)
+    if USE_QP:
+        rand_inds = np.random.choice(inds, size=num_circs, p=probs)
+        num_params_per_circ = shm_array.shape[1]
+        rand_circ_inds = [i // num_params_per_circ for i in rand_inds]
+        rand_param_inds = [i % num_params_per_circ for i in rand_inds]
+    else:
+        rand_circ_inds = np.random.randint(0, len(block_circs), size=num_circs)
+        rand_param_inds = np.random.randint(0, shm_array.shape[1], size=num_circs)
     circ_strs = []
     for c_ind, p_ind in zip(rand_circ_inds, rand_param_inds):
         # Now we need to get the random circuits
@@ -70,6 +81,8 @@ def get_random_circs(num_circs: int,
 
 def generate_full_circuits(block_circs: dict[str, list[Circuit]], 
                            block_names: list,
+                           block_inds: dict[str, np.ndarray],
+                           block_probs: dict[str, np.ndarray],
                            param_shapes: dict[str, tuple[int]],
                            block_targets: dict[str, UnitaryMatrix],
                            pcirc: Circuit,
@@ -84,8 +97,12 @@ def generate_full_circuits(block_circs: dict[str, list[Circuit]],
         shm_name = circ_name + "_" + str(max_tol) + "_" + block_name
         param_shape = param_shapes.get(block_name, None)
         target = block_targets.get(block_name, None)
+        inds = block_inds.get(block_name, None)
+        probs = block_probs.get(block_name, None)
         circ_blocks[block_name] = get_random_circs(ens_size,
-                                                  block_circs[block_name], 
+                                                  block_circs[block_name],
+                                                  inds=inds,
+                                                  probs=probs, 
                                                   shm_name=shm_name, 
                                                   param_shape=param_shape,
                                                   target=target)
@@ -114,6 +131,8 @@ def generate_full_circuits(block_circs: dict[str, list[Circuit]],
 if __name__ == '__main__':
     block_circs = {}
     block_names = []
+    block_probs = {}
+    block_inds = {}
 
     np.set_printoptions(precision=2, threshold=np.inf, linewidth=np.inf)
     max_tol = float(argv[1]) if len(argv) > 1 else 0.01
@@ -128,12 +147,11 @@ if __name__ == '__main__':
     target_dm = get_density_matrix(target_sv)
 
     block_targets = {}
-    block_dirs, count = get_circ_data(circ_name, max_tol, False, no_base=True)
+    block_dirs, count = get_circ_data(circ_name, max_tol, use_base=False)
     block_names = sorted([x[0] for x in block_dirs])
     print("Avg Count: ", count, "TKET Count: ", 110)
     print("Block dirs: ", block_dirs)
     print("Block names: ", block_names)
-    exit(0)
 
     # Figure out how many ensembles we need, and calculate shared memory space
     param_shapes = {}
@@ -157,9 +175,18 @@ if __name__ == '__main__':
             continue
         param_shape = param_shapes[block_name]
         shm_name = shm_names[block_name]
-        shm = SharedMemory(name=shm_name, 
-                           create=True, 
-                           size=np.prod(param_shape)*float_size)
+        try:
+            shm = SharedMemory(name=shm_name, 
+                            create=True, 
+                            size=np.prod(param_shape)*float_size)
+        except:
+            print("Shared Memory already exists: ", shm_name)
+            shm = SharedMemory(name=shm_name, create=False)
+            shm.close()
+            shm.unlink()
+            shm = SharedMemory(name=shm_name, 
+                               create=True, 
+                               size=np.prod(param_shape)*float_size)
         # print("Shared Memory: ", shm_name, shm.size)
         # Now we need to create a numpy array in the shared memory
         shm_array = np.ndarray(param_shape, dtype=np.float64, buffer=shm.buf)
@@ -171,7 +198,7 @@ if __name__ == '__main__':
 
     # Get all the circuits
     for block_name, block_data in block_dirs:
-        bc_file = load_block(circ_name, block_name)
+        bc_file = load_block(block_data[0], block_data[1], extra=block_data[-1])
         block_target = Circuit.from_file(bc_file) 
         block_un = block_target.get_unitary()
         block_targets[block_name] = block_un
@@ -183,6 +210,16 @@ if __name__ == '__main__':
         else:
             # inds, probs = load_compiled_block_circuits_qp_inds(*block_data)
             circuits, params = load_compiled_circs_params_separate(*block_data)
+            if USE_QP:
+                inds, probs = load_compiled_block_circuits_qp_inds(*block_data)
+                if probs is not None:
+                    block_inds[block_name] = inds
+                    block_probs[block_name] = probs
+                    print("Sum of probs: ", np.sum(probs), block_name, flush=True)
+                else:
+                    # Use uniform distribution
+                    block_inds[block_name] = np.arange(len(circuits) * params.shape[1])
+                    block_probs[block_name] = np.ones(len(circuits) * params.shape[1]) / len(circuits) / params.shape[1]
             # Now we need to load params into shared memory
             shm = shms[block_name]
             param_shape = params.shape
@@ -200,11 +237,11 @@ if __name__ == '__main__':
     # print("Partitioned Circuit: ", partitioned_circ.gate_counts)
     # print(partitioned_circ_save_file)
 
-    ensemble_sizes = [1, 5, 10, 20, 40, 80, 160, 320]
+    ensemble_sizes = [640, 2560]
     # ensemble_sizes = [2, 10, 20]
 
     ensemble_circuits = []
-    num_trials = 6
+    num_trials = 2
     ensemble_frob_costs = []
     ensemble_tvd_costs = []
     ensemble_trace_dist_costs = []
@@ -220,6 +257,8 @@ if __name__ == '__main__':
             # print("Trial: ", i, flush=True)
             ens = generate_full_circuits(block_circs, 
                                          block_names,
+                                         block_inds,
+                                         block_probs,
                                          param_shapes,
                                          block_targets,
                                          partitioned_circ,
@@ -239,6 +278,12 @@ if __name__ == '__main__':
         ensemble_tvd_costs.append(mean_tvd_costs)
         ensemble_trace_dist_costs.append(mean_trace_dist_costs)
         print("Avg Cost: ", np.mean(mean_frob_costs))
+        size_cost = {
+            "frob": mean_frob_costs,
+            "tvd": mean_tvd_costs,
+            "trace_dist": mean_trace_dist_costs
+        }
+        pickle.dump(size_cost, open(f"ensemble_{circ_name}_{max_tol}_{ens_size}.pickle", 'wb'))
     
 
     for block_name, shm in shms.items():
@@ -252,4 +297,4 @@ if __name__ == '__main__':
         "trace_dist": ensemble_trace_dist_costs
     }
 
-    pickle.dump(all_costs, open(f"ensemble_costs_{circ_name}_{max_tol}.pickle", 'wb'))
+    pickle.dump(all_costs, open(f"ensemble_costs_{circ_name}_{max_tol}_640_2560.pickle", 'wb'))

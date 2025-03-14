@@ -16,32 +16,33 @@ import shutil
 
 # enable_logging(True)
 # input_folder = f"/pscratch/sd/j/jkalloor/bqskit/QITE_8"
-input_folder = "/pscratch/sd/j/jkalloor/bqskit/qce23_qfactor_benchmarks"
+input_folder = "/pscratch/sd/j/jkalloor/bqskit/ensemble_benchmarks_tket"
 good_output_folder = 'good_blocks'
 bad_output_folder = 'bad_blocks'
 block_save_dir = "/pscratch/sd/j/jkalloor/bqskit/block_qasms_{circ_name}/"
 partitioned_circ_save_file = "/pscratch/sd/j/jkalloor/bqskit/partitioned_circs/{circ_name}.pickle"
 
+LARGE_BLOCK_SIZE = 9
+SMALL_BLOCK_SIZE = 3
+QUICK_SMALL_BLOCK_SIZE = 6
+
 def partition_workflow(circ_name: str, num_qudits: int = 8) -> list:
     if num_qudits < 15:
-        partitioner_1 = ScanPartitioner(3)
-        partitioner_2 = ScanPartitioner(8)
-    elif num_qudits < 25:        
-        partitioner_1 = QuickPartitioner(3)
-        partitioner_2 = ScanPartitioner(8)
+        partitioner_1 = ScanPartitioner(SMALL_BLOCK_SIZE)
+        partitioner_2 = ScanPartitioner(LARGE_BLOCK_SIZE)
     else:
-        partitioner_1 = QuickPartitioner(3)
-        partitioner_2 = QuickPartitioner(8)
+        partitioner_1 = QuickPartitioner(QUICK_SMALL_BLOCK_SIZE)
+        partitioner_2 = QuickPartitioner(LARGE_BLOCK_SIZE)
 
     if num_qudits >= 8:
-        extend_pass = ExtendBlockSizePass(8)
+        extend_pass = ExtendBlockSizePass(LARGE_BLOCK_SIZE)
     else:
         extend_pass = NOOPPass()
 
     return [
     ExtractMeasurements(),
     partitioner_1,
-    ExtendBlockSizePass(3),
+    ExtendBlockSizePass(SMALL_BLOCK_SIZE),
     partitioner_2,
     extend_pass,
     ForEachBlockPass([
@@ -86,8 +87,8 @@ def sort_blocks(circ_name: str, good_output_folder, bad_output_folder):
     os.rmdir(block_save_dir.format(circ_name=circ_name))
 
 if __name__ == '__main__':
-    compiler = Compiler(num_workers=64)
-    circ_types = ['qaoa10']
+    compiler = Compiler(num_workers=1)
+    circ_types = ['qml_16']
     job_ids = []
     for circ_type in circ_types:
         circ_files = glob.glob(os.path.join(input_folder, f"{circ_type}.qasm"))

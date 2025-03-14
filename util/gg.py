@@ -53,7 +53,7 @@ def gridsynth_gates_to_cir(gates: str):
 def get_approx_t_str(angle: float, precision: int) -> str:
     # Divid angle by pi and mod by 2
     mod_angle = (angle / np.pi) % 2.0
-    tol = 10 ** (-precision)
+    tol = 10.0 ** (-precision)
 
     # Edge errors, does not include Z for some reason
     if np.allclose(mod_angle, 0, atol=tol, rtol=0):

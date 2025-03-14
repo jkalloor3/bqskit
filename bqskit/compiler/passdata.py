@@ -43,7 +43,7 @@ class PassData(MutableMapping[str, Any]):
     def __init__(self, circuit: Circuit) -> None:
         """Initialize a PassData object from `circuit`."""
         self._target: Circuit | StateVector | UnitaryMatrix | StateSystem
-        if circuit.num_qudits <= 8:
+        if circuit.num_qudits <= 10:
             try:
                 self._target = circuit.get_unitary()
             except RuntimeError:
@@ -63,7 +63,7 @@ class PassData(MutableMapping[str, Any]):
     def target(self) -> StateVector | UnitaryMatrix | StateSystem:
         """Return the current target unitary or state."""
         if isinstance(self._target, Circuit):
-            if self._target.num_qudits <= 8:
+            if self._target.num_qudits <= 10:
                 self._target = self._target.get_unitary()
 
         return self._target

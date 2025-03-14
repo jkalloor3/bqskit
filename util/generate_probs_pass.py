@@ -89,8 +89,12 @@ class GenerateProbabilityPass(BasePass):
             return
 
         target = data.target
-        circ_params = load_jiggled_ensemble(final_ens_file, 
-                                            final_ens_jiggle_file)
+        try:
+            circ_params = load_jiggled_ensemble(final_ens_file, 
+                                                final_ens_jiggle_file)
+        except:
+            print("Corrupted ensemble files, skipping", checkpoint_dir, flush=True)
+            return
         ensemble = await get_runtime().map(create_jiggled_unitaries, circ_params, 
                                            target=target, add_cost=False)
         ensemble = np.concatenate(ensemble, axis=0)

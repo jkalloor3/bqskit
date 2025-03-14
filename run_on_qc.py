@@ -16,32 +16,14 @@ from bqskit.ir.point import CircuitPoint
 from bqskit.ir.lang.qasm2 import OPENQASM2Language
 from bqskit.ext import bqskit_to_qiskit
 
+from qiskit.quantum_info import random_statevector
 from qiskit_aer import AerSimulator
-from qiskit_aer.noise import (NoiseModel, depolarizing_error, coherent_unitary_error)
+from qiskit_aer.noise import (NoiseModel, depolarizing_error)
 
 from util import (load_circuit, get_circ_data, check_param_shape, 
-                  load_block, load_compiled_circs_params_separate,
-                  get_average_density_matrix, trace_distance,
-                  get_density_matrix)
-from util.distance import normalized_gp_frob_cost
+                  load_block, load_compiled_circs_params_separate, trace_distance)
 
-def over_rotated_cnot(two_q_error: float) -> UnitaryMatrix:
-    '''
-    Overrotated CNOT gate with depolarizing error.
-
-    '''
-
-    utry = [
-        [1, 0, 0, 0],
-        [0, 1, 0, 0],
-        [0, 0, -1j * np.sin(two_q_error), np.cos(two_q_error)],
-        [0, 0, np.cos(two_q_error), -1j * np.sin(two_q_error)]
-    ]
-    return UnitaryMatrix(utry)
-
-
-assert np.allclose(over_rotated_cnot(0), CNOTGate().get_unitary())
-# print("Unitary Diff: ",  normalized_gp_frob_cost(over_rotated_cnot(1e-4), CNOTGate().get_unitary()))
+import os
 
 def create_noise_model(one_q_err: float, 
                              two_q_err: float) -> NoiseModel:
@@ -67,13 +49,11 @@ def create_noise_model(one_q_err: float,
 
     return noise_model
 
-noise_model = create_noise_model(1e-4, 6e-3)
-backend = AerSimulator(method="density_matrix", noise_model=noise_model)
-ensemble_sizes = [1, 5, 10, 20, 40, 80, 160]
+ensemble_sizes = [1, 5, 10, 20, 40, 80, 160, 1280, 2560]
 TOTAL_SHOTS = 100 * max(ensemble_sizes)
-partitioned_circ_save_file = "/pscratch/sd/j/jkalloor/bqskit/partitioned_circs/{circ_name}.pickle"
+NUM_RANDOM_STATES = 2
 
-circ_name = "qaoa10"
+# circ_name = "qaoa10"
 
 lang = OPENQASM2Language()
 
@@ -106,12 +86,15 @@ def get_random_circs(num_circs: int,
         circ_strs.append(rand_circ.to("qasm"))
     return circ_strs
 
-def sim_full_circuits(block_circs: dict[str, list[Circuit]], 
-                           block_names: list,
-                           param_shapes: dict[str, tuple[int]],
-                           pcirc: Circuit,
-                           max_tol: float, 
-                           ens_size: int) -> dict[str, int]:
+def sim_full_circuits(circ_name: str,
+                      noisy_backend: AerSimulator,
+                      random_states: list[np.ndarray],
+                      block_circs: dict[str, list[Circuit]], 
+                      block_names: list,
+                      param_shapes: dict[str, tuple[int]],
+                      pcirc: Circuit,
+                      max_tol: float, 
+                      ens_size: int) -> dict[str, int]:
     all_circs = []
 
     circ_blocks = {}
@@ -149,12 +132,37 @@ def sim_full_circuits(block_circs: dict[str, list[Circuit]],
 
     # Now we need to sim the circuits
     shots = TOTAL_SHOTS / ens_size
-    results = backend.run(all_circs, shots=shots).result()
-    # Aggregate the results
-    all_dms = [np.array(results.data(i)['density_matrix']) for i in range(len(all_circs))]
-    average_dm = np.mean(all_dms, axis=0)
+    avg_dms = run_noisy_sim(all_circs, random_states=random_states, shots=shots, backend=noisy_backend)
     # agg_results = aggregate_results(all_dicts)
-    return average_dm
+    return avg_dms
+
+
+def run_noisy_sim(circs: list[QuantumCircuit], 
+                 random_states: list[np.ndarray],
+                 shots: int, backend: AerSimulator) -> np.ndarray:
+    '''
+    Run a noisy simulation of the circuits. Returns an averaged density matrix
+    over the circuits for each random state.
+    '''
+    # Now we need to run the circuits over the random states
+    all_dms = []
+    for qc in circs:
+        random_qcs = []
+        for state in random_states:
+            new_qc: QuantumCircuit = qc.copy()
+            new_qc.initialize(state, range(qc.num_qubits))
+            # print(new_qc.count_ops())
+            random_qcs.append(new_qc)
+        # Now we need to run the circuits
+        noisy_results = backend.run(random_qcs, shots=shots).result()
+        # Now we need to get the density matrix
+        noisy_dms = [noisy_results.data(i)['density_matrix'] for i in range(len(random_qcs))]
+        all_dms.append(noisy_dms)
+    # Now we have len(circs) x len(random_states) density matrices
+    # Now we need to average the density matrices over the circuits
+    avg_dms = np.mean(all_dms, axis=0)
+    return avg_dms
+
 
 # Circ 
 if __name__ == '__main__':
@@ -162,28 +170,46 @@ if __name__ == '__main__':
     block_names = []
 
     np.set_printoptions(precision=2, threshold=np.inf, linewidth=np.inf)
-    max_tol = float(argv[1]) if len(argv) > 1 else 0.01
+    circ_name = str(argv[1])
+    two_q_err = float(argv[2]) if len(argv) > 2 else 5e-3
+    max_tol = float(argv[3]) if len(argv) > 2 else 0.01
 
-    initial_circ = load_circuit(circ_name, opt=False)
-    print("Original CX Count: ", initial_circ.count(CNOTGate()))
+    partitioned_circ_save_file = "/pscratch/sd/j/jkalloor/bqskit/partitioned_circs/{circ_name}.pickle"
+
+    if not os.path.exists(partitioned_circ_save_file.format(circ_name=circ_name)):
+        print("Partitioned circuit not found")
+        exit(0)
+
+
+    # Create backends
+    perfect_backend = AerSimulator(method="density_matrix")
+    noise_model = create_noise_model(1e-5, two_q_err=two_q_err)
+    noisy_backend = AerSimulator(method="density_matrix", noise_model=noise_model)
+
+    # Get the circuit
+    initial_circ: Circuit = load_circuit(circ_name, opt=False)
+    num_q = initial_circ.num_qudits
     target = initial_circ.get_unitary()
-    initial_qcirc = bqskit_to_qiskit(initial_circ)
-
+    print("Original CX Count: ", initial_circ.count(CNOTGate()))
     initial_qcirc = bqskit_to_qiskit(initial_circ)
     initial_qcirc.save_density_matrix()
-    perfect_result = AerSimulator(method="density_matrix", shots=TOTAL_SHOTS).run(initial_qcirc).result()
-    # print(perfect_result.data(0)['density_matrix'])
-    perfect_dm = perfect_result.data(0)['density_matrix']
-    noisy_result = backend.run(initial_qcirc, shots=TOTAL_SHOTS).result()
-    noisy_dm = noisy_result.data(0)['density_matrix']
 
-    initial_dist = trace_distance(perfect_dm, noisy_dm)
+    # Run perfect simulation
+    random_states = [random_statevector(2 ** num_q) for _ in range(NUM_RANDOM_STATES)]
+    # random_states_2 = [random_statevector(2 ** num_q) for _ in range(NUM_RANDOM_STATES)]
+    perfect_dms = run_noisy_sim([initial_qcirc], random_states=random_states, shots=TOTAL_SHOTS, backend=perfect_backend)
 
-    print("Initial Trace Distance: ", initial_dist)
+    # Run initial noisy simulation
+    noisy_dms = run_noisy_sim([initial_qcirc], random_states=random_states, shots=TOTAL_SHOTS, backend=noisy_backend)
+    initial_dists = [trace_distance(perfect_dm, noisy_dm) for perfect_dm, noisy_dm in zip(perfect_dms, noisy_dms)]
 
-    block_dirs, count, tket_count = get_circ_data(circ_name, max_tol, False)
+
+    print("Initial Trace Distance: ", initial_dists)
+
+    block_dirs, count, tket_count = get_circ_data(circ_name, max_tol)
     block_names = sorted([x[0] for x in block_dirs])
     print("Avg Count: ", count, "TKET Count: ", tket_count)
+    print(block_dirs)
 
     # Figure out how many ensembles we need, and calculate shared memory space
     param_shapes = {}
@@ -207,9 +233,18 @@ if __name__ == '__main__':
             continue
         param_shape = param_shapes[block_name]
         shm_name = shm_names[block_name]
-        shm = SharedMemory(name=shm_name, 
-                           create=True, 
-                           size=np.prod(param_shape)*float_size)
+        try:
+            shm = SharedMemory(name=shm_name, 
+                            create=True, 
+                            size=np.prod(param_shape)*float_size)
+        except:
+            shm = SharedMemory(name=shm_name, 
+                            create=False)
+            shm.close()
+            shm.unlink()
+            shm = SharedMemory(name=shm_name, create=True, 
+                               size=np.prod(param_shape)*float_size)
+
         print("Shared Memory: ", shm_name, shm.size)
         # Now we need to create a numpy array in the shared memory
         shm_array = np.ndarray(param_shape, dtype=np.float64, buffer=shm.buf)
@@ -263,13 +298,18 @@ if __name__ == '__main__':
         print("Ensemble Size: ", ens_size, flush=True)
         for i in range(num_trials):
             # print("Trial: ", i, flush=True)
-            avg_dm = sim_full_circuits(block_circs, 
-                                         block_names,
-                                         param_shapes,
-                                         partitioned_circ,
-                                         max_tol=max_tol, 
-                                         ens_size=ens_size)
-            mean_tvd = trace_distance(perfect_dm, avg_dm)
+            avg_dms = sim_full_circuits(circ_name,
+                                       noisy_backend,
+                                       random_states,
+                                       block_circs, 
+                                       block_names,
+                                       param_shapes,
+                                       partitioned_circ,
+                                       max_tol=max_tol,
+                                       ens_size=ens_size)
+            # mean_tvd = trace_distance(perfect_dm, avg_dm)
+            tds = [trace_distance(perfect_dm, avg_dm) for perfect_dm, avg_dm in zip(perfect_dms, avg_dms)]
+            mean_tvd = np.mean(tds)
             mean_costs.append(mean_tvd)
         ensemble_costs.append(mean_costs)
         print("Avg Trace Distance: ", np.mean(mean_costs))
@@ -280,4 +320,4 @@ if __name__ == '__main__':
         shm.close()
         shm.unlink()
 
-    pickle.dump(ensemble_costs, open(f"ensemble_trace_dist_{circ_name}_{max_tol}.pickle", 'wb'))
+    pickle.dump(ensemble_costs, open(f"ensemble_trace_dist_qc_{circ_name}_{max_tol}.pickle", 'wb'))

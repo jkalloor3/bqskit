@@ -26,9 +26,14 @@ good_instantiation_options = {
 base_checkpoint_dir_form = "/pscratch/sd/j/jkalloor/bqskit/block_checkpoints_final_paper{extra}"
 NUM_UNIQUE_CIRCS = 250
 
-def get_ensemble_workflow(circ_name: str, tol: float, extra: str = "") -> WorkflowLike:
+def get_ensemble_workflow(circ_name: str, tol: float, extra: str = "", 
+                          max_diversity: bool = False) -> WorkflowLike:
     # workflow = gpu_workflow(tol, f"{circ_name}_{tol}_{timestep}")
-    base_checkpoint_dir = base_checkpoint_dir_form.format(extra=extra)
+    if max_diversity:
+        ckpt_extra = extra + "_max_diversity"
+    else:
+        ckpt_extra = extra
+    base_checkpoint_dir = base_checkpoint_dir_form.format(extra=ckpt_extra)
     checkpoint_dir = f"{base_checkpoint_dir}/{circ_name}_{tol}/"
     err_thresh = 10 ** (-1 * tol)
 
@@ -55,19 +60,21 @@ def get_ensemble_workflow(circ_name: str, tol: float, extra: str = "") -> Workfl
         store_partial_solutions=True,
         success_threshold = extra_err_thresh,
         partial_success_threshold=err_thresh,
-        max_layer_factor=1.1,
+        max_layer_factor=1.01,
         instantiate_options=instantiation_options,
         max_layer=14,
-        max_psols=5
+        max_psols=5,
+        maximize_diversity=max_diversity,
     )
 
     second_synthesis_pass = SecondLEAPSynthesisPass(
         success_threshold = extra_err_thresh,
         partial_success_threshold=err_thresh,
-        max_layer_factor=1.5,
+        max_layer_factor=1.01,
         instantiate_options=instantiation_options,
         max_layer=14,
-        max_psols=10
+        max_psols=10,
+        maximize_diversity=max_diversity,
     )
 
     jiggle_pass = JiggleEnsemblePass(success_threshold=err_thresh, 
@@ -91,6 +98,7 @@ def get_ensemble_workflow(circ_name: str, tol: float, extra: str = "") -> Workfl
         create_ensemble_pass,
         jiggle_pass,
         CleanupBlockFiles(),
+        CheckEnsembleQualityPass(False),
     ]
     return leap_workflow
 
@@ -104,9 +112,13 @@ def check_if_finished(circ_name: str, tol: float, extra: str = "") -> tuple[bool
     ret_3 -> extra_str
     
     '''
-    base_checkpoint_dir = base_checkpoint_dir_form.format(extra=extra)
+    if max_diversity:
+        ckpt_extra = extra + "_max_diversity"
+    else:
+        ckpt_extra = extra
+    base_checkpoint_dir = base_checkpoint_dir_form.format(extra=ckpt_extra)
     checkpoint_dir = os.path.join(base_checkpoint_dir, f"{circ_name}_{tol}")
-    final_file = os.path.join(checkpoint_dir, "ensemble_final_rand_inds.npy")
+    final_file = os.path.join(checkpoint_dir, "data.csv")
     if os.path.exists(final_file):
         return True, True, ""
     # Check if there is a jiggle .npy file in the checkpoint dir for at least 5
@@ -120,10 +132,14 @@ def check_if_finished(circ_name: str, tol: float, extra: str = "") -> tuple[bool
     extra_str = extra_str.split(".npy")[0]
     return False, True, extra_str
 
-def get_final_workflow(circ_name: str, tol: float, extra: str = "", num_processes: int = 1) -> WorkflowLike | None:
+def get_final_workflow(circ_name: str, tol: float, extra: str = "", max_diversity: bool = False) -> WorkflowLike | None:
     # Check if already finished
     # checkpoint_dir = f"{base_checkpoint_dir}/{circ_name}_{tol}/"
-    base_checkpoint_dir = base_checkpoint_dir_form.format(extra=extra)
+    if max_diversity:
+        ckpt_extra = extra + "_max_diversity"
+    else:
+        ckpt_extra = extra
+    base_checkpoint_dir = base_checkpoint_dir_form.format(extra=ckpt_extra)
     checkpoint_dir = os.path.join(base_checkpoint_dir, f"{circ_name}_{tol}")
     print(f"Checkpoint Dir: {checkpoint_dir}", flush=True)
     finished, jiggle_finished, _ = check_if_finished(circ_name, tol, extra=extra)
@@ -132,27 +148,26 @@ def get_final_workflow(circ_name: str, tol: float, extra: str = "", num_processe
         return None
     if not jiggle_finished:
         print(f"Jiggle not finished {circ_name} {tol}", flush=True)
-        return get_ensemble_workflow(circ_name, tol, extra=extra)
+        return get_ensemble_workflow(circ_name, tol, extra=extra, 
+                                     max_diversity=max_diversity)
     print("Finding Final Ensemble for ", circ_name, flush=True)
     workflow = [
         CheckpointRestartPass(checkpoint_dir, 
                                 default_passes=[]),
         CheckEnsembleQualityPass(False),
-        GenerateProbabilityPass()
+        # GenerateProbabilityPass()
     ]
     return workflow
 
-def get_shortest_circuits(circ_data: list[tuple[str, str, float]], extra: str = "") -> list[Circuit]:
+def get_shortest_circuits(circ_data: list[tuple[str, str, float]], extra: str = "", max_diversity: bool = False) -> list[Circuit]:
     '''
     Gets the corresponding workflow for the input
     
     Args:
         circ_data: list of tuples of the form (circ_name, circ_file, tol)
     '''
-    num_processes = len(circ_data)
-    print(f"Num Processes: {num_processes}", flush=True)
     workflows = [
-        get_final_workflow(circ_name, tol, extra, num_processes=num_processes)
+        get_final_workflow(circ_name, tol, extra, max_diversity=max_diversity)
         for circ_name, _, tol in circ_data
     ]
 
@@ -182,6 +197,9 @@ def get_shortest_circuits(circ_data: list[tuple[str, str, float]], extra: str = 
 def find_file(circ_name: str, block_num: str, extra="") -> tuple[str, str]:
     circ_name = f"{circ_name}_{block_num}"
 
+    if extra != "_tket":
+        extra = ""
+
     circ_file = f"good_blocks{extra}/{circ_name}.qasm"
     if os.path.exists(circ_file):
         return circ_name, circ_file
@@ -193,13 +211,19 @@ def find_file(circ_name: str, block_num: str, extra="") -> tuple[str, str]:
 
 
 def get_circ_data(circ_name: str, block_num: str | int, 
-                  tol: float, extra: str = "") -> list[tuple[str, str, float]]:
+                  tol: float, extra: str = "",
+                  max_diversity: bool = False) -> list[tuple[str, str, float]]:
     # Categorize circs into different categories and run them
     if tol == -1.0:
-        tols = [0.5, 1.0, 3.0]
+        tols = [0.8, 1.0, 2.0, 3.0, 4.0, 5.0]
     else:
         tols = [tol]
-    base_checkpoint_dir = base_checkpoint_dir_form.format(extra=extra)
+    if max_diversity:
+        ckpt_extra = extra + "_max_diversity"
+    else:
+        ckpt_extra = extra
+    
+    base_checkpoint_dir = base_checkpoint_dir_form.format(extra=ckpt_extra)
     if circ_name == "all_probs":
         # Get all the circ names, block_nums and tols which have a .npy file
         # but no ensemble_final.qasms file
@@ -210,7 +234,7 @@ def get_circ_data(circ_name: str, block_num: str | int,
             block_num = parts[-2]
             tol = float(parts[-1])
             circ_name = "_".join(parts[:-2])
-            if not circ_name.startswith("qaoa"):
+            if circ_name.startswith("shor"):
                 continue
             circ_name, circ_file = find_file(circ_name, block_num, extra=extra)
             for tol in tols:
@@ -218,9 +242,9 @@ def get_circ_data(circ_name: str, block_num: str | int,
                 if not finished and jiggle_finished:
                     circ_data.append((circ_name, circ_file, tol))
 
-        if len(circ_data) > 20:
-            circ_data = circ_data[:20]
-            print("Limiting to 20 circs", flush=True)
+        if len(circ_data) > 40:
+            circ_data = circ_data[:40]
+            print("Limiting to 10 circs", flush=True)
         return circ_data
     
     else:
@@ -228,8 +252,8 @@ def get_circ_data(circ_name: str, block_num: str | int,
             # Get all blocks
             good_circ_files = glob.glob(f"good_blocks{extra}/{circ_name}_*.qasm")
             # Ignore bad blocks for now
-            # bad_circ_files = glob.glob(f"bad_blocks{extra}/{circ_name}_*.qasm")
-            bad_circ_files = []
+            bad_circ_files = glob.glob(f"bad_blocks{extra}/{circ_name}_*.qasm")
+            # bad_circ_files = []
             all_circ_files = good_circ_files + bad_circ_files
             block_nums = [file.split('_')[-1].split('.')[0] for file in all_circ_files]
             circ_data = []
@@ -248,9 +272,10 @@ def get_circ_data(circ_name: str, block_num: str | int,
 
 if __name__ == '__main__':
     circ_name = argv[1]
-    block_num = argv[2] if len(argv) > 2 else ""
+    block_num = argv[2] if len(argv) > 2 else "all_blocks"
     tol = float(argv[3]) if len(argv) > 3 else -1.0
-    extra = argv[4] if len(argv) > 4 else "_tket"
-    circ_data = get_circ_data(circ_name, block_num, tol, extra=extra)
+    max_diversity = bool(int(argv[4])) if len(argv) > 4 else False
+    extra = argv[5] if len(argv) > 5 else "_tket"
+    circ_data = get_circ_data(circ_name, block_num, tol, extra=extra, max_diversity=max_diversity)
     print(circ_data)
-    get_shortest_circuits(circ_data, extra=extra)
+    get_shortest_circuits(circ_data, extra=extra, max_diversity=max_diversity)

@@ -446,8 +446,6 @@ class CreateEnsemblePass(BasePass):
         if self.use_calculated_error:
             self.success_threshold = self.success_threshold * data["error_percentage_allocated"]
 
-        data["scan_sols"] = []
-        data["ensemble"] = []
             
         approx_circs, pts, dists, _ = self.parse_data(circuit, block_data)        
         all_ensembles: list[list[Circuit]] = await self.assemble_circuits(circuit, approx_circs, pts, dists=dists, target=data.target)

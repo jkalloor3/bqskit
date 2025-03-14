@@ -24,6 +24,7 @@ import numpy.typing as npt
 from bqskit.ir.gate import Gate
 from bqskit.ir.gates.circuitgate import CircuitGate
 from bqskit.ir.gates.constant.unitary import ConstantUnitaryGate
+from bqskit.ir.gates.parameterized import VariableUnitaryGate
 from bqskit.ir.gates.measure import MeasurementPlaceholder
 from bqskit.ir.interval import CycleInterval
 from bqskit.ir.iterator import CircuitIterator
@@ -3264,7 +3265,8 @@ class Circuit(DifferentiableUnitary, StateVectorMap, Collection[Operation]):
         utry = UnitaryMatrix(utry)
         circuit = Circuit(utry.num_qudits, utry.radixes)
         circuit.append_gate(
-            ConstantUnitaryGate(utry), list(range(utry.num_qudits)),
+            VariableUnitaryGate(utry.num_qudits), list(range(utry.num_qudits)),
+            VariableUnitaryGate(utry.num_qudits).calc_params(utry)
         )
         return circuit
 
