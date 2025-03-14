@@ -6,7 +6,7 @@ from bqskit.ir import Circuit
 from .common import load_block, get_block_names, get_circ_names
 from .counter import (load_avg_ensemble_counts_est, load_avg_ensemble_counts_full, get_circ_counts)
 
-base_dir = "/pscratch/sd/j/jkalloor/bqskit"
+base_dir = "/home/jkalloor/bqskit"
 nisq_checkpoint_dir = f"{base_dir}/block_checkpoints_final_paper"
 clifft_checkpoint_dir = f"{base_dir}/block_checkpoints_final_paper_clifft"
 
@@ -53,7 +53,8 @@ def get_circ_data(circ_name: str, err_threshold: float, use_base: bool = True,
     '''
     if count_t or count_rz:
         checkpoint_dir_1 = clifft_checkpoint_dir
-        checkpoint_dir_2 = clifft_checkpoint_dir + "_tket"
+        # checkpoint_dir_3 = clifft_checkpoint_dir + "_tket"
+        checkpoint_dir_2 = f"{base_dir}/block_checkpoints_final_paper_clifft_tket_nou3"
     else:
         checkpoint_dir_1 = nisq_checkpoint_dir
         checkpoint_dir_2 = nisq_checkpoint_dir + "_tket"
@@ -62,13 +63,16 @@ def get_circ_data(circ_name: str, err_threshold: float, use_base: bool = True,
     # print("Circ name: ", circ_name)
     folder_files = glob.glob(os.path.join(checkpoint_dir_1, f"{circ_name}_*"))
     folder_files_2 = glob.glob(os.path.join(checkpoint_dir_2, f"{circ_name}_*"))
-    folder_files = folder_files + folder_files_2
+    # folder_files_3 = glob.glob(os.path.join(checkpoint_dir_3, f"{circ_name}_*"))
+    folder_files_3 = []
+    folder_files = folder_files + folder_files_2 + folder_files_3
 
     block_names = get_block_names(circ_name, extra="_tket")
     block_data = {}
     # print("Precision: ", precision)
     circ_files_orig = [load_block(circ_name, block_name) for block_name in block_names]
     circ_files_tket = [load_block(circ_name, block_name, extra="_tket") for block_name in block_names]
+    # print("Circ files tket: ", circ_files_tket)
     if use_base:
         orig_counts = get_circ_counts(circ_files_orig, 
                                             count_t=count_t, 
@@ -78,19 +82,30 @@ def get_circ_data(circ_name: str, err_threshold: float, use_base: bool = True,
                                             count_t=count_t, 
                                             count_rz=count_rz, 
                                             target_error=err_threshold)
+        
+        # print("Orig counts: ", orig_counts)
+        # print("TKET counts: ", tket_counts)
 
     for i, block_name in enumerate(block_names):
         block_counts = []
         if use_base:
             orig_count = orig_counts[i]
             tket_count = tket_counts[i]
-            block_counts.append((0, orig_count, ("orig", "", 0)))
-            block_counts.append((0, tket_count, ("tket", "", 0)))
+            if orig_count < tket_count:
+                file_d = (circ_files_orig[i], None)
+                block_counts.append((0, orig_count, ("orig", "", 0), file_d))
+            else:
+                file_d_tket = (circ_files_tket[i], None)
+                block_counts.append((0, tket_count, ("tket", "", 0), file_d_tket))
         block_data[block_name] = block_counts
+    
 
     num_qubits = {}
     for block_name in block_names:
-        circ = Circuit.from_file(circ_files_orig[i])
+        if os.path.exists(circ_files_orig[i]):
+            circ = Circuit.from_file(circ_files_orig[i])
+        elif os.path.exists(circ_files_tket[i]):
+            circ = Circuit.from_file(circ_files_tket[i])
         num_qubits[block_name] = circ.num_qudits
 
     # print(folder_files)
@@ -111,22 +126,39 @@ def get_circ_data(circ_name: str, err_threshold: float, use_base: bool = True,
             if len(ensemble_file) == 0:
                 continue
             ensemble_file = ensemble_file[0]
+            params_file = None
+            if count_t:
+                # Get params file as well
+                params_file = glob.glob(os.path.join(folder_name, f"ensemble_0_jiggles_.npy"))
+                if len(params_file) == 0:
+                    continue
+                params_file = params_file[0]
             dim = 2 ** num_qubits[block_num]
-            final_threshold = (10 ** (-2 * tol)) * frob_factor(dim)
+            if tol > 4.0:
+                add_factor = 100 # Bad scaling for smaller errors
+            else:
+                add_factor = 1
+            final_threshold = (10 ** (-2 * tol)) * frob_factor(dim) * add_factor
         else:
             csv_file = csv_files[0]
             ensemble_file = glob.glob(os.path.join(folder_name, f"ensemble_final.qasms"))[0]
+            if count_t:
+                # Get params file as well
+                params_file = glob.glob(os.path.join(folder_name, f"ensemble_final_jiggle.npy"))[0]
             reader = csv.DictReader(open(csv_file, 'r'))
             final_threshold = (10 ** -tol)
             for row in reader:
                 if "Norm. Bias" in row:  # Check if the column value is not empty
                     final_threshold = min(final_threshold, float(row["Norm. Bias"]))
-        avg_count = load_avg_ensemble_counts_est(ensemble_file, err_threshold, 
-                                                    count_t=count_t, 
-                                                    count_rz=count_rz)
+        avg_count = load_avg_ensemble_counts_est(ensemble_file, params_file, 
+                                                 err_threshold, 
+                                                 count_t=count_t, 
+                                                 count_rz=count_rz)
+        # print("Block num: ", block_num, " Avg count: ", avg_count, "Final threshold: ", final_threshold)
+        file_d = (ensemble_file, params_file)
         block_data[block_num].append((final_threshold, avg_count, 
                                       (circ_name, block_num, tol, extra), 
-                                      ensemble_file))
+                                      file_d))
 
     # Now for every block, try to select one folder name per block_num 
     # which minimizes the count and is below the threshold
@@ -134,6 +166,8 @@ def get_circ_data(circ_name: str, err_threshold: float, use_base: bool = True,
     # Get all possible combinations of block_dirs
     block_nums = sorted(list(block_data.keys()))
     # print(block_data)
+    if len(block_nums) == 0:
+        return [], 0, 0
     all_combos = block_data[block_nums[0]]
     all_combos = [(t, c, [d], [f]) for t, c, d, f in all_combos]
     block_ind = 1
@@ -160,8 +194,9 @@ def get_circ_data(circ_name: str, err_threshold: float, use_base: bool = True,
     final_files = min_combos[0][3]
 
     # Get actual count
-    actual_counts = [load_avg_ensemble_counts_full(file, err_threshold,  
-                            count_t=count_t, count_rz=count_rz) for file in final_files]
+    # print("Doing Final Count")
+    actual_counts = [load_avg_ensemble_counts_full(e_file, p_file, err_threshold,  
+                            count_t=count_t, count_rz=count_rz) for e_file, p_file in final_files]
     min_count = np.sum(actual_counts)
 
     if use_base:

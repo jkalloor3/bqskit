@@ -14,7 +14,7 @@ import multiprocessing as mp
 
 from .gg import gg_gate_def, GridSynthGate
 
-base_bqskit_dir = "/pscratch/sd/j/jkalloor/bqskit"
+base_bqskit_dir = "."
 good_block_dir = f"{base_bqskit_dir}/good_blocks"
 bad_block_dir = f"{base_bqskit_dir}/bad_blocks"
 base_checkpoint_dir = f"{base_bqskit_dir}/block_checkpoints_final_paper"
