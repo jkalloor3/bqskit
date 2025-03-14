@@ -58,7 +58,7 @@ def get_clifft_str(angle: float, precision: int = 5) -> tuple[str, int]:
         count = gates.count('T')
     return gates, count
 
-def get_clifft_circ(gates: str) -> Circuit:
+def get_clifft_circ(gates: str, simulable: bool = False) -> Circuit:
     circ = Circuit(1)
     for gate in gates:
         if gate == 'I':
@@ -77,7 +77,14 @@ def get_clifft_circ(gates: str) -> Circuit:
             circ.append_gate(TdgGate(), (0,))
         elif gate == "X":
             circ.append_gate(XGate(), (0,))
-    return circ
+
+    if simulable:
+        un = circ.get_unitary()
+        circ = Circuit(1)
+        circ.append_gate(U3Gate(), (0,), U3Gate().calc_params(un))
+        return circ
+    else:
+        return circ
 
 def get_clifft_gates(angle: float, precision: int = 5) -> Circuit:
     # Get the ZXZXZ gates
@@ -123,7 +130,7 @@ def convert_to_clifft(circ: Circuit, precision: int = 5, simulable: bool = False
 
     return circuit
 
-def convert_to_clifft_tbudget(circ: Circuit, t_budget: int, max_precision: int = 6) -> Circuit:
+def convert_to_clifft_tbudget(circ: Circuit, t_budget: int, max_precision: int = 6, simulable: bool = False) -> Circuit:
     start_time = time.process_time()
     target = circ.get_unitary()
     circuit = circ.copy()
@@ -199,7 +206,7 @@ def convert_to_clifft_tbudget(circ: Circuit, t_budget: int, max_precision: int =
     for cycle, op in circuit.operations_with_cycles():
         if isinstance(op.gate, RZGate):
             cliff_str = t_strs[ind]
-            clifft_circ = get_clifft_circ(cliff_str)
+            clifft_circ = get_clifft_circ(cliff_str, simulable=simulable)
             ind += 1
             pt = CircuitPoint(cycle, op.location[0])
             new_op = Operation(CircuitGate(clifft_circ), op.location, [])

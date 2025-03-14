@@ -26,6 +26,7 @@ from .ensemble import CreateEnsemblePass
 from .fix_angles import FixAnglesPass, UnFixTPass
 from .convert_to_clifft import *
 from .gg import *
+from .pauli_twirl import PauliTwirlPass
 from .combine_blocks import *
 from .counter import *
 from .convex_hull_finder import ConvexHullFinderPass

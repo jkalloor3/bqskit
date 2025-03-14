@@ -25,6 +25,16 @@ from util import convert_to_clifft, tvd_dict, convert_to_clifft_tbudget
 qcircs = []
 pickle_file = "qpe_14_3_3.0_250_debug.pkl"
 ensemble_circs = pickle.load(open(pickle_file, "rb"))
+t_budgets = [3000, 5000, 10000]
+all_t_circs = {}
+for t_budget in t_budgets:
+    t_circs: list[Circuit] = pickle.load(open(t_budget_file.format(t_budget=t_budget), "rb"))
+    # store_ensemble(t_circs, t_budget_qasms_file.format(t_budget=t_budget))
+    # t_circs = load_ensemble(t_budget_qasms_file.format(t_budget=t_budget))
+    print(f"Loaded T Budget={t_budget} Circuits with len {len(t_circs)}", flush=True)
+    # print([circ.gate_counts for circ in t_circs])
+    all_t_circs[t_budget] = t_circs
+
 num_random_states = 16
 
 # def run_ensembles(ens_size: int,shots: int, backend: AerSimulator, precisions: list[int]) -> list[dict[str, int]]:
@@ -120,6 +130,7 @@ if __name__ == '__main__':
     # circ_name = argv[1]
     # block_num = int(argv[2])
     circ_name = "qpe_14"
+    # circ_name = "LiH"
     block_num = 3
     # tol = int(argv[3])
     # num_unique_circs = int(argv[4])
@@ -133,29 +144,32 @@ if __name__ == '__main__':
     shots = 1024
 
     # # Get backend and target
-    # backend = AerSimulator()
+    backend = AerSimulator()
 
-    # # Get orig circ and unitary
-    # orig_circ = load_block(circ_name, block_num)
-    # orig_circ = Circuit.from_file(orig_circ)
-    # target = orig_circ.get_unitary()
+    # Get orig circ and unitary
+    orig_circ = load_block(circ_name, block_num)
+    orig_circ = Circuit.from_file(orig_circ)
+    target = orig_circ.get_unitary()
 
+    print("Converting Original Circuits", flush=True)
 
-    # # Run Simulator of circuit with continuos angles
-    # orig_counts = backend.run(get_qcirc(orig_circ), shots=shots * shot_ratio).result().get_counts(0)
-    # orig_circs = [convert_to_clifft_tbudget(orig_circ, budget) for budget in t_budgets]
-    # orig_t_counts = [get_t_count(circ) for circ in orig_circs]
-    # print("Original T Counts: ", orig_t_counts)
+    # Run Simulator of circuit with continuos angles
+    orig_counts = backend.run(get_qcirc(orig_circ), shots=shots * shot_ratio).result().get_counts(0)
+    orig_circs = [convert_to_clifft_tbudget(orig_circ, budget, True) for budget in t_budgets]
+    orig_t_counts = [get_t_count(circ) for circ in orig_circs]
+    print("Original T Counts: ", orig_t_counts)
 
     # qcircs: list[QuantumCircuit] = [[get_qcirc(circ) for circ in orig_circs]]
 
     # orig_statevectors = run_circuits(shots * shot_ratio, backend)
+    orig_unitaries = [c.get_unitary() for c in orig_circs]
     # start_tvds = [tvd_dict(orig_counts, statevector) for statevector in orig_statevectors]
-    # print("Got Original Statevectors", flush=True)
-    # print("Got Original TVDs", flush=True)
-    # print(start_tvds)
+    start_tvds = [normalized_gp_frob_cost(unitary, target) for unitary in orig_unitaries]
+    print("Got Original Statevectors", flush=True)
+    print("Got Original TVDs", flush=True)
+    print(start_tvds)
 
-    # # Get Ensemble of Circuits
+    # Get Ensemble of Circuits
     # ensemble_circs: list[Circuit] = load_compiled_block_circuits(circ_name, block_num, 3.0, 250, target=target, add_unitaries=False)
     # qp_inds, qp_probs = load_compiled_block_circuits_qp_inds(circ_name, block_num, 3.0, 250)
     # # Randomly pick 500 circuits
@@ -199,27 +213,30 @@ if __name__ == '__main__':
     #     all_tvds.append(tvds)
 
 
-    # pickle.dump(all_tvds, open("ens_err_analysis.pkl", "wb"))
-    all_tvds = pickle.load(open("ens_err_analysis.pkl", "rb"))
+    # pickle.dump(all_tvds, open("frob_dists_analysis_LiH.pkl", "wb"))
+    # all_tvds = pickle.load(open("ens_err_analysis.pkl", "rb"))
 
-    headers = [f"Prec: {prec}" for prec in precisions]
-
-    # Transpose the data
-    tvds = np.array(all_tvds).T
-    print(tvds.shape)
+    headers = [f"T Budget: {t_budg}" for t_budg in t_budgets]
 
     # Now it is in the form [pre 
 
     # Create a plot with lines for each precision
-    fig, axes = plt.subplots(1, len(precisions), figsize=(5 * len(precisions), 5))
+    fig, axes = plt.subplots(1, len(t_budgets), figsize=(5 * len(t_budgets), 5))
+    if len(t_budgets) == 1:
+        axes = [axes]
     colors = ['b', 'g', 'r', 'c', 'm', 'y', 'k']
-    for i, tvd in enumerate(tvds):
-        prec = precisions[i]
+    i = 0
+    for t_budget, tvd_data in all_tvds.items():
+        start_tvd = tvd_data[0]
         ax: plt.Axes = axes[i]
-        ax.plot(ens_sizes, tvd, label=headers[i], color=colors[i])
+        ax.plot(ens_sizes, tvd_data[1:], label=headers[i], color=colors[i])
         ax.hlines(start_tvds[i], min(ens_sizes), max(ens_sizes), label="Original", linestyles='dashed', colors=[colors[i]])
-
+        ax.legend()
+        ax.set_yscale('log')
+        ax.set_ylabel('Normalized Frobenius Distance')
+        ax.set_title(f'T Budget: {t_budget}')
+        i += 1
     # ax.hlines(start_tvds, min(ens_sizes), max(ens_sizes), label="Original", linestyles='dashed')
-
-    fig.savefig(f"ens_err_analysis.png")
+    
+    fig.savefig(f"frob_dist_analysis_qpe_14.png")
 
