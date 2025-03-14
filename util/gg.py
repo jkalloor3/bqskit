@@ -21,6 +21,7 @@ from pyLIQTR.gate_decomp.gate_approximation import approximate_rz_direct
 from .fix_global_phase import fix_phase
 from .distance import gp_frobenius_cost
 from fractions import Fraction
+from bqskit.runtime import get_runtime
 
 MIN_EPSILON = 17
 
@@ -53,7 +54,8 @@ def gridsynth_gates_to_cir(gates: str):
 def get_approx_t_str(angle: float, precision: int) -> str:
     # Divid angle by pi and mod by 2
     mod_angle = (angle / np.pi) % 2.0
-    tol = 10 ** (-precision)
+    # tol = 10 ** (-precision)
+    tol = pow(10.0, -precision)
 
     # Edge errors, does not include Z for some reason
     if np.allclose(mod_angle, 0, atol=tol, rtol=0):
@@ -200,8 +202,20 @@ class GridSynthGate(QubitGate, CachedClass):
     # cache = LRUCache(maxsize=10)
     def get_unitary(self, params: RealVector = []) -> UnitaryMatrix:
         """Return the unitary for this gate, see :class:`Unitary` for more."""
-        t_circ = self.get_circuit(params)
-        un = t_circ.get_unitary()
+        ang = round(params[0], 18)
+        epsilon = int(params[1])
+        z_twirl = int(params[2])
+        ind = (ang, epsilon)
+        cache = get_runtime().get_cache()
+        un = cache.get(ind, None)
+        if un is None:
+            t_circ = self.get_circuit([ang, epsilon, 0])
+            un = t_circ.get_unitary()
+            cache[ind] = un
+        
+        if z_twirl == 1:
+            un = ZGate().get_unitary() @ un @ ZGate().get_unitary()
+
         return un
 
     # def get_unitary(self, params: RealVector = []) -> UnitaryMatrix:

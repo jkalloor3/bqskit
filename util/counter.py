@@ -8,19 +8,24 @@ import numpy as np
 from .fix_angles import FixAnglesPass
 from .convert_to_cliff import ConvertToZXZXZSimple
 from .gg import GridSynthGate, gg_gate_def
+import os
 
 qlang = OPENQASM2Language(gate_defs=[("gg", gg_gate_def)])
 
-def fix_angle_workflow(circ: Circuit, precision: int) -> None:
-    FixAnglesPass.run_circ(circ, 15)
-    ConvertToZXZXZSimple.run_circ(circ)
+def fix_angle_workflow(circ: Circuit, precision: int, skip_first: bool = False) -> None:
+    if not skip_first:
+        FixAnglesPass.run_circ(circ, 15)
+    ConvertToZXZXZSimple.run_circuit(circ)
     FixAnglesPass.run_circ(circ, precision)
+
+
+
+t_cache = {}
 
 
 class GateCounter:
     def __init__(self, est: bool = True):
         self.est = est
-        self.cache = LRUCache(maxsize=10000)
 
     @staticmethod
     def has_non_rz(circ: Circuit) -> bool:
@@ -29,6 +34,9 @@ class GateCounter:
 
     def count_qasm_file(self, circ_file: str, target_error: float = None, 
                         count_t: bool = False, count_rz: bool = False) -> int:
+        
+        if not os.path.exists(circ_file):
+            return (10 ** 8)
         qasm_str = open(circ_file).read()
         return self.count_qasm(qasm_str, target_error, count_t, count_rz)
     
@@ -40,7 +48,7 @@ class GateCounter:
         # Load the circuit
         assert not (count_t and count_rz), "Cannot count T and RZ gates"
 
-        if self.est:
+        if self.est and count_rz:
             # Count RZ gates
             # Just count the number of RZ gates from str
             gg_count = qasm.count('gg(') + qasm.count('gg (')
@@ -54,25 +62,11 @@ class GateCounter:
             num_rotations = rz_count + gg_count + u3_count * 3
             if count_rz:
                 return num_rotations
-            if count_t:
-                # Assume that GG's are half precision and RZs are full precision
-                error_per_param = target_error / num_rotations
-                precision = ceil(-np.log10(error_per_param))
-                gg_precision = ceil(-np.log10(error_per_param) / 2)
-                
-                ts_per_rz = 10 * precision
-                ts_per_gg = 10 * gg_precision
-                ts_per_u3 = 30 * precision
-
-                # Count the number of T gates
-                return (rz_count * ts_per_rz + gg_count * ts_per_gg + 
-                        u3_count * ts_per_u3)
-        else:
-            circ = qlang.decode(qasm)
-            if count_rz:
-                return self.count_rz(circ, target_error)
-            elif count_t:
-                return self.count_t(circ, target_error)
+        circ = qlang.decode(qasm)
+        if count_rz:
+            return self.count_rz(circ, target_error)
+        elif count_t:
+            return self.count_t(circ, target_error)
             
     def count_cx(self, circ: Circuit)  -> int:
         return circ.count(CNOTGate())
@@ -98,52 +92,40 @@ class GateCounter:
             if isinstance(op.gate, U3Gate):
                 u3_params += len(np.nonzero(op.params))
 
-        return circ.count(RZGate()) + circ.count(GridSynthGate()) + u3_params
+        final_count = out_circ.count(RZGate()) + out_circ.count(GridSynthGate()) + u3_params
+        return final_count
 
     def count_t(self, circ: Circuit, target_error: float = None, skip_fix: bool = False) -> int:
         if target_error is None:
             precision = 18
         else:
-            error_per_param = target_error / circ.num_params
+            num_params = circ.count(U3Gate()) * 3 + circ.count(RZGate())
+            if num_params == 0:
+                return circ.count(TGate()) + circ.count(TdgGate())
+            error_per_param = target_error / num_params
             precision = ceil(-np.log10(error_per_param))
         
         if GateCounter.has_non_rz(circ) and not skip_fix:
             out_circ = circ.copy()
-            workflow = fix_angle_workflow(out_circ, precision=precision)
+            fix_angle_workflow(out_circ, precision=precision)
         else:
             out_circ = circ
 
-        print(out_circ.gate_counts)
+        # print("OutCirc Gate Counts: ", out_circ.gate_counts, flush=True)
 
         # Count the number of T gates
         num_t = out_circ.count(TGate()) + out_circ.count(TdgGate())
         for op in out_circ.operations():
             if isinstance(op.gate, RZGate):
-                angle = op.params[0]
-                ind = (angle, precision)
-                num_ts = self.cache.get(ind, None)
-                if num_ts is None:
-                    # Count the number of T gates
-                    gg_params = [angle, precision, 0]
-                    gg_circ = GridSynthGate().get_circuit(gg_params)
-                    gg_ts = gg_circ.count(TGate()) + gg_circ.count(TdgGate())
-
-                    self.cache[ind] = gg_ts
-                    num_ts = gg_ts
-                num_t += num_ts
+                # On average, num_ts is about 10 * precisions
+                num_t += 10 * precision
             elif isinstance(op.gate, GridSynthGate):
-                ind = (op.params[0], op.params[1])
-                num_ts = self.cache.get(ind, None)
-                if num_ts is None:
-                    # Count the number of T gates
-                    gg_params = [op.params[0], op.params[1], 0]
-                    gg_circ = GridSynthGate().get_circuit(gg_params)
-                    gg_ts = gg_circ.count(TGate()) + gg_circ.count(TdgGate())
-
-                    self.cache[ind] = gg_ts
-                    num_ts = gg_ts
-                num_t += num_ts
-        
+                gg_prec = op.params[1]
+                num_t += 10 * gg_prec
+            elif isinstance(op.gate, U3Gate):
+                # Assume 3 RZ gates per U3 -> This is explicitly converted in
+                # the fix_angle_workflow
+                num_t += 30 * precision
         return num_t
 
 gate_counter_est = GateCounter(est=True)
@@ -159,36 +141,73 @@ def get_circ_counts(circ_files: list[str],
             count_t, count_rz) for circ_file in circ_files]
 
 
-def load_ensemble_counts_est(ensemble_file: str, target_error: float, 
+def load_ensemble_counts_est(ensemble_file: str, jiggle_file: str, target_error: float, 
                                     count_t: bool = False, count_rz: bool = False) -> float:
 
     with open(ensemble_file, "r") as f:
         qasms = f.read().split("\nBREAK\n")
+
+    if jiggle_file is None:
+        counts = [gate_counter_est.count_qasm(q, target_error, count_rz=count_rz, count_t=count_t) for q in qasms]
     
-    counts = [gate_counter_est.count_qasm(qasm, target_error, count_t=count_t, count_rz=count_rz) for qasm in qasms]
+    else:
+        params = np.load(jiggle_file)
+        # Sample 10 of the qasms
+        rand_inds = np.random.randint(0, len(qasms), size=min(10, len(qasms)))
+        qasms = [qasms[i] for i in rand_inds]
+
+        # For each qasm, sample 3 random params
+        all_qasms = []
+        for i, qasm in enumerate(qasms):
+            rand_params = np.random.randint(0, len(params[i]), size=3)
+            for j in rand_params:
+                new_circ = qlang.decode(qasm)
+                new_circ.set_params(params[i][j])
+                all_qasms.append(new_circ)
+
+        # Ensemble should already be fixed
+        counts = [gate_counter_est.count_t(circ, target_error, skip_fix=True) for circ in all_qasms]
     return counts
 
-def load_avg_ensemble_counts_est(ensemble_file: str, target_error: float, 
+def load_avg_ensemble_counts_est(ensemble_file: str, jiggle_file: str, target_error: float, 
                                     count_t: bool = False, count_rz: bool = False) -> float:
 
-    counts = load_ensemble_counts_est(ensemble_file, target_error, count_t, count_rz)
+    counts = load_ensemble_counts_est(ensemble_file, jiggle_file, target_error, count_t, count_rz)
     return np.mean(counts)
     
-    
-def load_ensemble_counts_full(ensemble_file: str, target_error: float, 
+def load_ensemble_counts_full(ensemble_file: str, jiggle_file: str, target_error: float, 
                                   count_t: bool = False, count_rz: bool = False) -> float:
     with open(ensemble_file, "r") as f:
         qasms = f.read().split("\nBREAK\n")
-    
-    counts = [gate_counter_full.count_qasm(qasm, target_error, 
-                count_t=count_t, count_rz=count_rz) for qasm in qasms]
-    return counts
 
-def load_avg_ensemble_counts_full(ensemble_file: str, target_error: float, 
-                                  count_t: bool = False, count_rz: bool = False) -> float:
-    
-    counts = load_ensemble_counts_full(ensemble_file, target_error, count_t, count_rz)
+    if jiggle_file is None:
+        counts = [gate_counter_full.count_qasm(q, target_error, count_rz=count_rz, count_t=count_t) for q in qasms]
+    else:
+        params = np.load(jiggle_file)
+
+        # Sample 50 of the qasms
+        rand_inds = np.random.randint(0, len(qasms), size=min(50, len(qasms)))
+        qasms = [qasms[i] for i in rand_inds]
+
+        # For each qasm, sample 4 random params
+        all_qasms = []
+        for i, qasm in enumerate(qasms):
+            rand_params = np.random.randint(0, len(params[i]), size=4)
+            for j in rand_params:
+                new_circ = qlang.decode(qasm)
+                new_circ.set_params(params[i][j])
+                all_qasms.append(new_circ)
+
+        # Ensemble should already be fixed
+        counts = [gate_counter_full.count_t(circ, target_error, skip_fix=True) for circ in all_qasms]
     return np.mean(counts)
+
+def load_avg_ensemble_counts_full(ensemble_file: str, jiggle_file: str, target_error: float, 
+                                    count_t: bool = False, count_rz: bool = False) -> float:
+
+    counts = load_ensemble_counts_full(ensemble_file, jiggle_file, target_error, count_t, count_rz)
+    return np.mean(counts)
+
 
 def count_params(circ: Circuit) -> int:
     return gate_counter_full.count_rz(circ, skip_fix=True)

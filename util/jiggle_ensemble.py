@@ -291,6 +291,9 @@ class  JiggleEnsemblePass(BasePass):
         """Perform the pass's operation, see :class:`BasePass` for more."""
         _logger.debug('Converting single-qubit general gates to U3Gates.')
 
+        if circuit.num_params == 0 and self.count_t:
+            return
+
         # Collected one solution from synthesis
         print("Starting JIGGLE ENSEMBLE", flush=True)
 

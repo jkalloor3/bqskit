@@ -54,7 +54,10 @@ class FixAnglesPass(BasePass):
 
     def run_circ(circuit: Circuit, precision: int) -> None:
 
-        precision = precision * np.log10(circuit.num_params)
+        if circuit.num_params == 0:
+            return # No params to try and fix
+
+        precision = precision + np.log10(circuit.num_params)
         for cycle, op in circuit.operations_with_cycles():
             if op.num_qudits == 1:
                 if isinstance(op.gate, RXGate):

@@ -28,3 +28,4 @@ from .convert_to_clifft import *
 from .gg import *
 from .combine_blocks import *
 from .counter import *
+from .collect_angles import CollectAnglesPass
