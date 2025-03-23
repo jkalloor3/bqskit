@@ -2,6 +2,8 @@ from bqskit.ir.circuit import Circuit
 from sys import argv
 import glob
 import os
+from bqskit.compiler.basepass import BasePass
+from bqskit.compiler.passdata import PassData
 from bqskit.compiler.compiler import Compiler, WorkflowLike
 from bqskit.ir.gates import CNOTGate
 # Generate a super ensemble for some error bounds
@@ -12,6 +14,11 @@ from util import  LEAPSynthesisPass2, SecondLEAPSynthesisPass
 from util import CheckEnsembleQualityPass, FixGlobalPhasePass
 from util import GenerateProbabilityPass
 from util import CreateEnsemblePass
+class DoNothingPass(BasePass):
+
+    async def run(self, circuit: Circuit, data: PassData) -> None:
+        data['scan_sols'] = [(circuit.copy(), 0.0)]
+        pass
 
 good_instantiation_options = {
     'multistarts': 8,
@@ -55,21 +62,28 @@ def get_ensemble_workflow(circ_name: str, tol: float, extra: str = "",
             num_random_ensembles=2,
             solve_exact_dists=True,
     )
-
-    synthesis_pass = LEAPSynthesisPass2(
-        store_partial_solutions=True,
-        success_threshold = extra_err_thresh,
-        partial_success_threshold=err_thresh,
-        max_layer_factor=1.01,
-        instantiate_options=instantiation_options,
-        max_layer=14,
-        max_psols=5,
-        maximize_diversity=max_diversity,
-    )
-
+    if max_diversity:
+        synthesis_pass = DoNothingPass()
+    else:
+        synthesis_pass = LEAPSynthesisPass2(
+            store_partial_solutions=True,
+            success_threshold = extra_err_thresh,
+            partial_success_threshold=err_thresh,
+            max_layer_factor=1.01,
+            instantiate_options=instantiation_options,
+            max_layer=14,
+            max_psols=5,
+            maximize_diversity=max_diversity,
+        )
+    if max_diversity:
+        full_success_threshold = err_thresh ** 2
+        success_threshold = err_thresh ** 2
+    else:
+        full_success_threshold = err_thresh * 0.001
+        success_threshold = err_thresh
     second_synthesis_pass = SecondLEAPSynthesisPass(
-        success_threshold = extra_err_thresh,
-        partial_success_threshold=err_thresh,
+        success_threshold = full_success_threshold,
+        partial_success_threshold=success_threshold,
         max_layer_factor=1.01,
         instantiate_options=instantiation_options,
         max_layer=14,
@@ -215,7 +229,7 @@ def get_circ_data(circ_name: str, block_num: str | int,
                   max_diversity: bool = False) -> list[tuple[str, str, float]]:
     # Categorize circs into different categories and run them
     if tol == -1.0:
-        tols = [0.8, 1.0, 2.0, 3.0, 4.0, 5.0]
+        tols = [3.0, 4.0, 5.0]
     else:
         tols = [tol]
     if max_diversity:

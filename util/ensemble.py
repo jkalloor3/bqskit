@@ -377,7 +377,11 @@ class CreateEnsemblePass(BasePass):
         data: dict[Any, Any],
     ) -> tuple[list[list[tuple[Circuit, float]]], list[CircuitPoint], list[list[float]]]:
         """Parse the data outputed from synthesis."""
-        block_data = data[0]
+        try:
+            block_data = data[0]
+        except:
+            print("No Ensemble Data", flush=True)
+            return None, None, None, None
 
 
         # Look up to get data for each block psol
@@ -447,7 +451,10 @@ class CreateEnsemblePass(BasePass):
             self.success_threshold = self.success_threshold * data["error_percentage_allocated"]
 
             
-        approx_circs, pts, dists, _ = self.parse_data(circuit, block_data)        
+        approx_circs, pts, dists, _ = self.parse_data(circuit, block_data)
+        if approx_circs is None:
+            print("No Ensemble Data", checkpoint_dir, flush=True)
+            return        
         all_ensembles: list[list[Circuit]] = await self.assemble_circuits(circuit, approx_circs, pts, dists=dists, target=data.target)
         
         if len(all_ensembles) == 0:

@@ -110,6 +110,14 @@ def get_ensemble_workflow(circ_name: str, tol: float, extra: str = "",
         )
 
     if max_diversity:
+        ntro = DoNothingPass()
+    else:
+        ntro = NumericalTReductionPass(
+            full_loops=3,
+            success_threshold=err_thresh / 2,
+            use_calculated_error=True)
+        
+    if max_diversity:
         num_jiggled_circs = 200000
     else:
         num_jiggled_circs = 10000
@@ -134,10 +142,7 @@ def get_ensemble_workflow(circ_name: str, tol: float, extra: str = "",
                 FixAnglesPass(int(tol) * 2 + 2, run_scan_sols=True),
                 ConvertToZXZXZSimple(group=False),
                 # WriteQasmPass(write=False),
-                NumericalTReductionPass(
-                    full_loops=3,
-                    success_threshold=err_thresh / 2,
-                    use_calculated_error=True),
+                ntro,
                 FixAnglesPass(int(tol) * 2 + 2, run_scan_sols=True),
                 FixGlobalPhasePass(),
             ],
@@ -191,7 +196,7 @@ def get_shortest_circuits(circ_data: list[tuple[str, str, float]], extra: str = 
         for circ_name, _, tol in circ_data
     ]
 
-    num_workers = min(os.cpu_count(), 200)
+    num_workers = min(os.cpu_count(), 100)
     compiler = Compiler(num_workers=num_workers)
     
     workflow_ind = 0

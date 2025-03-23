@@ -115,7 +115,10 @@ class CheckEnsembleQualityPass(BasePass):
         ensemble = data.get("ensemble", ensemble_files)
 
 
+        start_ens_ind = 0
+
         for ens in ensemble:
+            print("LEN CSV DICT: ", len(csv_dict), flush=True)
             if len(ens) > 0 and isinstance(ens[0], str):
                 ens_file, jiggle_file = ens
                 circ_params = load_jiggled_ensemble(ens_file, jiggle_file)
@@ -151,6 +154,7 @@ class CheckEnsembleQualityPass(BasePass):
                     best_ind = start_ens_ind
                     best_ratio = ratio
                     best_count = count
+                    print("FOUND BETTER ENSEMBLE", flush=True)
                 # Keep Looking
                 start_ens_ind += 1
                 ens_file = ensemble_file_name.format(ind=start_ens_ind, extra=self.checkpoint_extra_str)
