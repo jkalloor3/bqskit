@@ -118,7 +118,7 @@ def get_ensemble_workflow(circ_name: str, tol: float, extra: str = "",
             use_calculated_error=True)
         
     if max_diversity:
-        num_jiggled_circs = 200000
+        num_jiggled_circs = 20000
     else:
         num_jiggled_circs = 10000
 

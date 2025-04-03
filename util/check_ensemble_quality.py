@@ -106,7 +106,7 @@ class CheckEnsembleQualityPass(BasePass):
         ensemble_files = []
         if os.path.exists(jiggle_file):
             while os.path.exists(jiggle_file):
-                ensemble_files.append((ens_file, jiggle_file))
+                ensemble_files.append((ens_file, jiggle_file, cache_file))
                 start_ens_ind += 1
                 ens_file = ensemble_file_name.format(ind=start_ens_ind, extra=self.checkpoint_extra_str)
                 jiggle_file = jiggle_file_name.format(ind=start_ens_ind, extra=self.checkpoint_extra_str)
@@ -122,19 +122,18 @@ class CheckEnsembleQualityPass(BasePass):
                 circ_params = load_jiggled_ensemble(ens_file, jiggle_file, cache_file)
             else:
                 circ_params = ens
-            circuits = [circ for circ, _ in circ_params]
+            circuits = [circ for circ, _, _ in circ_params]
             if len(circuits) < 4:
                 # Make 10 copies of each circuit and split the params amongst them
                 new_circ_params = []
-                for circ, params in circ_params:
+                for circ, params, cache in circ_params:
                     param_chunks = np.array_split(params, 10)
                     for i in range(10):
                         if param_chunks[i].shape[0] > 5000:
                             # pick a random subset of 5000
                             rand_inds = np.random.choice(param_chunks[i].shape[0], 5000, replace=False)
                             param_chunks[i] = param_chunks[i][rand_inds]
-                        print("Param Chunk: ", param_chunks[i].shape, flush=True)
-                        new_circ_params.append((circ, param_chunks[i]))
+                        new_circ_params.append((circ, param_chunks[i], cache))
 
                 circ_params = new_circ_params
             avg_utries_dists = await get_runtime().map(create_avg_utry, 
