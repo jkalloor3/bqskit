@@ -87,10 +87,12 @@ class CheckEnsembleQualityPass(BasePass):
         # Otherwise, reload from saved files - Would have done in 
         ensemble_file_name = os.path.join(checkpoint_dir, "ensemble_{ind}_{extra}.qasms")
         jiggle_file_name = os.path.join(checkpoint_dir, "ensemble_{ind}_jiggles_{extra}.npy")
+        cache_file_name = os.path.join(checkpoint_dir, "ensemble_{ind}_cache.pkl")
         final_ens_file = os.path.join(checkpoint_dir, "ensemble_final.qasms")
         start_ens_ind = 0
         ens_file = ensemble_file_name.format(ind=start_ens_ind, extra=self.checkpoint_extra_str)
         jiggle_file = jiggle_file_name.format(ind=start_ens_ind, extra=self.checkpoint_extra_str)
+        cache_file = cache_file_name.format(ind=start_ens_ind, extra=self.checkpoint_extra_str)
         ensemble_counts = {}
 
         target = data.target
@@ -108,20 +110,16 @@ class CheckEnsembleQualityPass(BasePass):
                 start_ens_ind += 1
                 ens_file = ensemble_file_name.format(ind=start_ens_ind, extra=self.checkpoint_extra_str)
                 jiggle_file = jiggle_file_name.format(ind=start_ens_ind, extra=self.checkpoint_extra_str)
-
-        print("Ensemble Files: ", ensemble_files, flush=True)
-        print(data.get("ensemble", None))
+                cache_file = cache_file_name.format(ind=start_ens_ind, extra=self.checkpoint_extra_str)
 
         ensemble = data.get("ensemble", ensemble_files)
-
 
         start_ens_ind = 0
 
         for ens in ensemble:
-            print("LEN CSV DICT: ", len(csv_dict), flush=True)
             if len(ens) > 0 and isinstance(ens[0], str):
-                ens_file, jiggle_file = ens
-                circ_params = load_jiggled_ensemble(ens_file, jiggle_file)
+                ens_file, jiggle_file, cache_file = ens
+                circ_params = load_jiggled_ensemble(ens_file, jiggle_file, cache_file)
             else:
                 circ_params = ens
             circuits = [circ for circ, _ in circ_params]

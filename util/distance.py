@@ -135,6 +135,14 @@ def gp_frobenius_cost(utry: UnitaryMatrix, target: UnitaryMatrix):
 
     return frobenius_cost(utry, target)
 
+def get_corrected_un(utry: UnitaryMatrix, target: UnitaryMatrix):
+    '''
+    Calculates the normalized Frobenius distance between two unitaries
+    '''
+    gp_correction = target.get_target_correction_factor(utry)
+    utry = utry * gp_correction
+    return utry
+
 def normalized_frob_dist_func(target: UnitaryMatrix) -> callable:
     def calc_frob_dist(mat: np.ndarray) -> np.float64:
         return normalized_frob_cost(target, mat)

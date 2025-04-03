@@ -2,7 +2,7 @@ from bqskit.ir.circuit import Circuit
 from .fix_global_phase import fix_phase
 from bqskit.qis import UnitaryMatrix
 from pathlib import Path
-from multiprocessing import shared_memory
+import pickle
 from itertools import chain
 import numpy as np
 import os
@@ -11,6 +11,7 @@ import numpy as np
 from bqskit.ir.lang.qasm2 import OPENQASM2Language
 from .distance import frobenius_cost, normalized_frob_cost
 import multiprocessing as mp
+from bqskit.runtime import get_runtime
 
 from .gg import gg_gate_def, GridSynthGate
 
@@ -66,10 +67,16 @@ def create_single_jiggled_ensemble(circ_params: tuple[Circuit, np.ndarray],
             ens.append(new_circ)
     return ens
 
-def create_avg_utry(circ_params: tuple[Circuit, np.ndarray], 
+def create_avg_utry(circ_params: tuple[Circuit, np.ndarray, dict], 
                     target: UnitaryMatrix,  
-                    add_cost: bool = False) -> UnitaryMatrix | tuple[UnitaryMatrix, float]:
-    circ, params = circ_params
+                    add_cost: bool = False) -> UnitaryMatrix | tuple[UnitaryMatrix, 
+                                                                     float]:
+    circ, params, cache = circ_params
+    if cache is not None:
+        # Get the worker cache
+        w_cache = get_runtime().get_cache()
+        w_cache.update(cache)
+
     avg_utry = np.zeros_like(circ.get_unitary())
     avg_dist = 0
     for param in params.tolist():
@@ -103,13 +110,19 @@ def get_unitary(circ: Circuit, target: UnitaryMatrix) -> tuple[UnitaryMatrix, fl
     return (utry, cost_1)
 
 
-def create_jiggled_unitaries(circ_params: tuple[Circuit, np.ndarray], 
+def create_jiggled_unitaries(circ_params: tuple[Circuit, np.ndarray, dict], 
                                    target: UnitaryMatrix = None,
                                    add_cost: bool = True) -> np.ndarray[np.complex128] | list[tuple[UnitaryMatrix, float]]:
-    circ, params = circ_params
+    circ, params, cache = circ_params
+    if cache is not None:
+        # Get the worker cache if exists
+        try:
+            w_cache = get_runtime().get_cache()
+            w_cache.update(cache)
+        except:
+            pass
     ens = []
     correct = target is not None
-    # print("Params Shape: ", params.shape, "Circuit Params: ", circ.num_params, flush=True)
     for param in params.tolist():
         utry = circ.get_unitary(param)
         if correct:
@@ -124,55 +137,6 @@ def create_jiggled_unitaries(circ_params: tuple[Circuit, np.ndarray],
         ens = np.array(ens, dtype=np.complex128)
         return ens
     return ens
-
-# def calc_avg_unitary_shm(circ_ind: tuple[Circuit, int],
-#                                  shm_name: str, 
-#                                  shm_shape: tuple[int, int, int], 
-#                                  target: UnitaryMatrix = None) -> tuple[UnitaryMatrix, float]:
-#     existing_shm = shared_memory.SharedMemory(name=shm_name)
-#     shared_array = np.ndarray(shm_shape, dtype=np.float64, buffer=existing_shm.buf)
-#     circ, param_ind = circ_ind
-#     params: np.ndarray = shared_array[param_ind]
-#     orig_unitary = circ.get_unitary()
-#     avg_unitary = np.zeros_like(orig_unitary)
-#     avg_dist = 0.0
-#     for i, param in enumerate(params.tolist()):
-#         utry = circ.get_unitary(param)
-#         gp_correction = target.get_target_correction_factor(utry)
-#         utry: UnitaryMatrix = utry * gp_correction
-#         cost_1 = normalized_frob_cost(utry, target)
-#         avg_unitary += utry.numpy
-#         avg_dist += cost_1
-
-#     existing_shm.close()
-#     avg_unitary = avg_unitary / len(params)
-#     avg_dist = avg_dist / len(params)
-#     return avg_unitary, avg_dist
-
-# def create_jiggled_unitaries_shm(circ_ind: tuple[Circuit, int],
-#                                  shm_name: str, 
-#                                  shm_ret_name: str,
-#                                  shm_shape: tuple[int, int, int], 
-#                                  shm_ret_shape: tuple[int, int, int],
-#                                  target: UnitaryMatrix) -> np.ndarray:
-#     existing_shm = shared_memory.SharedMemory(name=shm_name)
-#     existing_shm_ret = shared_memory.SharedMemory(name=shm_ret_name)
-#     shared_array = np.ndarray(shm_shape, dtype=np.float64, buffer=existing_shm.buf)
-#     shared_array_ret = np.ndarray(shm_ret_shape, dtype=np.complex128, buffer=existing_shm_ret.buf)
-#     circ, param_ind = circ_ind
-#     params: np.ndarray = shared_array[param_ind]
-
-#     for i, param in enumerate(params.tolist()):
-#         utry = circ.get_unitary(param)
-#         gp_correction = target.get_target_correction_factor(utry)
-#         utry: UnitaryMatrix = utry * gp_correction
-#         shared_array_ret[i + param_ind * 4] = utry.numpy
-        
-
-#     existing_shm.close()
-#     existing_shm_ret.close()
-#     return
-
 
 def create_jiggled_ensemble(circ_params: list[tuple[Circuit, np.ndarray]]) -> list[Circuit]:
     ensemble = [create_single_jiggled_ensemble(c) for c in circ_params]
@@ -191,17 +155,17 @@ def load_jiggled_ensemble_separate(file_name: str, jiggle_file_name: str) -> tup
     print("Params Shape: ", params.shape, flush=True)
     return circs, params
 
-def load_jiggled_ensemble(file_name: str, jiggle_file_name: str) -> list[tuple[Circuit, np.ndarray]]:
+def load_jiggled_ensemble(file_name: str, jiggle_file_name: str, 
+                          cache_file_name: str) -> list[tuple[Circuit, 
+                                                              np.ndarray, 
+                                                              dict]]:
     circs = load_ensemble(file_name)
     print("Num Circs: ", len(circs), flush=True)
     params: np.ndarray = np.load(jiggle_file_name)
     print("Params Shape: ", params.shape, flush=True)
-    circ_params = list(zip(circs, params))
+    caches = pickle.load(open(cache_file_name, "rb"))
+    circ_params = list(zip(circs, params, caches))
     return circ_params
-    # if not use_mp:
-    #     return create_jiggled_ensemble(circ_params)
-    # else:
-    #     return create_jiggled_ensemble_mp(circ_params)
 
 def store_ensemble(ensemble: list[Circuit], file_name: str):
     # Store as list of qasm strings

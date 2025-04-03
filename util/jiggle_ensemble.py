@@ -17,7 +17,7 @@ from bqskit.ir.gates import *
 from bqskit.qis import UnitaryMatrix
 import numpy as np
 from math import ceil
-import itertools
+import pickle
 import time
 
 from bqskit.qis.pauli import PauliMatrices
@@ -30,8 +30,7 @@ from bqskit.runtime import get_runtime
 import os
 from .common import store_params, load_ensemble_strs, store_ensemble_strs
 from .counter import count_params_str
-from .gg import GridSynthGate, gg_gate_def, MIN_EPSILON, get_rz_perturbation_params
-from .distance import normalized_gp_frob_cost
+from .gg import GridSynthGate, gg_gate_def, MIN_EPSILON, get_rz_perturbations
 
 _logger = logging.getLogger(__name__)
 
@@ -115,8 +114,33 @@ class  JiggleEnsemblePass(BasePass):
         return final_params
 
     @staticmethod
-    def single_jiggle_ham(circ_str: str, target: UnitaryMatrix, num: int, success_threshold: float) -> np.ndarray[float]:
-        # dist = frob_cost.calc_cost(circ, target)
+    def single_jiggle_ham(circ_str: str, target: UnitaryMatrix, 
+                          num: int, success_threshold: float) -> np.ndarray[float]:
+        '''
+        Apply Hamiltonian perturbations to the circuit.
+
+        Input:
+        circ_str
+
+        circ_str is the string representation of the circuit
+
+        We require the circ_num to create a local cache for Gridsynth Strings
+
+        target:
+        target is the target unitary matrix
+
+        num: number of circuits to generate
+
+        success_threshold: success threshold for the perturbation
+        
+
+        Returns:
+        A numpy array of size (num, num_params) where num_params is the number 
+        of parameters in the circuit
+
+        Also returns the local cache for Gridsynth Strings
+        
+        '''
         circ = lang.decode(circ_str)
         dist = frob_cost.calc_cost(circ, target)
         # For each U3 gate, calculate do a Hamiltonian perturbation
@@ -127,6 +151,12 @@ class  JiggleEnsemblePass(BasePass):
         if (num_u3s + num_rzs + num_ggs) == 0:
             print("No U3s or Zs", flush=True)
             return np.array([])
+        
+        if num_ggs > 0:
+            local_cache = {}
+        else:
+            local_cache = None
+
         # For each u3, come up with 16 param perturbations
         num_options = 16
         # Map U3 params to perturbed params
@@ -161,10 +191,16 @@ class  JiggleEnsemblePass(BasePass):
                     z_perturbs = np.array([np.pi/ 2, -np.pi/2, np.pi, -np.pi]) * perturb_dist
                     rz_param_options[angle] = z_perturbs + angle
             elif isinstance(op.gate, GridSynthGate):
-                # print("GridSynthGate", op.params, flush=True)
                 angle = op.params[0]
                 if angle not in gg_param_options:
-                    gg_params, probs = get_rz_perturbation_params(angle, int_perturb_dist)
+                    gg_params, gg_strs, probs = get_rz_perturbations(angle, 
+                                                                     int_perturb_dist)
+                    
+                    # Fill up local cache with gg_strs
+                    for i, gg_str in enumerate(gg_strs):
+                        ind = (gg_params[i][0], gg_params[i][1])
+                        local_cache[ind] = gg_str
+
                     gg_param_options[angle] = gg_params
                     gg_probs[angle] = probs
 
@@ -215,12 +251,7 @@ class  JiggleEnsemblePass(BasePass):
             final_params.append(full_params_1)
             final_params.append(full_params_2)
 
-        del u3_param_options
-        del rz_param_options
-        del gg_param_options
-        del gg_probs
-        del new_circ
-        return np.vstack(final_params)
+        return np.vstack(final_params), local_cache
 
     @staticmethod
     def flood_circ(circ_str: str) -> str:
@@ -268,12 +299,9 @@ class  JiggleEnsemblePass(BasePass):
             for cycle, op in circ.operations_with_cycles():
                 if isinstance(op.gate, RZGate):
                     gg_params = [op.params[0], min(MIN_EPSILON, int_thresh * 2 + 2), 0]
-                    # Test if angle works
-                    test_ps = get_rz_perturbation_params(op.params[0], int_thresh)
-                    if len(test_ps[0]) > 1:
-                        circ.replace_gate(CircuitPoint(cycle, op.location[0]), 
-                                        GridSynthGate(), op.location, gg_params)
-                if isinstance(op.gate, U3Gate):
+                    circ.replace_gate(CircuitPoint(cycle, op.location[0]), 
+                                      GridSynthGate(), op.location, gg_params)
+                elif isinstance(op.gate, U3Gate):
                     # if all the params are 0, then remove the gate
                     if np.allclose(op.params, [0, 0, 0]):
                         pts_to_remove.append(CircuitPoint(cycle, op.location[0]))
@@ -357,11 +385,14 @@ class  JiggleEnsemblePass(BasePass):
             mod_time = time.time() - mod_start
             print("Modified Circuits", mod_time, flush=True)
 
-            all_params = await get_runtime().map(JiggleEnsemblePass.single_jiggle_ham, 
+            '''Get a list of params and caches for each circuit'''
+            all_params_caches = await get_runtime().map(JiggleEnsemblePass.single_jiggle_ham, 
                                           circuit_strs, 
                                           target=data.target,
                                           num = ceil(self.num_circs / len(circuit_strs)), 
                                           success_threshold=success_threshold)
+            all_params = [p[0] for p in all_params_caches]
+            all_caches = [p[1] for p in all_params_caches]
 
             ens_file = ensemble_file_name.format(ind=ens_ind, extra=self.checkpoint_extra_str)
             store_start = time.time()
@@ -372,6 +403,9 @@ class  JiggleEnsemblePass(BasePass):
             store_time = time.time() - store_start
             jiggle_file = jiggle_file_name.format(ind=ens_ind, extra=self.checkpoint_extra_str)
             store_params(all_params, jiggle_file)
+            cache_file = os.path.join(checkpoint_dir, f"ensemble_{ens_ind}_cache.pkl")
+            # store_caches(all_caches, jiggle_file)
+            pickle.dump(all_caches, open(cache_file, "wb"))
             print("Stored Ensemble", store_time, flush=True)
 
         total_time = time.time() - start

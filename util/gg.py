@@ -15,7 +15,7 @@ from bqskit.ir.gates.qubitgate import QubitGate
 from bqskit.qis.unitary.unitary import RealVector
 from bqskit.qis.unitary.unitarymatrix import UnitaryMatrix
 from bqskit.utils.cachedclass import CachedClass
-from bqskit.utils.math import unitary_log_no_i, pauli_expansion
+from bqskit.qis.pauli import PauliMatrices
 from pyLIQTR.gate_decomp.gate_approximation import approximate_rz_direct
 
 from .fix_global_phase import fix_phase
@@ -76,88 +76,68 @@ def get_approx_t_str(angle: float, precision: int) -> str:
     # print("Angle: ", angle, "Num: ", num, "Den: ", den)
     return approximate_rz_direct(num, den, precision)[0]
 
+def get_az(H):
+    """
+    Computes a Pauli expansion of the hermitian matrix H and returns the Z 
+    coefficient.
+    """
 
-def get_rz_perturbation_params(starting_angle, 
-                               epsilon: int, 
-                               num_trials: int = 5) -> tuple[list[RealVector],
-                                                                list[float]]:
-    
-    default_params = ([[starting_angle, min(epsilon*2, MIN_EPSILON), 0]], [1])
-    for _ in range(num_trials):
-        params, probs = get_rz_perturbation_params_inner(starting_angle, epsilon)
-        if params is not None:
-            return params, probs
-        
-    return default_params
+    # Change basis of H to Pauli Basis (solve for coefficients -> X)
+    n = int(np.log2(len(H)))
+    paulis = PauliMatrices(n)
+    flatten_paulis = [np.reshape(pauli, 4 ** n) for pauli in paulis]
+    flatten_H = np.reshape(H, 4 ** n)
+    A = np.stack(flatten_paulis, axis=-1)
+    X = np.matmul(np.linalg.inv(A), flatten_H)
 
-def get_rz_perturbation_params_inner(starting_angle, 
-                                     epsilon: int) -> tuple[list[RealVector],
-                                                                list[float]]:
+    # Want to make the first coefficient real
+    global_phase = np.angle(X[0])
+    X = np.exp(-1j * global_phase) * X
+
+    # Return imaginary part of the last coefficient
+    return np.imag(X[-1])
+
+def get_rz_perturbations(starting_angle, 
+                         epsilon: int) -> tuple[list[RealVector], 
+                                                list[str], list[float]]:
     '''
-    Return a list of params 
+    Returns a list of 4 parameters and a list of strings to put in the the
+    cache of the requester. Furthermore, returns the probabilities of each
+    parameter.
     '''
     if epsilon > MIN_EPSILON:
         # Try with epsilon
         epsilon = MIN_EPSILON
 
-    final_params = [[starting_angle, epsilon, 0]]
 
     V = RZGate().get_unitary([starting_angle])
     U_1_t_str = get_approx_t_str(starting_angle, epsilon)
     U_1_t_circ = gridsynth_gates_to_cir(U_1_t_str)
     U_1 = U_1_t_circ.get_unitary()
-    del U_1_t_circ
+
+    final_strs = []
+    final_params = []
+    final_params.append([starting_angle, epsilon, 0])
+
+    final_strs.append(U_1_t_str)
 
     Vt_U_1 = V.conj().T @ U_1
 
-    del U_1
+    az = get_az(Vt_U_1)
 
-    # Expand to Pauli Basis and get Z component
-    H = unitary_log_no_i(Vt_U_1)
-    coeffs = pauli_expansion(H)
-    az = coeffs[-1]
-    del H
-    del coeffs
-    del Vt_U_1
-
-    float_epsilon = 10 ** (-epsilon)
-    delta = 2 * np.arcsin(np.sqrt(float_epsilon) / 2)
+    float_epsilon = 10.0 ** (-epsilon)
+    delta = 2 * np.arcsin(float_epsilon)
     if az < 0:
         delta = -delta
-    
-    final_params.append([starting_angle + delta, epsilon, 0])
 
     U_2_t_str = get_approx_t_str(starting_angle + delta, epsilon)
     U_2_t_circ = gridsynth_gates_to_cir(U_2_t_str)
     U_2 = U_2_t_circ.get_unitary()
-    del U_2_t_circ
-
-    # Twirl U_1
-    final_params.append([starting_angle, epsilon, 1])
-    U_3_t_str = "Z" + U_1_t_str + "Z"
-    # Now do with U_2
-    final_params.append([starting_angle + delta, epsilon, 1])
-    U_4_t_str = "Z" + U_2_t_str + "Z"
-    
-    perturbed_t_strs = [U_1_t_str, U_2_t_str, U_3_t_str, U_4_t_str]
-    perturbed_circs = [gridsynth_gates_to_cir(t_str) for t_str in perturbed_t_strs]
-
-    [fix_phase(circ, V) for circ in perturbed_circs]
-    perturbed_unitaries = [c.get_unitary() for c in perturbed_circs]
-    del perturbed_circs
-    perturbed_costs = [gp_frobenius_cost(u, V) for u in perturbed_unitaries]
-    eps = np.mean(perturbed_costs)
-    del perturbed_costs
+    final_params.append([starting_angle + delta, epsilon, 0])
+    final_strs.append(U_2_t_str)
 
     Vt_U_2 = V.conj().T @ U_2
-    del U_2
-    H = unitary_log_no_i(Vt_U_2)
-    coeffs = pauli_expansion(H)
-    Bz = coeffs[-1]
-
-    del H
-    del coeffs
-    del Vt_U_2
+    Bz = get_az(Vt_U_2)
 
     q = az / (az - Bz)
 
@@ -172,15 +152,9 @@ def get_rz_perturbation_params_inner(starting_angle,
         p2 = 0
 
     probs = [p1, p2] * 2
-
-    mean_un = np.average(perturbed_unitaries, axis=0, weights=probs)
-    cost_of_mean = gp_frobenius_cost(mean_un, V)
-    del perturbed_unitaries
-    del mean_un
-    ratio = cost_of_mean / eps / eps
-    if ratio > 15 or p1 < 0 or p2 < 0:
-        return None, None
-    return final_params, probs
+    final_params.append([starting_angle, epsilon, 1])
+    final_params.append([starting_angle + delta, epsilon, 1])
+    return final_params, final_strs, probs
 
 class GridSynthGate(QubitGate, CachedClass):
     """
@@ -199,44 +173,25 @@ class GridSynthGate(QubitGate, CachedClass):
     _num_qudits = 1
     _num_params = 3
     _qasm_name = 'gg'
-    # cache = LRUCache(maxsize=10)
     def get_unitary(self, params: RealVector = []) -> UnitaryMatrix:
         """Return the unitary for this gate, see :class:`Unitary` for more."""
         ang = round(params[0], 18)
         epsilon = int(params[1])
         z_twirl = int(params[2])
         ind = (ang, epsilon)
-        cache = get_runtime().get_cache()
-        un = cache.get(ind, None)
-        if un is None:
-            t_circ = self.get_circuit([ang, epsilon, 0])
-            un = t_circ.get_unitary()
-            cache[ind] = un
-        
+        try:
+            cache = get_runtime().get_cache()
+            t_str = cache.get(ind, None)
+        except:
+            t_str = None
+
+        if t_str is None:
+            t_str = get_approx_t_str(ang, epsilon)            
         if z_twirl == 1:
-            un = ZGate().get_unitary() @ un @ ZGate().get_unitary()
-
+            t_str = "Z" + t_str + "Z"
+        
+        un = gridsynth_gates_to_cir(t_str).get_unitary()
         return un
-
-    # def get_unitary(self, params: RealVector = []) -> UnitaryMatrix:
-    #     """Return the unitary for this gate, see :class:`Unitary` for more."""
-    #     # print(params, flush=True)
-    #     angle = round(params[0], 20)
-    #     epsilon = int(params[1])
-    #     z_twirl = int(params[2])
-    #     un = GridSynthGate.cache.get((angle, epsilon), None)
-    #     if un is None:
-    #         t_circ = self.get_circuit([angle, epsilon, 0])
-    #         un = t_circ.get_unitary()
-    #         GridSynthGate.cache[(angle, epsilon)] = un
-    #     else:
-    #         # print("Cache Hit!", flush=True)
-    #         pass
-
-    #     if z_twirl == 1:
-    #         un = ZGate().get_unitary() @ un @ ZGate().get_unitary()
-
-    #     return un
 
     def get_circuit(self, params: RealVector = []) -> Circuit:
         # self.check_parameters(params)
