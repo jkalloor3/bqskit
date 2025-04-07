@@ -86,6 +86,18 @@ def tvd_dict(p: dict[str, int], q: dict[str, int]) -> np.float64:
     q = {k: v/shots for k, v in q.items()}
     return 0.5 * sum(abs(p.get(k, 0) - q.get(k, 0)) for k in set(p) | set(q))
 
+def hs_cost(utry: UnitaryMatrix, target: UnitaryMatrix):
+    '''
+    Calculates the Hilbert-Schmidt distance between two unitaries
+    '''
+    # This is Frob(u - v)
+    inner = np.abs(np.trace(utry @ target.conj().T)) ** 2
+    N = utry.shape[0]
+    inner /= (N ** 2)
+    cost = np.sqrt(1 - inner)
+    return cost
+
+
 def frobenius_cost(utry: UnitaryMatrix, target: UnitaryMatrix):
     '''
     Calculates the Frobenius distance between two unitaries

@@ -16,7 +16,7 @@ import shutil
 from .common import load_jiggled_ensemble, create_avg_utry
 from .counter import count_params
 
-from .distance import frobenius_cost, normalized_frob_cost
+from .distance import frobenius_cost, normalized_frob_cost, hs_cost
 
 norm_cost = GPNormalizedFrobeniusCostGenerator()
 frob_cost = GPNormalizedFrobeniusCostGenerator()
@@ -26,7 +26,7 @@ class CheckEnsembleQualityPass(BasePass):
                  count_t: bool = False,
                  csv_name: str = "",
                  checkpoint_extra_str: str = "",
-                 shm_percentage: float = 1.0,
+                 calculate_hs: bool = False,
                  ) -> None:
         self.count_t = count_t
         self.csv_name = csv_name
@@ -37,12 +37,13 @@ class CheckEnsembleQualityPass(BasePass):
         self.gate_title = "Num Params" if count_t else "CNOT Count"
         self.gate_func = lambda x: x.count(TGate()) + x.count(TdgGate()) + x.num_params * 60 if count_t else x.count(CNOTGate())
         self.checkpoint_extra_str = checkpoint_extra_str
-        self.shm_percentage = shm_percentage
+        self.calculate_hs = calculate_hs
 
     def get_ensemble_data(self, avg_utry: np.ndarray, 
                           avg_dist: float, 
                           target: UnitaryMatrix, 
-                          orig_count: int) -> dict[str, Any]:
+                          orig_count: int,
+                          avg_hs: float = None) -> dict[str, Any]:
         ensemble_data = {}
         dim = avg_utry.shape[0]
         print("Average Norm Epsilon: ", avg_dist, flush=True)
@@ -52,6 +53,11 @@ class CheckEnsembleQualityPass(BasePass):
         mean_un = avg_utry
         norm_bias = normalized_frob_cost(mean_un, target)
         frob_bias = frobenius_cost(mean_un, target)
+
+        if self.calculate_hs:
+            mean_hs = hs_cost(mean_un, target)
+            ensemble_data["HS of Mean"] = mean_hs
+            ensemble_data["Avg. HS"] = avg_hs
         
         # final_counts = [self.gate_func(circ) for circ in ens]
         ensemble_data["Ensemble Generation Method"] = ""
@@ -141,12 +147,14 @@ class CheckEnsembleQualityPass(BasePass):
                                                         target=data.target, 
                                                         add_cost=True)
             
-            utries = [avg_utry for avg_utry, _ in avg_utries_dists]
-            dists = [dist for _, dist in avg_utries_dists]
+            utries = [avg_utry for avg_utry, _, _ in avg_utries_dists]
+            dists = [dist for _, dist, _ in avg_utries_dists]
+            hs_dists = [hs for _, _, hs in avg_utries_dists]
             avg_utry = np.mean(utries, axis=0)
             avg_dist = np.mean(dists)
+            avg_hs = np.mean(hs_dists)
             print("Avg Dist: ", avg_dist, flush=True)
-            csv_dict[start_ens_ind] = self.get_ensemble_data(avg_utry, avg_dist, target, None)
+            csv_dict[start_ens_ind] = self.get_ensemble_data(avg_utry, avg_dist, target, None, avg_hs=avg_hs)
             csv_dict[start_ens_ind]["Ensemble Generation Method"] = self.ensemble_names[start_ens_ind]
             ratio = csv_dict[start_ens_ind]["Ratio"]
             print("Ratio: ", ratio, flush=True)

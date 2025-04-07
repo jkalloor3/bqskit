@@ -9,7 +9,7 @@ import os
 import glob
 import numpy as np
 from bqskit.ir.lang.qasm2 import OPENQASM2Language
-from .distance import frobenius_cost, normalized_frob_cost
+from .distance import frobenius_cost, normalized_frob_cost, hs_cost
 import multiprocessing as mp
 from bqskit.runtime import get_runtime
 
@@ -79,6 +79,7 @@ def create_avg_utry(circ_params: tuple[Circuit, np.ndarray, dict],
 
     avg_utry = np.zeros_like(circ.get_unitary())
     avg_dist = 0
+    avg_hs = 0
     for param in params.tolist():
         new_circ = circ.copy()
         new_circ.set_params(param)
@@ -87,10 +88,12 @@ def create_avg_utry(circ_params: tuple[Circuit, np.ndarray, dict],
         avg_utry += un
         if add_cost:
             avg_dist += normalized_frob_cost(un, target)
+            avg_hs += hs_cost(un, target)
     avg_utry = avg_utry / len(params)
     avg_dist = avg_dist / len(params)
+    avg_hs = avg_hs / len(params)
     if add_cost:
-        return (avg_utry, avg_dist)
+        return (avg_utry, avg_dist, avg_hs)
     else:
         return avg_utry
 
