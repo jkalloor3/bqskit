@@ -3,12 +3,15 @@ from __future__ import annotations
 
 import logging
 
+from pathlib import Path
+
 from bqskit.compiler.basepass import BasePass
 from bqskit.compiler.passdata import PassData
 from bqskit.passes import ToU3Pass, ForEachBlockPass
 from bqskit.ir.circuit import Circuit, CircuitPoint
 from bqskit.runtime import get_runtime
 from typing import Any
+import itertools
 from bqskit.ir.lang.qasm2 import OPENQASM2Language
 from bqskit.ir.opt.cost.functions import GPNormalizedFrobeniusCostGenerator, GPNormalizedFrobeniusCostGenerator
 from bqskit.ir.opt.minimizers.lbfgs import LBFGSMinimizer
@@ -28,7 +31,8 @@ from bqskit.utils.math import dot_product
 from bqskit.runtime import get_runtime
 
 import os
-from .common import store_params, load_ensemble_strs, store_ensemble_strs
+from .common import (store_params, load_ensemble_strs, store_ensemble_strs, 
+                     load_jiggled_ensemble, create_jiggled_ensemble)
 from .counter import count_params_str
 from .gg import GridSynthGate, gg_gate_def, MIN_EPSILON, get_rz_perturbations
 
@@ -46,11 +50,13 @@ class  JiggleEnsemblePass(BasePass):
                  num_circs = 1000,
                  cost: CostFunctionGenerator = GPNormalizedFrobeniusCostGenerator(),
                  use_ensemble: bool = True,
+                 use_scan_sols: bool = False,
                  use_calculated_error: bool = True,
                  count_t: bool = False,
                  checkpoint_extra_str: str = "",
                  jiggle_skew: int = 0,
                  do_u3_perturbation: bool = True,
+                 pass_ensemble: bool = False,
                  flood_circ: bool = False) -> None:
         """
         Construct a ToU3Pass.
@@ -64,6 +70,8 @@ class  JiggleEnsemblePass(BasePass):
         self.num_circs = num_circs
         self.cost = cost
         self.use_ensemble = use_ensemble
+        self.use_scan_sols = use_scan_sols
+        self.pass_ensemble = pass_ensemble
         self.instantiate_options: dict[str, Any] = {
             'dist_tol': self.success_threshold,
             'min_iters': 100,
@@ -176,8 +184,10 @@ class  JiggleEnsemblePass(BasePass):
         try:
             int_perturb_dist = ceil(-1 * np.log10(perturb_dist))
         except:
+            print("Success Threshold: ", success_threshold, flush=True)
+            print("Dist: ", dist, flush=True)
             print("Perturb Dist is 0", flush=True)
-            exit(1)
+            return np.vstack([circ.params] * num * 2), local_cache
         # start_time = time.process_time()
         for op in circ.operations():
             if isinstance(op.gate, U3Gate):
@@ -315,7 +325,7 @@ class  JiggleEnsemblePass(BasePass):
         else:
             return circ_str
 
-    async def run(self, circuit: Circuit, data: PassData) -> None:
+    async def run_ensemble(self, circuit: Circuit, data: PassData) -> None:
         """Perform the pass's operation, see :class:`BasePass` for more."""
         _logger.debug('Converting single-qubit general gates to U3Gates.')
 
@@ -323,9 +333,10 @@ class  JiggleEnsemblePass(BasePass):
             return
 
         # Collected one solution from synthesis
-        print("Starting JIGGLE ENSEMBLE", flush=True)
 
         checkpoint_dir = data["checkpoint_dir"]
+        print("Checkpoint Dir: ", checkpoint_dir, flush=True)
+        print("Starting JIGGLE ENSEMBLE", flush=True)
         # checkpoint_dir = "/pscratch/sd/j/jkalloor/bqskit/block_checkpoints_final_paper_clifft/QITE_8_1_0_5.0"
         ensemble_file_name = os.path.join(checkpoint_dir, "ensemble_{ind}_{extra}.qasms")
         jiggle_file_name = os.path.join(checkpoint_dir, "ensemble_{ind}_jiggles_{extra}.npy")
@@ -410,3 +421,76 @@ class  JiggleEnsemblePass(BasePass):
 
         total_time = time.time() - start
         print("Total Time for Jiggling Params: ", total_time, flush=True)
+
+
+    async def run_scan_sols(self, circuit: Circuit, data: PassData) -> None:
+        """Perform the pass's operation, see :class:`BasePass` for more."""
+        _logger.debug('Converting single-qubit general gates to U3Gates.')
+
+        if circuit.num_params == 0 and self.count_t:
+            return
+
+        checkpoint_dir = data["checkpoint_dir"]
+        print("Checkpoint Dir: ", checkpoint_dir, flush=True)
+        print("Starting JIGGLE ENSEMBLE", flush=True)
+        # checkpoint_dir = "/pscratch/sd/j/jkalloor/bqskit/block_checkpoints_final_paper_clifft/QITE_8_1_0_5.0"
+        ensemble_file_name = os.path.join(checkpoint_dir, "ensemble_{ind}_{extra}.qasms")
+        jiggle_file_name = os.path.join(checkpoint_dir, "ensemble_{ind}_jiggles_{extra}.npy")
+        ens_file = ensemble_file_name.format(ind=0, extra=self.checkpoint_extra_str)
+        jiggle_file = jiggle_file_name.format(ind=0, extra=self.checkpoint_extra_str)
+        Path(ens_file).parent.mkdir(parents=True, exist_ok=True)
+        Path(jiggle_file).parent.mkdir(parents=True, exist_ok=True)
+        
+        scan_sols = data["scan_sols"]
+        circuits = [c for c, _ in scan_sols]
+        # Jiggle the rest of the ensembles
+
+        if self.use_calculated_error:
+            success_threshold = self.success_threshold * data.get("error_percentage_allocated", 1)
+        else:
+            success_threshold = self.success_threshold
+
+        circuit_strs = [lang.encode(c) for c in circuits]
+        mod_start = time.time()
+        circuit_strs = await get_runtime().map(JiggleEnsemblePass.get_final_circ, 
+                                            circuit_strs,
+                                            do_flood_circ=self.do_flood_circ,
+                                            success_threshold=success_threshold,
+                                            count_t=self.count_t)
+        mod_time = time.time() - mod_start
+        print("Modified Circuits", mod_time, flush=True)
+
+        '''Get a list of params and caches for each circuit'''
+        all_params_caches = await get_runtime().map(JiggleEnsemblePass.single_jiggle_ham, 
+                                        circuit_strs, 
+                                        target=data.target,
+                                        num = ceil(self.num_circs / len(circuit_strs)), 
+                                        success_threshold=success_threshold)
+        
+        all_params = [p[0] for p in all_params_caches]
+        all_caches = [p[1] for p in all_params_caches]
+        store_start = time.time()
+        store_ensemble_strs(circuit_strs, ens_file)
+        print("Finished Jiggling Ensemble", flush=True)
+        store_time = time.time() - store_start
+        store_params(all_params, jiggle_file)
+
+        cache_file = os.path.join(checkpoint_dir, f"ensemble_cache_0.pkl")
+        Path(cache_file).parent.mkdir(parents=True, exist_ok=True)
+        pickle.dump(all_caches, open(cache_file, "wb"))
+        print("Stored Ensemble", store_time, flush=True)
+        if self.pass_ensemble:
+            # Calculate ensemble
+            data['ensemble_circs'] = circuit_strs
+            data['ensemble_jiggles'] = all_params
+            data["ensemble_cache"] = all_caches
+
+    async def run(self, circuit: Circuit, data: PassData) -> None:
+        if self.use_ensemble:
+            await self.run_ensemble(circuit, data)
+        elif self.use_scan_sols:
+            # Run the jiggle pass on the circuit
+            print("Running Jiggle Ensemble Pass on Scan Sols", flush=True)
+            await self.run_scan_sols(circuit, data)
+        else:
+            pass

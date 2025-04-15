@@ -20,6 +20,11 @@ NUM_CIRCS_PER_PROB = 5000
 
 class GenerateProbabilityPass(BasePass):
     
+    def __init__(self, run_on_ensemble_0: bool = False) -> None:
+        self.run_on_ensemble_0 = run_on_ensemble_0
+
+
+
     @staticmethod
     def calculate_probs(ensemble: np.ndarray, target: np.ndarray) -> np.ndarray:
         """Calculate the probabilities for the ensemble"""
@@ -79,8 +84,15 @@ class GenerateProbabilityPass(BasePass):
 
         print("Running Generate Probability Pass", flush=True)
         checkpoint_dir = data["checkpoint_dir"]
-        final_ens_file = f"{checkpoint_dir}/ensemble_final.qasms"
-        final_ens_jiggle_file = f"{checkpoint_dir}/ensemble_final_jiggle.npy"
+        if self.run_on_ensemble_0:
+            final_ens_file = f"{checkpoint_dir}/ensemble_0_.qasms"
+            final_ens_jiggle_file = f"{checkpoint_dir}/ensemble_0_jiggles_.npy"
+            final_ens_cache_file = f"{checkpoint_dir}/ensemble_cache_0.pkl"
+        else:
+            final_ens_file = f"{checkpoint_dir}/ensemble_final.qasms"
+            final_ens_jiggle_file = f"{checkpoint_dir}/ensemble_final_jiggle.npy"
+            final_ens_cache_file = f"{checkpoint_dir}/ensemble_cache_final.pkl"
+
         probs_file = f"{checkpoint_dir}/ensemble_final_probs.npy"
 
 
@@ -95,7 +107,8 @@ class GenerateProbabilityPass(BasePass):
         else:
             try:
                 circ_params = load_jiggled_ensemble(final_ens_file, 
-                                                    final_ens_jiggle_file)
+                                                    final_ens_jiggle_file,
+                                                    final_ens_cache_file)
             except:
                 print("Corrupted ensemble files, skipping", checkpoint_dir, flush=True)
                 return
@@ -111,6 +124,8 @@ class GenerateProbabilityPass(BasePass):
             rand_inds_file = f"{checkpoint_dir}/ensemble_final_rand_inds.npy"
             np.save(rand_inds_file, rand_un_inds)
             ensemble = ensemble[rand_un_inds]
+
+        print("Running Probaility on ensemble of size: ", ensemble.shape[0], flush=True)
             
         all_probs = GenerateProbabilityPass.calculate_probs(ensemble, 
                                                             target=target)

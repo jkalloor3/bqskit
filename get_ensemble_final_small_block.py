@@ -14,11 +14,6 @@ from util import  LEAPSynthesisPass2, SecondLEAPSynthesisPass
 from util import CheckEnsembleQualityPass, FixGlobalPhasePass
 from util import GenerateProbabilityPass
 from util import CreateEnsemblePass
-class DoNothingPass(BasePass):
-
-    async def run(self, circuit: Circuit, data: PassData) -> None:
-        data['scan_sols'] = [(circuit.copy(), 0.0)]
-        pass
 
 good_instantiation_options = {
     'multistarts': 8,
@@ -30,16 +25,12 @@ good_instantiation_options = {
     'method': 'minimization'
 }
 
-base_checkpoint_dir_form = "/pscratch/sd/j/jkalloor/bqskit/block_checkpoints_final_paper{extra}"
+base_checkpoint_dir_form = "/pscratch/sd/j/jkalloor/bqskit/small_block_checkpoints_final_paper{extra}"
 NUM_UNIQUE_CIRCS = 250
 
-def get_ensemble_workflow(circ_name: str, tol: float, extra: str = "", 
-                          max_diversity: bool = False) -> WorkflowLike:
+def get_ensemble_workflow(circ_name: str, tol: float, extra: str = "") -> WorkflowLike:
     # workflow = gpu_workflow(tol, f"{circ_name}_{tol}_{timestep}")
-    if max_diversity:
-        ckpt_extra = extra + "_max_diversity"
-    else:
-        ckpt_extra = extra
+    ckpt_extra = extra
     base_checkpoint_dir = base_checkpoint_dir_form.format(extra=ckpt_extra)
     checkpoint_dir = f"{base_checkpoint_dir}/{circ_name}_{tol}/"
     err_thresh = 10 ** (-1 * tol)
@@ -54,49 +45,34 @@ def get_ensemble_workflow(circ_name: str, tol: float, extra: str = "",
     ]
     partitioner_passes = slow_partitioner_passes
     instantiation_options = good_instantiation_options
-
-    create_ensemble_pass = CreateEnsemblePass(
-            success_threshold=err_thresh, 
-            use_calculated_error=False, 
-            num_circs=10000,
-            num_random_ensembles=2,
-            solve_exact_dists=True,
-    )
     
-    if max_diversity:
-        synthesis_pass = DoNothingPass()
-    else:
-        synthesis_pass = LEAPSynthesisPass2(
-            store_partial_solutions=True,
-            success_threshold = extra_err_thresh,
-            partial_success_threshold=err_thresh,
-            max_layer_factor=1.01,
-            instantiate_options=instantiation_options,
-            max_layer=14,
-            max_psols=5,
-            maximize_diversity=max_diversity,
-        )
-    if max_diversity:
-        full_success_threshold = err_thresh ** 2
-        success_threshold = err_thresh ** 2
-    else:
-        full_success_threshold = err_thresh * 0.001
-        success_threshold = err_thresh
+    synthesis_pass = LEAPSynthesisPass2(
+        store_partial_solutions=True,
+        success_threshold = extra_err_thresh,
+        partial_success_threshold=err_thresh,
+        max_layer_factor=1.01,
+        instantiate_options=instantiation_options,
+        max_layer=14,
+        max_psols=5
+    )
+    full_success_threshold = err_thresh * 0.001
+    success_threshold = err_thresh
     second_synthesis_pass = SecondLEAPSynthesisPass(
         success_threshold = full_success_threshold,
         partial_success_threshold=success_threshold,
         max_layer_factor=1.01,
         instantiate_options=instantiation_options,
         max_layer=14,
-        max_psols=10,
-        maximize_diversity=max_diversity,
+        max_psols=10
     )
 
     jiggle_pass = JiggleEnsemblePass(success_threshold=err_thresh, 
-                                  num_circs=200, 
-                                  use_ensemble=True,
+                                  num_circs=500, 
+                                  use_scan_sols=True,
+                                  use_ensemble=False,
                                   use_calculated_error=False,
                                   jiggle_skew=0,
+                                  count_t=False,
                                   do_u3_perturbation=True,
                                   flood_circ=True)
 
@@ -107,13 +83,12 @@ def get_ensemble_workflow(circ_name: str, tol: float, extra: str = "",
             [
                 synthesis_pass,
                 second_synthesis_pass,
-            ],
-            skip_file="ensemble_0_.qasms"
+                jiggle_pass,
+                GenerateProbabilityPass(run_on_ensemble_0=True),
+                CheckEnsembleQualityPass(False),
+            ]
         ),
-        create_ensemble_pass,
-        jiggle_pass,
-        CleanupBlockFiles(),
-        CheckEnsembleQualityPass(False),
+        # CheckEnsembleQualityPass(False, sample_blocks = True),
     ]
     return leap_workflow
 
@@ -127,10 +102,7 @@ def check_if_finished(circ_name: str, tol: float, extra: str = "") -> tuple[bool
     ret_3 -> extra_str
     
     '''
-    if max_diversity:
-        ckpt_extra = extra + "_max_diversity"
-    else:
-        ckpt_extra = extra
+    ckpt_extra = extra
     base_checkpoint_dir = base_checkpoint_dir_form.format(extra=ckpt_extra)
     checkpoint_dir = os.path.join(base_checkpoint_dir, f"{circ_name}_{tol}")
     final_file = os.path.join(checkpoint_dir, "data.csv")
@@ -147,13 +119,10 @@ def check_if_finished(circ_name: str, tol: float, extra: str = "") -> tuple[bool
     extra_str = extra_str.split(".npy")[0]
     return False, True, extra_str
 
-def get_final_workflow(circ_name: str, tol: float, extra: str = "", max_diversity: bool = False) -> WorkflowLike | None:
+def get_final_workflow(circ_name: str, tol: float, extra: str = "") -> WorkflowLike | None:
     # Check if already finished
     # checkpoint_dir = f"{base_checkpoint_dir}/{circ_name}_{tol}/"
-    if max_diversity:
-        ckpt_extra = extra + "_max_diversity"
-    else:
-        ckpt_extra = extra
+    ckpt_extra = extra
     base_checkpoint_dir = base_checkpoint_dir_form.format(extra=ckpt_extra)
     checkpoint_dir = os.path.join(base_checkpoint_dir, f"{circ_name}_{tol}")
     print(f"Checkpoint Dir: {checkpoint_dir}", flush=True)
@@ -163,8 +132,7 @@ def get_final_workflow(circ_name: str, tol: float, extra: str = "", max_diversit
         return None
     if not jiggle_finished:
         print(f"Jiggle not finished {circ_name} {tol}", flush=True)
-        return get_ensemble_workflow(circ_name, tol, extra=extra, 
-                                     max_diversity=max_diversity)
+        return get_ensemble_workflow(circ_name, tol, extra=extra)
     print("Finding Final Ensemble for ", circ_name, flush=True)
     workflow = [
         CheckpointRestartPass(checkpoint_dir, 
@@ -174,7 +142,7 @@ def get_final_workflow(circ_name: str, tol: float, extra: str = "", max_diversit
     ]
     return workflow
 
-def get_shortest_circuits(circ_data: list[tuple[str, str, float]], extra: str = "", max_diversity: bool = False) -> list[Circuit]:
+def get_shortest_circuits(circ_data: list[tuple[str, str, float]], extra: str = "") -> list[Circuit]:
     '''
     Gets the corresponding workflow for the input
     
@@ -182,7 +150,7 @@ def get_shortest_circuits(circ_data: list[tuple[str, str, float]], extra: str = 
         circ_data: list of tuples of the form (circ_name, circ_file, tol)
     '''
     workflows = [
-        get_final_workflow(circ_name, tol, extra, max_diversity=max_diversity)
+        get_final_workflow(circ_name, tol, extra)
         for circ_name, _, tol in circ_data
     ]
 
@@ -226,17 +194,13 @@ def find_file(circ_name: str, block_num: str, extra="") -> tuple[str, str]:
 
 
 def get_circ_data(circ_name: str, block_num: str | int, 
-                  tol: float, extra: str = "",
-                  max_diversity: bool = False) -> list[tuple[str, str, float]]:
+                  tol: float, extra: str = "") -> list[tuple[str, str, float]]:
     # Categorize circs into different categories and run them
     if tol == -1.0:
         tols = [1.0, 2.0, 3.0, 4.0, 5.0, 6.0]
     else:
         tols = [tol]
-    if max_diversity:
-        ckpt_extra = extra + "_max_diversity"
-    else:
-        ckpt_extra = extra
+    ckpt_extra = extra
     
     base_checkpoint_dir = base_checkpoint_dir_form.format(extra=ckpt_extra)
     if circ_name == "all_probs":
@@ -289,8 +253,7 @@ if __name__ == '__main__':
     circ_name = argv[1]
     block_num = argv[2] if len(argv) > 2 else "all_blocks"
     tol = float(argv[3]) if len(argv) > 3 else -1.0
-    max_diversity = bool(int(argv[4])) if len(argv) > 4 else False
     extra = argv[5] if len(argv) > 5 else "_tket"
-    circ_data = get_circ_data(circ_name, block_num, tol, extra=extra, max_diversity=max_diversity)
+    circ_data = get_circ_data(circ_name, block_num, tol, extra=extra)
     print(circ_data)
-    get_shortest_circuits(circ_data, extra=extra, max_diversity=max_diversity)
+    get_shortest_circuits(circ_data, extra=extra)

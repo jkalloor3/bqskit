@@ -11,8 +11,7 @@ from bqskit.passes import CheckpointRestartPass
 from bqskit.passes import ForEachBlockPass, ScanPartitioner
 from util import JiggleEnsemblePass, CleanupBlockFiles
 from util import  LEAPSynthesisPass2, SecondLEAPSynthesisPass
-from util import CheckEnsembleQualityPass, FixGlobalPhasePass
-from util import GenerateProbabilityPass
+from util import CheckEnsembleQualityPass, AddHSCostPass
 from util import CreateEnsemblePass
 class DoNothingPass(BasePass):
 
@@ -30,7 +29,7 @@ good_instantiation_options = {
     'method': 'minimization'
 }
 
-base_checkpoint_dir_form = "/pscratch/sd/j/jkalloor/bqskit/block_checkpoints_final_paper{extra}"
+base_checkpoint_dir_form = "/pscratch/sd/j/jkalloor/bqskit/block_checkpoints_final_paper{extra}_4"
 NUM_UNIQUE_CIRCS = 250
 
 def get_ensemble_workflow(circ_name: str, tol: float, extra: str = "", 
@@ -45,7 +44,7 @@ def get_ensemble_workflow(circ_name: str, tol: float, extra: str = "",
     err_thresh = 10 ** (-1 * tol)
 
     extra_err_thresh = err_thresh * 0.01
-    small_block_size = 3
+    small_block_size = 4
     print("Checkpoint Dir: ", checkpoint_dir, flush=True)
     print("Error Threshold: ", err_thresh, flush=True)
 
@@ -112,7 +111,8 @@ def get_ensemble_workflow(circ_name: str, tol: float, extra: str = "",
         create_ensemble_pass,
         jiggle_pass,
         CleanupBlockFiles(),
-        CheckEnsembleQualityPass(False),
+        CheckEnsembleQualityPass(False, calculate_hs=True),
+        AddHSCostPass(),
     ]
     return leap_workflow
 
@@ -132,7 +132,7 @@ def check_if_finished(circ_name: str, tol: float, extra: str = "") -> tuple[bool
         ckpt_extra = extra
     base_checkpoint_dir = base_checkpoint_dir_form.format(extra=ckpt_extra)
     checkpoint_dir = os.path.join(base_checkpoint_dir, f"{circ_name}_{tol}")
-    final_file = os.path.join(checkpoint_dir, "data.csv")
+    final_file = os.path.join(checkpoint_dir, "data_hs.csv")
     if os.path.exists(final_file):
         return True, True, ""
     # Check if there is a jiggle .npy file in the checkpoint dir for at least 5
@@ -168,8 +168,7 @@ def get_final_workflow(circ_name: str, tol: float, extra: str = "", max_diversit
     workflow = [
         CheckpointRestartPass(checkpoint_dir, 
                                 default_passes=[]),
-        CheckEnsembleQualityPass(False),
-        # GenerateProbabilityPass()
+        AddHSCostPass()
     ]
     return workflow
 
