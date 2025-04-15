@@ -27,7 +27,7 @@ SMALL_BLOCK_SIZE = 3
 QUICK_SMALL_BLOCK_SIZE = 6
 
 def partition_workflow(circ_name: str, num_qudits: int = 8) -> list:
-    if num_qudits < 15:
+    if num_qudits < 18:
         partitioner_1 = ScanPartitioner(SMALL_BLOCK_SIZE)
         partitioner_2 = ScanPartitioner(LARGE_BLOCK_SIZE)
     else:
@@ -88,7 +88,7 @@ def sort_blocks(circ_name: str, good_output_folder, bad_output_folder):
 
 if __name__ == '__main__':
     compiler = Compiler(num_workers=1)
-    circ_types = ['qml_16']
+    circ_types = ['lgt_17']
     job_ids = []
     for circ_type in circ_types:
         circ_files = glob.glob(os.path.join(input_folder, f"{circ_type}.qasm"))

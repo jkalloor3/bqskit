@@ -32,7 +32,11 @@ def stack_padding(it: list[np.ndarray], vertical: bool = True) -> np.ndarray:
     if vertical:
         result = np.vstack(padded_arrays)
     else:
-        result = np.stack(padded_arrays)
+        try:
+            result = np.stack(padded_arrays)
+        except:
+            print([a.shape for a in padded_arrays], flush=True)
+            exit(1)
         print("Final Param Arr Shape: ", result.shape, flush=True)
     return result
 
@@ -122,6 +126,7 @@ def create_jiggled_unitaries(circ_params: tuple[Circuit, np.ndarray, dict],
         # Get the worker cache if exists
         try:
             w_cache = get_runtime().get_cache()
+            w_cache.clear()
             w_cache.update(cache)
         except:
             pass
@@ -167,7 +172,10 @@ def load_jiggled_ensemble(file_name: str, jiggle_file_name: str,
     print("Num Circs: ", len(circs), flush=True)
     params: np.ndarray = np.load(jiggle_file_name)
     print("Params Shape: ", params.shape, flush=True)
-    caches = pickle.load(open(cache_file_name, "rb"))
+    try:
+        caches = pickle.load(open(cache_file_name, "rb"))
+    except:
+        caches = [None] * len(circs)
     circ_params = list(zip(circs, params, caches))
     return circ_params
 

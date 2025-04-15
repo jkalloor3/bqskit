@@ -6,7 +6,7 @@ import glob
 import numpy as np
 
 # List of circuits
-circs = ["shor_12", "mult_16", "add17", "qae13", "qaoa10", "lgt_17", "draper_adder_12"]  # Replace with your list of circuits
+circs = ["shor_12", "qft_16", "draper_adder_12", "qae13", "qpe_14", "lgt_17"]  # Replace with your list of circuits
 
 
 MAX_DIVERSITY = False
@@ -118,13 +118,12 @@ if __name__ == '__main__':
         epss = np.unique(x)
         # print(epss)
         y_mean = []
-        # y_std = []
-        y_min = []
-        y_max = []
+        y_maxs= []
+        y_mins = []
         # print(x)
         for eps in epss:
             y_eps = y[x == eps]
-            # # print(eps, y_eps)
+            # print(eps, y_eps)
             # if len(y_eps) > 1:
             #     m, s = mean_std_without_outliers_zscore(y_eps, 1.5)
             #     # m = np.mean(y_eps)
@@ -137,14 +136,15 @@ if __name__ == '__main__':
             # s = max(s, 0.1)
             m = np.mean(y_eps)
             y_mean.append(m)
-            y_max.append(np.max(y_eps))
-            y_min.append(np.min(y_eps))
+            # y_std.append(s)
+            y_maxs.append(np.max(y_eps))
+            y_mins.append(np.min(y_eps))
         y_mean = np.array(y_mean)
         # y_std = np.array(y_std)
-        y_min = np.array(y_min)
-        y_max = np.array(y_max)
+        y_maxs = np.array(y_maxs)
+        y_mins = np.array(y_mins)
         # axs.errorbar(x, y_mean, yerr=y_std, label=circ)
-        axs.fill_between(epss, y_min, y_max, alpha=0.1)
+        axs.fill_between(epss, y_mins, y_maxs, alpha=0.1)
         axs.plot(epss, y_mean, label=circ)
 
 

@@ -7,6 +7,8 @@ from bqskit.compiler.basepass import BasePass
 from math import ceil
 from bqskit.ir.gates import CNOTGate, TGate, TdgGate
 from bqskit.ir import Circuit
+from bqskit.ir.circuit import Circuit, CircuitPoint, Operation, CircuitLocationLike
+from bqskit.passes import ForEachBlockPass
 from bqskit.ir.opt.cost.functions import GPNormalizedFrobeniusCostGenerator, GPNormalizedFrobeniusCostGenerator
 from bqskit.qis import UnitaryMatrix
 from bqskit.runtime import get_runtime
@@ -27,10 +29,12 @@ class CheckEnsembleQualityPass(BasePass):
                  csv_name: str = "",
                  checkpoint_extra_str: str = "",
                  calculate_hs: bool = False,
+                 sample_blocks: bool = False,
                  ) -> None:
         self.count_t = count_t
         self.csv_name = csv_name
         self.ensemble_names = ["Least CNOTs", "Medium CNOTs", "Valid CNOTs"]
+        self.sample_blocks = sample_blocks
         for i in range(10):
             # Default Names
             self.ensemble_names.append(f"Random Circuits #{i}")
@@ -75,6 +79,28 @@ class CheckEnsembleQualityPass(BasePass):
 
         return ensemble_data
 
+
+    # def sample_sub_ensembles(self, 
+    #                          circuit: Circuit, 
+    #                          data: PassData) -> list[list[tuple[Circuit, np.ndarray, Any]]]:
+        
+    #     # Get ensembles for each block
+    #     block_data = data[ForEachBlockPass.key]
+    #     pts: list[CircuitPoint] = []
+    #     all_data = []
+    #     for i, block in enumerate(block_data):
+    #         pts.append(block['point'])
+    #         pcircs = block['ensemble_circs']
+    #         pparams = block['ensemble_params']
+    #         pcaches = block['ensemble_caches']
+    #         all_data.append((pcircs, pparams, pcaches))
+
+    #     final_circs = []
+    #     final_params = []
+    #     for _ in ra
+
+
+
     async def run(self, circuit: Circuit, data: PassData) -> None:
         # Check Ensemble Quality and output it to a CSV
         print("Check Ensemble Quality Pass", flush=True)
@@ -109,16 +135,20 @@ class CheckEnsembleQualityPass(BasePass):
         best_ratio = float("inf")
         best_count = float("inf")
 
-        ensemble_files = []
-        if os.path.exists(jiggle_file):
-            while os.path.exists(jiggle_file):
-                ensemble_files.append((ens_file, jiggle_file, cache_file))
-                start_ens_ind += 1
-                ens_file = ensemble_file_name.format(ind=start_ens_ind, extra=self.checkpoint_extra_str)
-                jiggle_file = jiggle_file_name.format(ind=start_ens_ind, extra=self.checkpoint_extra_str)
-                cache_file = cache_file_name.format(ind=start_ens_ind, extra=self.checkpoint_extra_str)
+        if self.sample_blocks:
+            # ensemble = self.sample_sub_ensembles(circuit, data)
+            pass
+        else:
+            ensemble_files = []
+            if os.path.exists(jiggle_file):
+                while os.path.exists(jiggle_file):
+                    ensemble_files.append((ens_file, jiggle_file, cache_file))
+                    start_ens_ind += 1
+                    ens_file = ensemble_file_name.format(ind=start_ens_ind, extra=self.checkpoint_extra_str)
+                    jiggle_file = jiggle_file_name.format(ind=start_ens_ind, extra=self.checkpoint_extra_str)
+                    cache_file = cache_file_name.format(ind=start_ens_ind, extra=self.checkpoint_extra_str)
 
-        ensemble = data.get("ensemble", ensemble_files)
+            ensemble = data.get("ensemble", ensemble_files)
 
         start_ens_ind = 0
 
@@ -155,6 +185,8 @@ class CheckEnsembleQualityPass(BasePass):
             avg_hs = np.mean(hs_dists)
             print("Avg Dist: ", avg_dist, flush=True)
             csv_dict[start_ens_ind] = self.get_ensemble_data(avg_utry, avg_dist, target, None, avg_hs=avg_hs)
+            params = [params for _, params, _ in circ_params]
+            csv_dict[start_ens_ind]["Num Circs"] = len(circuits) * params[0].shape[0]
             csv_dict[start_ens_ind]["Ensemble Generation Method"] = self.ensemble_names[start_ens_ind]
             ratio = csv_dict[start_ens_ind]["Ratio"]
             print("Ratio: ", ratio, flush=True)
@@ -195,3 +227,103 @@ class CheckEnsembleQualityPass(BasePass):
                 shutil.copyfile(best_ensemble_file_name, final_ens_file)
                 shutil.copyfile(best_file_name, final_ens_jiggle_file)
 
+
+class AddHSCostPass(BasePass):
+
+    def __init__(self,
+                 csv_name: str = "",
+                 checkpoint_extra_str: str = "",
+                 ) -> None:
+        self.csv_name = csv_name
+        self.checkpoint_extra_str = checkpoint_extra_str
+
+    async def run(self, circuit: Circuit, data: PassData) -> None:
+        # Check Ensemble Quality and output it to a CSV
+        print("Check Ensemble Quality Pass", flush=True)
+        checkpoint_dir: str = data["checkpoint_dir"]
+
+        print("Checkpoint Dir: ", checkpoint_dir, flush=True)
+        print("Starting Add HS Cost Pass", flush=True)
+        
+        # Otherwise, reload from saved files - Would have done in 
+        ensemble_file_name = os.path.join(checkpoint_dir, "ensemble_{ind}_{extra}.qasms")
+        jiggle_file_name = os.path.join(checkpoint_dir, "ensemble_{ind}_jiggles_{extra}.npy")
+        cache_file_name = os.path.join(checkpoint_dir, "ensemble_{ind}_cache.pkl")
+        start_ens_ind = 0
+        ens_file = ensemble_file_name.format(ind=start_ens_ind, extra=self.checkpoint_extra_str)
+        jiggle_file = jiggle_file_name.format(ind=start_ens_ind, extra=self.checkpoint_extra_str)
+        cache_file = cache_file_name.format(ind=start_ens_ind, extra=self.checkpoint_extra_str)
+
+        target = data.target
+        csv_dict = {}
+
+        ensemble_files = []
+        if os.path.exists(jiggle_file):
+            while os.path.exists(jiggle_file):
+                ensemble_files.append((ens_file, jiggle_file, cache_file))
+                start_ens_ind += 1
+                ens_file = ensemble_file_name.format(ind=start_ens_ind, extra=self.checkpoint_extra_str)
+                jiggle_file = jiggle_file_name.format(ind=start_ens_ind, extra=self.checkpoint_extra_str)
+                cache_file = cache_file_name.format(ind=start_ens_ind, extra=self.checkpoint_extra_str)
+
+        ensemble = data.get("ensemble", ensemble_files)
+
+        print("Ensemble: ", ensemble, flush=True)
+
+        start_ens_ind = 0
+
+        # Read in data.csv
+        checkpoint_data_file: str = data["checkpoint_data_file"]
+        csv_file = checkpoint_data_file.replace(".data", f"{self.csv_name}.csv")
+        f = open(csv_file, "r")
+        reader = csv.DictReader(f)
+        csv_dict = [row for row in reader]
+        print("CSV Dict: ", csv_dict, flush=True)
+        out_csv_file = checkpoint_data_file.replace(".data", f"{self.csv_name}_hs.csv")
+        g = open(out_csv_file, "w", newline="")
+        field_names = csv_dict[0].keys()
+        field_names = list(field_names)
+        field_names.append("HS of Mean")
+        field_names.append("Avg. HS")
+        writer = csv.DictWriter(g, fieldnames=field_names)
+        writer.writeheader()
+
+        for ens_ind, ens in enumerate(ensemble):
+            if len(ens) > 0 and isinstance(ens[0], str):
+                ens_file, jiggle_file, cache_file = ens
+                circ_params = load_jiggled_ensemble(ens_file, jiggle_file, cache_file)
+            else:
+                circ_params = ens
+            circuits = [circ for circ, _, _ in circ_params]
+            if len(circuits) < 4:
+                # Make 10 copies of each circuit and split the params amongst them
+                new_circ_params = []
+                for circ, params, cache in circ_params:
+                    param_chunks = np.array_split(params, 10)
+                    for i in range(10):
+                        if param_chunks[i].shape[0] > 5000:
+                            # pick a random subset of 5000
+                            rand_inds = np.random.choice(param_chunks[i].shape[0], 5000, replace=False)
+                            param_chunks[i] = param_chunks[i][rand_inds]
+                        new_circ_params.append((circ, param_chunks[i], cache))
+
+                circ_params = new_circ_params
+            avg_utries_dists = await get_runtime().map(create_avg_utry, 
+                                                        circ_params, 
+                                                        target=data.target, 
+                                                        add_cost=True)
+            
+            utries = [avg_utry for avg_utry, _, _ in avg_utries_dists]
+            hs_dists = [hs for _, _, hs in avg_utries_dists]
+            avg_utry = np.mean(utries, axis=0)
+            avg_hs = np.mean(hs_dists)
+            avg_utry = np.mean(utries, axis=0)
+            mean_hs = hs_cost(avg_utry, target)
+            row = csv_dict[ens_ind]
+            row["HS of Mean"] = mean_hs
+            row["Avg. HS"] = avg_hs
+            writer.writerow(row)
+
+        f.close()
+        g.close()
+        print("Finished writing HS data to CSV", flush=True)

@@ -21,8 +21,33 @@ class HamiltonianNoisePass(BasePass):
         self.use_calculated_error = use_calculated_error
         self.kmeans = kmeans
 
+    @staticmethod
+    def get_perturbation_bases(num_qudits: int,
+                                epsilon: float, 
+                                pauli_length: int = 2) -> list[UnitaryMatrix]:
+        perturbations = []
+        # Limit to length 2 paulis
+        pauli_strings = PauliMatrices.get_pauli_strings(num_qudits, 
+                                                        pauli_length)
+        
+        pauli_strings.remove("I" * num_qudits)
+        print("Num Pauli Strings: ", len(pauli_strings), flush=True)
+        paulis = [PauliMatrices.from_string(pauli) for 
+                        pauli in pauli_strings]
+        for pauli in paulis:
+            H_1 = epsilon * pauli
+            H_2 = -epsilon * pauli
+            eiH_1 = sp.linalg.expm(1j * H_1)
+            eiH_2 = sp.linalg.expm(1j * H_2)
+            perturbations.append(UnitaryMatrix(eiH_1))
+            perturbations.append(UnitaryMatrix(eiH_2))
+        return perturbations
 
-    def get_perturbations(num_qudits: int, epsilon: float, ens_size: int) -> list[UnitaryMatrix]:
+
+
+    @staticmethod
+    def get_perturbations(num_qudits: int, epsilon: float, 
+                          ens_size: int) -> list[UnitaryMatrix]:
         perturbations = []
         # Limit to length 2 paulis
         pauli_strings = PauliMatrices.get_pauli_strings(num_qudits, 2)
