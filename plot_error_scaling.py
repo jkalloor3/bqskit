@@ -6,7 +6,7 @@ import glob
 import numpy as np
 
 # List of circuits
-circs = ["shor_12", "qft_8", "adder9", "qae13"]  # Replace with your list of circuits
+circs = ["shor_12", "mult_16", "add17", "qae13", "qaoa10", "lgt_17", "draper_adder_12"]  # Replace with your list of circuits
 
 
 MAX_DIVERSITY = False
@@ -17,7 +17,7 @@ else:
     max_diversity_str = ""
 
 # Directory containing block checkpoints
-block_checkpoints_dir = f'block_checkpoints_final_paper_tket{max_diversity_str}'
+block_checkpoints_dir = f'block_checkpoints_final_paper_clifft_tket{max_diversity_str}'
 block_form = "{circ}_*/data.csv"
 
 def mean_std_without_outliers_zscore(data, threshold=3):
@@ -73,11 +73,11 @@ def read_data_from_folders(circuits, checkpoints_dir):
                                     eps = 0.8
                 if final_ratio < 1:
                     final_ratio = 1
-                if final_ratio > 10 and MAX_DIVERSITY:
-                    # Remove folder
-                    print(f"Removing folder {folder} due to high final ratio")
-                    os.system(f"rm -rf {os.path.join(checkpoints_dir, folder)}")
-                    continue
+                # if final_ratio > 10 and MAX_DIVERSITY:
+                #     # Remove folder
+                #     print(f"Removing folder {folder} due to high final ratio")
+                #     os.system(f"rm -rf {os.path.join(checkpoints_dir, folder)}")
+                #     continue
                 # print("Final ratio:", final_ratio)
                 # print(block_num, tol, eps, final_ratio)
                 all_data[circ][block_num][eps] = final_ratio
@@ -118,27 +118,33 @@ if __name__ == '__main__':
         epss = np.unique(x)
         # print(epss)
         y_mean = []
-        y_std = []
+        # y_std = []
+        y_min = []
+        y_max = []
         # print(x)
         for eps in epss:
             y_eps = y[x == eps]
-            # print(eps, y_eps)
-            if len(y_eps) > 1:
-                m, s = mean_std_without_outliers_zscore(y_eps, 1.5)
-                # m = np.mean(y_eps)
-                # s = np.std(y_eps)
-                print(circ, eps, m , s, y_eps)
-            else:
-                m = y_eps[0]
-                s = 0
+            # # print(eps, y_eps)
+            # if len(y_eps) > 1:
+            #     m, s = mean_std_without_outliers_zscore(y_eps, 1.5)
+            #     # m = np.mean(y_eps)
+            #     # s = np.std(y_eps)
+            #     print(circ, eps, m , s, y_eps)
+            # else:
+            #     m = y_eps[0]
+            #     s = 0
 
-            s = max(s, 0.1)
+            # s = max(s, 0.1)
+            m = np.mean(y_eps)
             y_mean.append(m)
-            y_std.append(s)
+            y_max.append(np.max(y_eps))
+            y_min.append(np.min(y_eps))
         y_mean = np.array(y_mean)
-        y_std = np.array(y_std)
+        # y_std = np.array(y_std)
+        y_min = np.array(y_min)
+        y_max = np.array(y_max)
         # axs.errorbar(x, y_mean, yerr=y_std, label=circ)
-        axs.fill_between(epss, y_mean - y_std, y_mean + y_std, alpha=0.1)
+        axs.fill_between(epss, y_min, y_max, alpha=0.1)
         axs.plot(epss, y_mean, label=circ)
 
 
@@ -153,5 +159,5 @@ if __name__ == '__main__':
     # Save the figure
     # plt.tight_layout()
     fig.tight_layout()
-    fig.savefig(f"error_scaling_nisq{max_diversity_str}.png", dpi=300)
+    fig.savefig(f"error_scaling_cliff_t{max_diversity_str}.png", dpi=300)
         # axs.plot(x, y, label=circ)

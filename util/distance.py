@@ -91,10 +91,11 @@ def hs_cost(utry: UnitaryMatrix, target: UnitaryMatrix):
     Calculates the Hilbert-Schmidt distance between two unitaries
     '''
     # This is Frob(u - v)
-    inner = np.abs(np.trace(utry @ target.conj().T)) ** 2
+    inner = np.abs(np.einsum("ij,ij->", utry, target.conj())) ** 2
     N = utry.shape[0]
     inner /= (N ** 2)
-    cost = np.sqrt(1 - inner)
+    inner = max(1 - inner, 0)
+    cost = np.sqrt(inner)
     return cost
 
 
@@ -152,8 +153,8 @@ def get_corrected_un(utry: UnitaryMatrix, target: UnitaryMatrix):
     Calculates the normalized Frobenius distance between two unitaries
     '''
     gp_correction = target.get_target_correction_factor(utry)
-    utry = utry * gp_correction
-    return utry
+    new_utry = utry * gp_correction
+    return new_utry
 
 def normalized_frob_dist_func(target: UnitaryMatrix) -> callable:
     def calc_frob_dist(mat: np.ndarray) -> np.float64:
