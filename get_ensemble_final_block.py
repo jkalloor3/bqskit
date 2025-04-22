@@ -228,7 +228,7 @@ def get_circ_data(circ_name: str, block_num: str | int,
                   max_diversity: bool = False) -> list[tuple[str, str, float]]:
     # Categorize circs into different categories and run them
     if tol == -1.0:
-        tols = [3.0, 4.0, 5.0]
+        tols = [1.0, 2.0, 3.0, 4.0, 5.0, 6.0]
     else:
         tols = [tol]
     if max_diversity:

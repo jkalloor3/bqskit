@@ -287,7 +287,7 @@ class  JiggleEnsemblePass(BasePass):
         return new_circ_str
 
     @staticmethod
-    async def get_final_circ(circ_str: str, do_flood_circ: bool, success_threshold: float, count_t: bool) -> Circuit:
+    async def get_final_circ(circ_str: str, do_flood_circ: bool, success_threshold: float, count_t: bool) -> str:
         """Get the final circuit to be used for jiggling"""
         # assert than each circ has U3 gates after their CNOTs
         if do_flood_circ:
@@ -297,6 +297,8 @@ class  JiggleEnsemblePass(BasePass):
         assert not (do_flood_circ and count_t)
 
         num_params = count_params_str(circ_str)
+        if num_params == 0:
+            return circ_str
         int_thresh = ceil(-1 * np.log10(success_threshold / num_params)) + 1
         # empty_circ = Circuit(1)
         if count_t:

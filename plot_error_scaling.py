@@ -17,7 +17,7 @@ else:
     max_diversity_str = ""
 
 # Directory containing block checkpoints
-block_checkpoints_dir = f'block_checkpoints_final_paper_tket{max_diversity_str}'
+block_checkpoints_dir = f'block_checkpoints_final_paper_clifft_tket{max_diversity_str}'
 block_form = "{circ}_*/data.csv"
 
 def mean_std_without_outliers_zscore(data, threshold=3):
@@ -73,11 +73,11 @@ def read_data_from_folders(circuits, checkpoints_dir):
                                     eps = 0.8
                 if final_ratio < 1:
                     final_ratio = 1
-                if final_ratio > 10 and MAX_DIVERSITY:
-                    # Remove folder
-                    print(f"Removing folder {folder} due to high final ratio")
-                    os.system(f"rm -rf {os.path.join(checkpoints_dir, folder)}")
-                    continue
+                # if final_ratio > 10 and MAX_DIVERSITY:
+                #     # Remove folder
+                #     print(f"Removing folder {folder} due to high final ratio")
+                #     os.system(f"rm -rf {os.path.join(checkpoints_dir, folder)}")
+                #     continue
                 # print("Final ratio:", final_ratio)
                 # print(block_num, tol, eps, final_ratio)
                 all_data[circ][block_num][eps] = final_ratio
@@ -159,5 +159,5 @@ if __name__ == '__main__':
     # Save the figure
     # plt.tight_layout()
     fig.tight_layout()
-    fig.savefig(f"error_scaling_nisq{max_diversity_str}.png", dpi=300)
+    fig.savefig(f"error_scaling_cliff_t{max_diversity_str}.png", dpi=300)
         # axs.plot(x, y, label=circ)

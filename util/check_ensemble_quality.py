@@ -206,10 +206,11 @@ class CheckEnsembleQualityPass(BasePass):
                     best_ratio = ratio
                     best_count = count
                     print("FOUND BETTER ENSEMBLE", flush=True)
-                # Keep Looking
-                start_ens_ind += 1
-                ens_file = ensemble_file_name.format(ind=start_ens_ind, extra=self.checkpoint_extra_str)
-                jiggle_file = jiggle_file_name.format(ind=start_ens_ind, extra=self.checkpoint_extra_str)
+            # Keep Looking
+            start_ens_ind += 1
+            ens_file = ensemble_file_name.format(ind=start_ens_ind, extra=self.checkpoint_extra_str)
+            jiggle_file = jiggle_file_name.format(ind=start_ens_ind, extra=self.checkpoint_extra_str)
+            cache_file = cache_file_name.format(ind=start_ens_ind, extra=self.checkpoint_extra_str)
         
         if "checkpoint_dir" in data:
             checkpoint_data_file: str = data["checkpoint_data_file"]

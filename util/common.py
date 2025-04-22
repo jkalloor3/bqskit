@@ -79,6 +79,7 @@ def create_avg_utry(circ_params: tuple[Circuit, np.ndarray, dict],
     if cache is not None:
         # Get the worker cache
         w_cache = get_runtime().get_cache()
+        w_cache.clear()
         w_cache.update(cache)
 
     avg_utry = np.zeros_like(circ.get_unitary())

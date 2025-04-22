@@ -126,18 +126,23 @@ def get_rz_perturbations(starting_angle,
     az = get_az(Vt_U_1)
 
     float_epsilon = 10.0 ** (-epsilon)
-    delta = 2 * np.arcsin(float_epsilon)
+    delta = np.arcsin(float_epsilon)
     if az < 0:
         delta = -delta
 
-    U_2_t_str = get_approx_t_str(starting_angle + delta, epsilon)
-    U_2_t_circ = gridsynth_gates_to_cir(U_2_t_str)
-    U_2 = U_2_t_circ.get_unitary()
+    Bz = az
+    while az == Bz:
+        # Keep modifying delta until we get different gridsynth approximations
+        delta = delta * 2
+        U_2_t_str = get_approx_t_str(starting_angle + delta, epsilon)
+        U_2_t_circ = gridsynth_gates_to_cir(U_2_t_str)
+        U_2 = U_2_t_circ.get_unitary()
+
+        Vt_U_2 = V.conj().T @ U_2
+        Bz = get_az(Vt_U_2)
+
     final_params.append([starting_angle + delta, epsilon, 0])
     final_strs.append(U_2_t_str)
-
-    Vt_U_2 = V.conj().T @ U_2
-    Bz = get_az(Vt_U_2)
 
     q = az / (az - Bz)
 

@@ -152,7 +152,7 @@ def get_ensemble_workflow(circ_name: str, tol: float, extra: str = "",
         create_ensemble_pass,
         jiggle_pass,
         CleanupBlockFiles(),
-        CheckEnsembleQualityPass(True)
+        CheckEnsembleQualityPass(True, calculate_hs = True)
     ]
     return leap_workflow
 
@@ -179,8 +179,7 @@ def get_final_workflow(circ_name: str, tol: float, extra: str = "", max_diversit
     workflow = [
         CheckpointRestartPass(checkpoint_dir, 
                                 default_passes=[]),
-        CheckEnsembleQualityPass(True),
-        # GenerateProbabilityPass()
+        CheckEnsembleQualityPass(True, calculate_hs = True)
     ]
     return workflow
 
