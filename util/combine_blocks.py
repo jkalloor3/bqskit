@@ -6,7 +6,7 @@ from bqskit.ir import Circuit
 from .common import load_block, get_block_names, get_circ_names
 from .counter import (load_avg_ensemble_counts_est, load_avg_ensemble_counts_full, get_circ_counts)
 
-base_dir = "/home/jkalloor/bqskit"
+base_dir = "/pscratch/sd/j/jkalloor/bqskit"
 nisq_checkpoint_dir = f"{base_dir}/block_checkpoints_final_paper"
 clifft_checkpoint_dir = f"{base_dir}/block_checkpoints_final_paper_clifft"
 
@@ -204,6 +204,128 @@ def get_circ_data(circ_name: str, err_threshold: float, use_base: bool = True,
         return [(block_nums[i], d) for i, d in enumerate(final_data)], min_count, tket_count
     else:
         return [(block_nums[i], d) for i, d in enumerate(final_data)], min_count
+
+
+def get_circ_data_basic(circ_name: str, 
+                        err_threshold: float, 
+                        count_rz: bool = False, 
+                        count_t: bool = False) -> tuple[int, int]:
+    '''
+    Takes in a circ name and total error, and calculates the 
+    best combination of blocks that minimizes the count
+    while being below the error threshold
+    '''
+    if count_t or count_rz:
+        checkpoint_dir_1 = clifft_checkpoint_dir
+        checkpoint_dir_2 = clifft_checkpoint_dir +"_tket"
+    else:
+        checkpoint_dir_1 = nisq_checkpoint_dir
+        checkpoint_dir_2 = nisq_checkpoint_dir + "_tket"
+
+    # print("Checkpoint dir: ", checkpoint_dir)
+    # print("Circ name: ", circ_name)
+    folder_files = glob.glob(os.path.join(checkpoint_dir_1, f"{circ_name}_*"))
+    folder_files_2 = glob.glob(os.path.join(checkpoint_dir_2, f"{circ_name}_*"))
+    # folder_files_3 = glob.glob(os.path.join(checkpoint_dir_3, f"{circ_name}_*"))
+    folder_files_3 = []
+    folder_files = folder_files + folder_files_2 + folder_files_3
+
+    block_names = get_block_names(circ_name)
+    block_data = {}
+    # print("Precision: ", precision)
+    circ_files_orig = [load_block(circ_name, block_name) for block_name in block_names]
+    circ_files_tket = [load_block(circ_name, block_name, extra="_tket") for block_name in block_names]
+    # print("Circ files tket: ", circ_files_tket)
+    orig_counts = get_circ_counts(circ_files_orig, 
+                                        count_t=count_t, 
+                                        count_rz=count_rz, 
+                                        target_error=err_threshold)
+    tket_counts = get_circ_counts(circ_files_tket, 
+                                        count_t=count_t, 
+                                        count_rz=count_rz, 
+                                        target_error=err_threshold)
+
+    for i, block_name in enumerate(block_names):
+        orig_count = orig_counts[i]
+        tket_count = tket_counts[i]
+        if orig_count < tket_count:
+            block_data[block_name] = orig_count
+        else:
+            block_data[block_name] = tket_count
+
+    orig_count = sum(block_data.values())
+
+    num_qubits = {}
+    for block_name in block_names:
+        if os.path.exists(circ_files_orig[i]):
+            circ = Circuit.from_file(circ_files_orig[i])
+            num_qubits[block_name] = circ.num_qudits
+        elif os.path.exists(circ_files_tket[i]):
+            circ = Circuit.from_file(circ_files_tket[i])
+            num_qubits[block_name] = circ.num_qudits
+        else:
+            num_qubits[block_name] = 8
+
+    for folder_name in folder_files:
+        tol = float(folder_name.split('_')[-1])
+        block_num = folder_name.split('_')[-2]
+        # Read CSV
+        csv_files = glob.glob(os.path.join(folder_name, f"*.csv"))
+        params_file = None
+        cache_file = None
+        if len(csv_files) == 0:
+            # Just pick ensemble 0
+            ensemble_file = glob.glob(os.path.join(folder_name, f"ensemble_0_.qasms"))
+            if len(ensemble_file) == 0:
+                continue
+            ensemble_file = ensemble_file[0]
+            if count_t:
+                # Get params file as well
+                params_file = glob.glob(os.path.join(folder_name, f"ensemble_0_jiggles_.npy"))
+                cache_file = glob.glob(os.path.join(folder_name, f"ensemble_0_cache.pkl"))
+                if len(params_file) == 0 or len(cache_file) == 0:
+                    continue
+                params_file = params_file[0]
+                cache_file = cache_file[0]
+            dim = 2 ** num_qubits[block_num]
+            if tol > 4.0:
+                add_factor = 100 # Bad scaling for smaller errors
+            else:
+                add_factor = 1
+            final_threshold = (10 ** (-2 * tol)) * frob_factor(dim) * add_factor
+        else:
+            csv_file = csv_files[0]
+            ensemble_file = glob.glob(os.path.join(folder_name, f"ensemble_final.qasms"))[0]
+            if count_t:
+                # Get params file as well
+                params_file = glob.glob(os.path.join(folder_name, f"ensemble_final_jiggle.npy"))[0]
+                cache_file = glob.glob(os.path.join(folder_name, f"ensemble_final_cache.pkl"))[0]
+            reader = csv.DictReader(open(csv_file, 'r'))
+            final_threshold = (10 ** -tol)
+            for row in reader:
+                if "Norm. Bias" in row:  # Check if the column value is not empty
+                    final_threshold = min(final_threshold, float(row["Norm. Bias"]))
+
+
+        if final_threshold < err_threshold:
+            avg_count = load_avg_ensemble_counts_est(ensemble_file, params_file, 
+                                                        err_threshold, 
+                                                        count_t=count_t, 
+                                                        count_rz=count_rz)
+            if avg_count < block_data[block_num]:
+                avg_count_actual = load_avg_ensemble_counts_full(ensemble_file, 
+                                                                 params_file,
+                                                                 cache_file,
+                                                                err_threshold, 
+                                                                count_t=count_t, 
+                                                                count_rz=count_rz)
+                block_data[block_num] = avg_count_actual
+
+    # Sum block_data values
+    total_count = sum(block_data.values())
+    return orig_count, total_count
+
+
 
 def get_counts(circ_name: str, err_threshold: float, cliff_t: bool = False) -> float:
     return get_circ_data(circ_name, err_threshold, cliff_t)[1]
