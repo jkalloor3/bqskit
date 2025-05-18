@@ -51,6 +51,7 @@ from bqskit.ir.gates.constant.yy import YYGate
 from bqskit.ir.gates.constant.z import ZGate
 from bqskit.ir.gates.constant.zz import ZZGate
 from bqskit.ir.gates.measure import MeasurementPlaceholder
+from bqskit.ir.gates.parameterized.qft import QFTGate
 from bqskit.ir.gates.parameterized.ccp import CCPGate
 from bqskit.ir.gates.parameterized.cp import CPGate
 from bqskit.ir.gates.parameterized.crx import CRXGate
@@ -186,6 +187,9 @@ class OPENQASMVisitor(Visitor):
     def fill_gate_defs(self) -> None:
         """Prefills gate definitions with built-in gates."""
         # Parameterized Gates
+        # TODO: QFT is fixed for 5 qubits for now
+        self.gate_defs['qft'] = GateDef('qft', 0, 5, QFTGate(5, False, -1))
+        self.gate_defs['iqft'] = GateDef('qft', 0, 5, QFTGate(5, False, -1))
         self.gate_defs['p'] = GateDef('p', 1, 1, RZGate())
         self.gate_defs['cp'] = GateDef('cp', 1, 2, CPGate())
         self.gate_defs['ccp'] = GateDef('ccp', 1, 3, CCPGate())
