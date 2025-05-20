@@ -10,8 +10,9 @@ from typing import Tuple
 from bqskit.compiler.basepass import BasePass
 from bqskit.compiler.machine import MachineModel
 from bqskit.compiler.passdata import PassData
-from bqskit.ir.circuit import Circuit
+from bqskit.ir.circuit import Circuit, CircuitPoint
 from bqskit.ir.gates.circuitgate import CircuitGate
+from bqskit.ir.gates.parameterized import QFTGate
 from bqskit.ir.operation import Operation
 from bqskit.ir.region import CircuitRegion
 from bqskit.utils.typing import is_integer
@@ -42,6 +43,7 @@ class ScanPartitioner(BasePass):
     def __init__(
         self,
         block_size: int,
+        ignore_qft: bool = False,
         scoring_fn: Callable[[list[Operation]], float] = default_scoring_fn,
     ) -> None:
         """
@@ -72,11 +74,10 @@ class ScanPartitioner(BasePass):
 
         self.block_size = block_size
         self.scoring_fn = scoring_fn
+        self.ignore_qft = ignore_qft
 
     async def run(self, circuit: Circuit, data: PassData) -> None:
         """Perform the pass's operation, see :class:`BasePass` for more."""
-
-        print("Running ScanPartitioner on block size: ", self.block_size, flush=True)
 
         if self.block_size >= circuit.num_qudits:
             _logger.warning(
@@ -106,6 +107,15 @@ class ScanPartitioner(BasePass):
             0 if q in qudit_group_map.keys() else num_cycles
             for q in range(circuit.num_qudits)
         ]
+        # start divider at first operation for each qudit
+        for qudit in range(circuit.num_qudits):
+            start_cycle = 0
+            while start_cycle < num_cycles:
+                pt = CircuitPoint(start_cycle, qudit)
+                if not circuit.is_point_idle(pt):
+                    break
+                start_cycle += 1
+            divider[qudit] = start_cycle
 
         # Stores the selected blocks as regions
         regions: list[CircuitRegion] = []
@@ -133,9 +143,20 @@ class ScanPartitioner(BasePass):
                     qudit_group, circuit, starting_cycles,
                 )
                 potential_blocks[qudit_group] = new_block
-
-        # Form the partitioned circuit
         circuit.become(self.fold_circuit(circuit, regions))
+        if self.ignore_qft:
+            # Now unfold all QFTs back
+            qft_pts = []
+            for cycle, op in circuit.operations_with_cycles():
+                assert isinstance(op.gate, CircuitGate)
+                block_circ = op.gate._circuit
+                if block_circ.num_operations == 1:
+                    op_gate = block_circ[0][0].gate
+                    if isinstance(op_gate, QFTGate):
+                        pt = CircuitPoint(cycle, op.location[0])
+                        qft_pts.append(pt)
+                        
+            circuit.batch_unfold(qft_pts)
 
     def fold_circuit(
         self,
@@ -151,6 +172,9 @@ class ScanPartitioner(BasePass):
                 for point in region.points
                 if not circuit.is_point_idle(point)
             })
+            if len(ops_and_cycles) == 0:
+                print("Empty region: ", region)
+                continue
             ops_and_cycles.sort(key=lambda x: (x[0], *x[1].location))
             ops = [op for _, op in ops_and_cycles]
             qudits = list(set(sum((tuple(op.location) for op in ops), ())))
@@ -211,6 +235,14 @@ class ScanPartitioner(BasePass):
         for q in active_qudits:
             if q not in qudits_in_groups:
                 qudit_groups.append((q,))
+
+        # Add groups for qudits used in QFTs, TODO: Fix
+        qft_groups = set()
+        for op in circuit.operations():
+            if isinstance(op.gate, QFTGate):
+                qft_groups.add(tuple(op.location))
+        for qft_group in qft_groups:
+            qudit_groups.append(qft_group)
 
         return qudit_groups
 
@@ -283,15 +315,64 @@ class ScanPartitioner(BasePass):
         op_list: list[Operation] = []
 
         iter = self.FastRegionIterator(qudit_group, starting_cycles, circuit)
+        # TODO: FIX! Hardcoded for 5-qubit QFT
+        is_qft_group = (len(qudit_group) == 5)
+
+        # Add a special case for QFT
+        if is_qft_group:
+            # If all of the in_qudits are in the QFT, then check if next op
+            # is a QFT
+            for cycle, next_op in iter:
+                if isinstance(next_op.gate, QFTGate):
+                    # Check if location is the same
+                    group_qudits = set(qudit_group)
+                    qft_qudits = set(next_op.location)
+                    if group_qudits == qft_qudits:
+                        all_qudits_ready = all(s >= cycle for s in starting_cycles)
+                        if all_qudits_ready:
+                            # All qudits are in the QFT
+                            stopped_cycles = [cycle + 1] * len(qudit_group)
+                            # Now check if we are at end of the circuit
+                            for i, q in enumerate(qudit_group):
+                                while stopped_cycles[i] < circuit.num_cycles:
+                                    pt = CircuitPoint(
+                                        stopped_cycles[i], q,
+                                    )
+                                    if circuit.is_point_idle(pt):
+                                        stopped_cycles[i] += 1
+                                    else:
+                                        break
+                            return (
+                                CircuitRegion({
+                                    q: (cycle, stopped_cycles[i] - 1)
+                                    for i, q in enumerate(qudit_group)
+                                }),
+                                [next_op],
+                            )
+                        else:
+                            # Not ready yet
+                            return (
+                                CircuitRegion({}),
+                                [],
+                            )
+            # Return empty region if not found
+            return (CircuitRegion({}), [])
+
         for cycle, op in iter:
             if any(op_q not in in_qudits for op_q in op.location):
                 if op.num_qudits > self.block_size:
-                    raise RuntimeError(
-                        'ScanPartitioner cannot handle gates larger than'
-                        ' block size. You may want to use the '
-                        'QuickPartitioner.',
-                    )
-
+                    if self.ignore_qft and isinstance(op.gate, QFTGate):
+                        # Stop qubits at QFT gates
+                        for op_q in op.location:
+                            if op_q in in_qudits:
+                                stopped_cycles[op_q] = cycle
+                                in_qudits.remove(op_q)
+                    else:
+                        raise RuntimeError(
+                            'ScanPartitioner cannot handle gates larger than'
+                            ' block size. You may want to use the '
+                            'QuickPartitioner.',
+                        )
                 for op_q in op.location:
                     if op_q in in_qudits:
                         stopped_cycles[op_q] = cycle
