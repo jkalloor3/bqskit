@@ -99,7 +99,7 @@ if __name__ == '__main__':
 
     Path(output_dir).mkdir(parents=True, exist_ok=True)
 
-    unoptimized_circ_files = glob.glob(f"{input_dir}/qml_16_*.qasm")
+    unoptimized_circ_files = glob.glob(f"{input_dir}/lgt*.qasm")
 
     print(unoptimized_circ_files, flush=True)
 

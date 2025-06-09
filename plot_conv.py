@@ -1,6 +1,8 @@
 import os
-import json
+import glob
+import pickle
 import sys
+from pathlib import Path
 import numpy as np
 import pandas as pd
 from util import load_block
@@ -9,120 +11,74 @@ from bqskit.ir.gates import CNOTGate
 
 import matplotlib.pyplot as plt
 
-two_q_err =1e-2
-one_q_err =1e-4
-csv_folder = "/pscratch/sd/j/jkalloor/bqskit/block_checkpoints_nisq_0/{circ_name}_{block_num}_{tol}_250/data_try1.csv"
-noisy_file_name = "{circ_name}_conv_data_noisy_{two_q_err:.1e}_{one_q_err:.1e}/{circ_name}_{block_num}_{tol}_250.json"
-sim_file_name = "no_qp_conv_data/{circ_name}_{block_num}_{tol}_250.json"
+ens_sizes = [1, 5, 10, 40, 160, 640, 2560]
 colors = ["blue", "orange", "green", "red", "purple", "cyan", "pink", "brown"]
 
-def plot_data(circ_name, block_num, tol) -> None:
-    fig, axes = plt.subplots(1, 1, figsize=(7, 6))
+def plot_data(circ_name, tol: float, do_blocks: bool = False) -> None:
+    if do_blocks:
+        data_path_form = f"block_ensemble_sim_{circ_name}/*/{tol}"
+    else:
+        data_path_form = f"ensemble_sim_{circ_name}_{tol}"
+
+    # All data folders
+    data_paths = glob.glob(data_path_form)
+    if len(data_paths) == 0:
+        print(f"No data found for {circ_name} with tol {tol}")
+        return
     
-    data = get_json_data(circ_name, block_num, tol, noisy=False)
 
-    x_axis = data["Ensemble Size"]
+    fig, axes = plt.subplots(1, 1, figsize=(7, 6))
 
-    # headers = ["TVD", "Trace Distance", "Frobenius Distance"]
-    headers = ["Frobenius Distance"]
-    for i, header in enumerate(headers):
-        if header not in data:
-            print(f"Header {header} not found in data")
-            continue
-        y = data[header]
-        header_2 = header + " w/ QP"
-        if header_2 in data:
-            y_qp = data[header_2]
-            axes.plot(x_axis, y_qp, label=header_2, color=colors[i], linestyle='--')
-            axes.plot(x_axis, y_qp, 'o', color=colors[i])
-        axes.plot(x_axis, y, label=headers[i], color=colors[i])
-        axes.plot(x_axis, y, '*', color=colors[i])
+    # Plot every block separately
+    for data_path in data_paths:
+        if do_blocks:
+            label = circ_name + "Block: " + data_path.split("/")[-2]
+        else:
+            label = circ_name
+        # Check if all.pickle exists
+        if os.path.exists(f"{data_path}/all_data.pickle"):
+            data = pickle.load(open(f"{data_path}/all_data.pickle", "rb"))
+            # Just plot frobenius cost
+            frob_data = data["frob"]
+            x_data = ens_sizes
+        else:
+            print("Getting data from individual files")
+            frob_data = []
+            x_data = []
+            for ens_size in ens_sizes:
+                # Check if the data file exists
+                data_file = f"{data_path}/{ens_size}.pickle"
+                if os.path.exists(data_file):
+                    data = pickle.load(open(data_file, "rb"))
+                    print(data["frob"])
+                    frob_data.append(data["frob"])
+                    x_data.append(ens_size)
+                else:
+                    continue
+        frob_data = np.array(frob_data)
+        print("Frob Data Shape: ", frob_data.shape)
+        avg_frob_data = np.mean(frob_data, axis=1)
+        print(f"Avg frob data: {avg_frob_data}")
+        print(f"X data: {x_data}")
+        axes.plot(x_data, avg_frob_data, label=label)
+        # Plot the fill as well
+        max_frob_data = np.max(frob_data, axis=1)
+        min_frob_data = np.min(frob_data, axis=1)
+        print(f"Max frob data: {max_frob_data}")
+        print(f"Min frob data: {min_frob_data}")
+        axes.fill_between(x_data, min_frob_data, max_frob_data, alpha=0.2)
 
     axes.set_yscale('log')
     axes.legend(fontsize=11)
     axes.tick_params(axis='both', which='both', labelsize=14)
-    fig.savefig(f'conv_{circ_name}_{block_num}_sim.png', bbox_inches='tight')
-
-
-def get_json_data(circ_name: str, block_num: str | int, tol: float, noisy: bool = True) -> tuple[dict, pd.DataFrame]:
-    if noisy:
-        file_name = noisy_file_name
-    else:
-        file_name = sim_file_name
-    file_path = file_name.format(tol=tol, circ_name=circ_name, 
-                                     block_num=block_num, one_q_err=one_q_err, 
-                                     two_q_err=two_q_err)
-    print(file_path)
-    if not os.path.exists(file_path):
-        if tol - int(tol) > 0.0001:
-            return None, None
-        # Try with integer
-        file_path = file_name.format(tol=int(tol), circ_name=circ_name, 
-                                    block_num=block_num, one_q_err=one_q_err, 
-                                    two_q_err=two_q_err)
-        if not os.path.exists(file_path):
-            # If this doesn't exist, skip this tol
-            return None, None
-    data = json.load(open(file_path, 'r'))
-
-    # csv_path = csv_folder.format(tol=tol, circ_name=circ_name, block_num=block_num)
-    # print(csv_path)
-    # if os.path.exists(csv_path):
-    #     df = pd.read_csv(csv_path)
-    # else:
-    #     csv_path = csv_folder.format(tol=int(tol), circ_name=circ_name, block_num=block_num)
-    #     if not os.path.exists(csv_path):
-    #         return None, None
-    #     df = pd.read_csv(csv_path)
-    return data #, df
-
-
-def plot_noisy_data(data: dict, axes: plt.Axes, label: str= "", color: str = ["blue"]):
-    x_axis = data["Ensemble Size"]
-    headers = ["TVD"]
-    for i, header in enumerate(headers):
-        if header not in data:
-            print(f"Header {header} not found in data")
-            continue
-        y = data[header]
-        axes.plot(x_axis, y, label=label, color=color)
-        axes.plot(x_axis, y, '*', color=color)
-
-def plot_all_noisy_data(circ_name, block_num) -> None:
-    fig, ax = plt.subplots(1, 1, figsize=(7, 6))
-
-    # Set y to log scale
-    orig_circ = Circuit.from_file(load_block(circ_name, block_num))
-    orig_cnots = orig_circ.count(CNOTGate())
-
-    original_tvd = 0
-
-    tols = [0.0, 0.5, 1.0, 1.5, 2.0, 3.0, 4.0, 5.0]
-
-    for i, tol in enumerate(tols):
-        data, df = get_json_data(circ_name, block_num, tol)
-        if data is None or df is None:
-            continue
-
-        if "Original Circuit TVD" in data:
-            original_tvd = data["Original Circuit TVD"]
-
-        # Covert to scientific notation to 3 sig figs
-        e1 = max(df['Norm. Epsilon'])
-        cnot_count = round(min(df['Avg. CNOT Count']))
-        plot_noisy_data(data, ax, label=f"Norm. Distance={e1:.1e}, {cnot_count} CNOTs", color=colors[i])
-    
-    xmin, xmax = ax.get_xlim()
-    ax.hlines([original_tvd], color="black", label=f"Exact Circuit TVD, {orig_cnots} CNOTs", xmin=xmin, xmax=xmax, linestyles="--")
-
-    ax.set_yscale('log')
-    ax.legend(fontsize=11)
-    ax.tick_params(axis='both', which='both', labelsize=14)
-    fig.savefig(f'conv_{circ_name}_{block_num}_noisy.png', bbox_inches='tight')
-
+    img_path = f'ensemble_conv_images/conv_{circ_name}_{tol}_sim.png'
+    Path(img_path).parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(f'ensemble_conv_images/conv_{circ_name}_{tol}_sim.png', bbox_inches='tight')
 
 if __name__ == '__main__':
     circ_name = sys.argv[1]
-    block_num = sys.argv[2]
+    tol = float(sys.argv[2])
+    # block_num = sys.argv[2]
+    do_blocks = True
     # plot_all_noisy_data(circ_name, block_num)
-    plot_data(circ_name, block_num, 3.5)
+    plot_data(circ_name, tol, do_blocks)

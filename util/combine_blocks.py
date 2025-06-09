@@ -4,7 +4,8 @@ import csv
 import numpy as np
 from bqskit.ir import Circuit
 from .common import load_block, get_block_names, get_circ_names
-from .counter import (load_avg_ensemble_counts_est, load_avg_ensemble_counts_full, get_circ_counts)
+from .counter import (load_avg_ensemble_counts_est, 
+                      load_avg_ensemble_counts_full, get_circ_counts)
 
 base_dir = "/pscratch/sd/j/jkalloor/bqskit"
 nisq_checkpoint_dir = f"{base_dir}/block_checkpoints_final_paper"
@@ -63,7 +64,6 @@ def get_circ_data(circ_name: str, err_threshold: float, use_base: bool = True,
     # print("Circ name: ", circ_name)
     folder_files = glob.glob(os.path.join(checkpoint_dir_1, f"{circ_name}_*"))
     folder_files_2 = glob.glob(os.path.join(checkpoint_dir_2, f"{circ_name}_*"))
-    # folder_files_3 = glob.glob(os.path.join(checkpoint_dir_3, f"{circ_name}_*"))
     folder_files_3 = []
     folder_files = folder_files + folder_files_2 + folder_files_3
 
@@ -82,9 +82,6 @@ def get_circ_data(circ_name: str, err_threshold: float, use_base: bool = True,
                                             count_t=count_t, 
                                             count_rz=count_rz, 
                                             target_error=err_threshold)
-        
-        # print("Orig counts: ", orig_counts)
-        # print("TKET counts: ", tket_counts)
 
     for i, block_name in enumerate(block_names):
         block_counts = []
@@ -119,6 +116,7 @@ def get_circ_data(circ_name: str, err_threshold: float, use_base: bool = True,
         extra = ""
         if "_tket" in folder_name:
             extra = "_tket"
+        params_file = None
 
         if len(csv_files) == 0:
             # Just pick ensemble 0
@@ -126,7 +124,6 @@ def get_circ_data(circ_name: str, err_threshold: float, use_base: bool = True,
             if len(ensemble_file) == 0:
                 continue
             ensemble_file = ensemble_file[0]
-            params_file = None
             if count_t:
                 # Get params file as well
                 params_file = glob.glob(os.path.join(folder_name, f"ensemble_0_jiggles_.npy"))
@@ -195,7 +192,7 @@ def get_circ_data(circ_name: str, err_threshold: float, use_base: bool = True,
 
     # Get actual count
     # print("Doing Final Count")
-    actual_counts = [load_avg_ensemble_counts_full(e_file, p_file, err_threshold,  
+    actual_counts = [load_avg_ensemble_counts_full(e_file, p_file, None, err_threshold,  
                             count_t=count_t, count_rz=count_rz) for e_file, p_file in final_files]
     min_count = np.sum(actual_counts)
 
@@ -209,7 +206,8 @@ def get_circ_data(circ_name: str, err_threshold: float, use_base: bool = True,
 def get_circ_data_basic(circ_name: str, 
                         err_threshold: float, 
                         count_rz: bool = False, 
-                        count_t: bool = False) -> tuple[int, int]:
+                        count_t: bool = False,
+                        return_dict: bool = False) -> tuple[int, int]:
     '''
     Takes in a circ name and total error, and calculates the 
     best combination of blocks that minimizes the count
@@ -322,6 +320,9 @@ def get_circ_data_basic(circ_name: str,
                 block_data[block_num] = avg_count_actual
 
     # Sum block_data values
+    if return_dict:
+        return_block_data = {}
+        # return block_data
     total_count = sum(block_data.values())
     return orig_count, total_count
 

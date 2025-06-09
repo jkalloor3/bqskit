@@ -31,8 +31,6 @@ circ_markers = {
     "qft_16": "h",
 }
 
-
-
 def get_all_circuit_data(circ: Circuit) -> list[int]:
     num_cnots = circ.count(CNOTGate())
     num_u3s = circ.num_operations - num_cnots

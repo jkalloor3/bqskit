@@ -75,9 +75,6 @@ class ScanPartitioner(BasePass):
 
     async def run(self, circuit: Circuit, data: PassData) -> None:
         """Perform the pass's operation, see :class:`BasePass` for more."""
-
-        print("Running ScanPartitioner on block size: ", self.block_size, flush=True)
-
         if self.block_size >= circuit.num_qudits:
             _logger.warning(
                 'Configured block size is greater than circuit size; '

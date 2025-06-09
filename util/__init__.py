@@ -31,3 +31,4 @@ from .combine_blocks import *
 from .counter import *
 from .collect_angles import CollectAnglesPass
 from .convex_hull_finder import ConvexHullFinderPass
+from ..sim_lib.sim_lib import *

@@ -15,7 +15,7 @@ from bqskit.runtime import get_runtime
 
 from .gg import gg_gate_def, GridSynthGate
 
-base_bqskit_dir = "."
+base_bqskit_dir = "/pscratch/sd/j/jkalloor/bqskit"
 good_block_dir = f"{base_bqskit_dir}/good_blocks"
 bad_block_dir = f"{base_bqskit_dir}/bad_blocks"
 base_checkpoint_dir = f"{base_bqskit_dir}/block_checkpoints_final_paper"
@@ -193,9 +193,9 @@ def store_ensemble_strs(qasms: list[str], file_name: str):
 def load_ensemble(file_name: str) -> list[Circuit]:
     with open(file_name, "r") as f:
         qasms = f.read().split("\nBREAK\n")
-    print("SPlit String", flush=True)
+    # print("SPlit String", flush=True)
     circs = [qlang.decode(qasm, gate_defs = [("gg", gg_gate_def)]) for qasm in qasms]
-    print("Decoded", flush=True)
+    # print("Decoded", flush=True)
     return circs
 
 def load_ensemble_strs(file_name: str) -> list[Circuit]:
