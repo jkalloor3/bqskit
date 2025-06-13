@@ -1,12 +1,12 @@
 from bqskit.ir.circuit import Circuit
 from bqskit.ir.gates import CNOTGate, CircuitGate, U3Gate, GlobalPhaseGate
-from bqskit.qis import UnitaryMatrix
-from sys import argv
+from bqskit.qis import UnitaryMatrix, StateVector
 import glob
 import numpy as np
 import os
 import pickle
-import cudaq
+
+from qiskit.quantum_info import SparsePauliOp
 
 from pathlib import Path
 from multiprocessing.shared_memory import SharedMemory
@@ -15,81 +15,125 @@ from bqskit.compiler import Compiler
 from bqskit.passes import ScanPartitioner
 from bqskit.ir.point import CircuitPoint
 
+from bqskit.runtime import get_runtime
 from bqskit.ir.lang.qasm2 import OPENQASM2Language
 
 import csv
 
 from common.io import (load_block, load_ensemble, get_block_names)
+from util import get_density_matrix, get_average_density_matrix
+import multiprocessing as mp
 
-from sim_lib.sim_lib import (run_cudaq_nisq_circs)
-from mpi4py import MPI
+def get_obs(ham: np.ndarray, dm: np.ndarray) -> float:
+    '''
+    Get the observable for the output density matrix.
+    '''
+    return np.real(np.trace(ham @ dm))
+
+def fix_phase(circuit: Circuit, target: UnitaryMatrix) -> float:
+    unitary = circuit.get_unitary()
+    global_phase_correction = target.get_target_correction_factor(unitary)
+    # old_cost = frob_cost.calc_cost(circuit, target)
+    circuit.append_gate(GlobalPhaseGate(1, 
+                                        global_phase=global_phase_correction),
+                                        (0,))
 
 shots = 2 ** 15   
 checkpoint_folder = "/pscratch/sd/j/jkalloor/bqskit/small_block_checkpoints_tket/{circ_name}"
-checkpoint_folder_2 = "/pscratch/sd/j/jkalloor/bqskit/small_block_checkpoints_tket_2/{circ_name}"
 
 lang = OPENQASM2Language()
 
-base_bqskit_dir = "/pscratch/sd/j/jkalloor/bqskit"
-
-def load_circuit(circ_name: str, timestep: int = 0, opt: bool = False) -> Circuit:
-    if "JW" in circ_name:
-        circ_name = f"JWCircs/{circ_name}.qasm"
-
-    if opt:
-        extra = "_tket"
-    else:
-        extra = ""
+def generate_lgt_hamiltonian(num_qubits: int, x: int) -> np.ndarray:
+    '''
+    H = He (electric) + Hb (magnetic)
     
-    file_name = f"{base_bqskit_dir}/ensemble_benchmarks{extra}/{circ_name}.qasm"
-    if not os.path.exists(file_name):
-        file_name = f"{base_bqskit_dir}/qce23_qfactor_benchmarks{extra}/{circ_name}.qasm"
+    He = 3/8 * (3N + 1) - 9/8 * (Z_0 + Z_{N-1}) - 3/4 (sum_{n=1}^{N-2} Z_n)
+    - 3/8 * (sum_{n=0}^{N-2} Z_n Z_{n+1})
 
-    if not os.path.exists(file_name):
-        file_name = f"{base_bqskit_dir}/ensemble_benchmarks_new{extra}/{circ_name}.qasm"
+    Hb = -x/2 (3 + Z_1)(X_0) - x/2 (3 + Z_{N-2})(X_{N-1}) - 
+    [x/8 (sum_{n=1}^{N-2} (9 + 3Z_{n-1} + 3Z_{n+1} + Z_{n-1}Z_{n+1}))(X_n))
+    '''
 
-    return Circuit.from_file(filename=file_name)
+    # Generate He
+    Z_0_term = ("Z" + "I" * (num_qubits - 1), -9/8)
+    Z_N1_term = ("I" * (num_qubits - 1) + "Z", -9/8)
+    He = [
+        Z_0_term,
+        Z_N1_term
+    ]
 
-def generate_full_circuits(block_circs: dict[str, list[Circuit]], 
-                           block_names: list,
-                           ens_size: int,
-                           partitioned_circ: Circuit) -> list[Circuit]:
-    all_circs = []
-    for i in range(ens_size):
-        circ = partitioned_circ.copy()
-        ind = 0
-        for cycle, op in circ.operations_with_cycles():
-            pt = CircuitPoint(cycle, op.location[0])
-            block_name = block_names[ind]
-            ind += 1
-            assert isinstance(op.gate, CircuitGate)
-            assert isinstance(op.gate._circuit, Circuit)
-            if block_name in block_circs:
-                new_block_circ = block_circs[block_name][i]
-                assert isinstance(new_block_circ, Circuit)
-                assert op.gate._circuit.num_qudits == new_block_circ.num_qudits
-                circ.replace_with_circuit(pt, new_block_circ, 
-                                          as_circuit_gate=True)
-        circ.unfold_all()
-        all_circs.append(circ)
-    return all_circs
+    for i in range(1, num_qubits - 1):
+        Z_n_term = ("I" * i + "Z" + "I" * (num_qubits - i - 1), -3/4)
+        He.append(Z_n_term)
+    
+    for i in range(num_qubits - 1):
+        Z_nZ_n1_term = ("I" * i + "ZZ" + "I" * (num_qubits - i - 2), -3/8)
+        He.append(Z_nZ_n1_term)
+
+    # Generate Hb
+    X_0_term = ("X" + "I" * (num_qubits - 1), -x/2 * (3))
+    X_0_Z_1_term = ("XZ" + "I" * (num_qubits - 2), -x/2)
+    X_N1_term = ("I" * (num_qubits - 1) + "X", -x/2 * (3))
+    X_N1_Z_N2_term = ("I" * (num_qubits - 2) + "ZX", -x/2)
+    Hb = [
+        X_0_term,
+        X_0_Z_1_term,
+        X_N1_term,
+        X_N1_Z_N2_term
+    ]
+
+    for i in range(1, num_qubits - 1):
+        X_term = ("I" * i + "X" + "I" * (num_qubits - i - 1), -9*x/8)
+        # 3Z_{n-1}*X_n
+        ZX_term = ("I" * (i - 1) + "ZX" + "I" * (num_qubits - i - 1), -3*x/8)
+        # 3Z_{n+1}*X_n
+        XZ_term = ("I" * i + "XZ" + "I" * (num_qubits - i - 2), -3*x/8)
+        ZXZ_term = ("I" * (i - 1) + "ZXZ" + "I" * (num_qubits - i - 2), -x/8)
+
+        Hb.extend(
+            [
+                X_term,
+                ZX_term,
+                XZ_term,
+                ZXZ_term
+            ]
+        )
+
+    op = SparsePauliOp.from_list(He + Hb)
+    return op.to_matrix()
+
+def generate_tfim_hamiltonian(num_qubits: int) -> np.ndarray:
+    '''
+    1D Transverse Field Ising Model Hamiltonian:
+    H = J * sum_{i=0}^{N-2} Z_i Z_{i+1} + mu_x * sum_{i=0}^{N-1} X_i
+    '''
+
+    Jz = 1.0
+    mu_x = 1.0
+
+    He = []
+    Hb = []
+
+    for i in range(num_qubits - 1):
+        Z_term = ("I" * i + "ZZ" + "I" * (num_qubits - i - 2), Jz)
+        He.append(Z_term)
+
+    for i in range(num_qubits):
+        X_term = ("I" * i + "X" + "I" * (num_qubits - i - 1), mu_x)
+        Hb.append(X_term)
+
+    op = SparsePauliOp.from_list(He + Hb)
+    return op.to_matrix()
+
 # Get partitioned circuits for all 8-qubit blocks
-def partition_circs(compiler: Compiler, block_num: str, 
-                     sub_block_names: list[str]) -> tuple[dict[str, Circuit], Circuit]:
+def partition_circs(compiler: Compiler,
+                    circ_name, block_num: str) -> tuple[dict[str, Circuit], Circuit]:
     workflow = [
         ScanPartitioner(4)
     ]
     circ_file = load_block(circ_name, block_num, extra="_tket")
     circ = Circuit.from_file(circ_file)
-    out_circ = compiler.compile(circ, workflow=workflow)
-    assert out_circ.num_operations == len(sub_block_names)
-    sub_block_circs = {}
-    for i, op in enumerate(out_circ.operations()):
-        assert isinstance(op.gate, CircuitGate)
-        block_name = sub_block_names[i]
-        sub_block_circs[block_name] = op.gate._circuit
-
-    return sub_block_circs, out_circ
+    return compiler.submit(circ, workflow=workflow)
         
 def get_sub_block_nums(circ_name: str, block_num: str) -> list[str]:
     sub_block_path = f"{checkpoint_folder.format(circ_name=circ_name)}_{block_num}_*/block_*.data"
@@ -107,37 +151,22 @@ def get_sub_block_count(circ_name: str,
                         max_tol: float) -> tuple[bool, int]:
     qasm_file = f"{checkpoint_folder.format(circ_name=circ_name)}_{large_block_num}_{max_tol}/block_{small_block_num}/ensemble_final.qasms"
     csv_file = f"{checkpoint_folder.format(circ_name=circ_name)}_{large_block_num}_{max_tol}/block_{small_block_num}.csv"
-
-    qasm_file_2 = f"{checkpoint_folder_2.format(circ_name=circ_name)}_{large_block_num}_{max_tol}/block_{small_block_num}/ensemble_final.qasms"
-    csv_file_2 = f"{checkpoint_folder_2.format(circ_name=circ_name)}_{large_block_num}_{max_tol}/block_{small_block_num}.csv"
     # Read CSV file, if the ratio is < 20 then we can read counts
-    if not os.path.exists(csv_file) and not os.path.exists(csv_file_2):
-        print(f"CSV file does not exist: {csv_file}", flush=True)
+    if not os.path.exists(csv_file):
         return False, 0
-    
-    def get_min_ratio(csv_file: str) -> float:
-        with open(csv_file, 'r') as f:
-            reader = csv.DictReader(f)
-            min_ratio = float("inf")
-            final_frob_cost = float("inf")
-            for row in reader:
-                if "Ratio" in row:  # Check if the column value is not empty
-                    min_ratio = min(min_ratio, float(row["Ratio"]))
-                    final_frob_cost = min(final_frob_cost, float(row["Norm. Bias"]))
-    
-        return min_ratio
-    
-    min_ratio = get_min_ratio(csv_file)
+    with open(csv_file, 'r') as f:
+        reader = csv.DictReader(f)
+        min_ratio = float("inf")
+        final_frob_cost = float("inf")
+        for row in reader:
+            if "Ratio" in row:  # Check if the column value is not empty
+                min_ratio = min(min_ratio, float(row["Ratio"]))
+                final_frob_cost = min(final_frob_cost, float(row["Norm. Bias"]))
         
     # Now we need to check if the ratio is less than 20
-    if min_ratio > 10:
-        min_ratio_2 = get_min_ratio(csv_file_2)
-        if min_ratio_2 > 10:
-            return False, 0
-        else:
-            qasm_file = qasm_file_2
-            csv_file = csv_file_2
-            min_ratio = min_ratio_2
+    if min_ratio > 5:
+        print("Final Ratio is too high: ", min_ratio, flush=True)
+        return False, 0
     # Now we need to get the avg. number of CNOTs
     qasm_str = open(qasm_file, 'r').read()
     count = qasm_str.count("cx ")
@@ -154,7 +183,7 @@ def get_random_circs(num_circs: int,
     '''
     Generate a random circuit from the block_circs.
     '''
-    assert len(block_circs) > 1
+    assert len(block_circs) >= 1
     # Now pick a random param from the shared memory
     shm_array = np.ndarray(param_shape, dtype=np.float64, buffer=shm.buf)
 
@@ -178,20 +207,6 @@ def get_random_circs(num_circs: int,
         circ_strs.append(rand_circ)
 
     return circ_strs
-
-def aggregate_counts(counts: list[dict[str, int]]) -> dict[str, int]:
-    '''
-    Aggregate the counts from multiple circuits.
-    '''
-    aggregated_counts = {}
-    for count in counts:
-        for key, value in count.items():
-            if key in aggregated_counts:
-                aggregated_counts[key] += value
-            else:
-                aggregated_counts[key] = value
-    return aggregated_counts
-
 
 def generate_small_block_circuits(block_circs: dict[str, list[Circuit]], 
                            block_names: list,
@@ -244,13 +259,12 @@ def generate_small_block_circuits(block_circs: dict[str, list[Circuit]],
 def create_shared_memory(circ_name: str,
                          large_block_num: str, 
                          small_block_num: str, 
-                         max_tol: float,
-                         mpi_rank: int = 0) -> tuple[SharedMemory, tuple[int]]:
+                         max_tol: float) -> tuple[SharedMemory, tuple[int]]:
     # Get params_file
     params_file = f"{checkpoint_folder.format(circ_name=circ_name)}_{large_block_num}_{max_tol}/block_{small_block_num}/ensemble_final_jiggle.npy"
     params: np.ndarray = np.load(params_file)
     param_shape = params.shape
-    shm_name = f"{circ_name}_{large_block_num}_{small_block_num}_{max_tol}_{mpi_rank}"
+    shm_name = f"{circ_name}_{large_block_num}_{small_block_num}_{max_tol}"
     float_size = np.dtype(np.float64).itemsize
     try:
         shm = SharedMemory(name=shm_name, 
@@ -270,39 +284,22 @@ def create_shared_memory(circ_name: str,
     shm_array[:] = params
     return shm, param_shape
 
-
-if __name__ == '__main__':
-    cudaq.set_target('nvidia')
+def run_circ_tol(circ_name: str, max_tol: float, use_qp: bool = False,
+                 partitioned_data: dict[str, tuple] = {}) -> None:
     np.set_printoptions(precision=2, threshold=np.inf, linewidth=np.inf)
-    circ_name = argv[1]
-    max_tol = float(argv[2]) if len(argv) > 1 else 1.0
-    use_noise = bool(int(argv[3])) if len(argv) > 2 else True
-    use_qp = bool(int(argv[4])) if len(argv) > 3 else False
-
-    partitioned_circ = pickle.load(open(f"/pscratch/sd/j/jkalloor/bqskit/partitioned_circs/{circ_name}.pickle", "rb"))
-
-    if use_noise:
-        COHERENT_ERROR = 1e-4  # Coherent error to add to the circuits
-    else:
-        COHERENT_ERROR = 0.0
-
-    # large_block_num = argv[2] if len(argv) > 2 else "00"
     large_block_nums = get_block_names(circ_name, extra="_tket")
 
-    # full_circ = Circuit.from_file(f"ensemble_benchmarks/{circ_name}.qasm")
-    full_circ = load_circuit(circ_name, opt=False)
-
-    num_processes = MPI.COMM_WORLD.Get_size()
-    mpi_rank = MPI.COMM_WORLD.Get_rank()
+    full_circ = Circuit.from_file(f"/pscratch/sd/j/jkalloor/bqskit/ensemble_benchmarks/{circ_name}.qasm")
+    full_circ.remove_all_measurements()
+    if circ_name.startswith("lgt_"):
+        ham = generate_lgt_hamiltonian(full_circ.num_qudits, 2)
+    else:
+        ham = generate_tfim_hamiltonian(full_circ.num_qudits)
 
     full_circ.unfold_all()
-    target_obs_mag = run_cudaq_nisq_circs([full_circ],
-                                          ham=None,
-                                          add_coherent_error=COHERENT_ERROR,
-                                           use_noise=use_noise, 
-                                           num_shots=shots,
-                                           average=False)
-    print("Target Results: ", target_obs_mag)
+    target_dm = get_density_matrix(full_circ.get_statevector(StateVector.zero(full_circ.num_qudits)).numpy)
+    target_obs_mag = get_obs(ham, target_dm)
+    print("Target Observable Magnitude: ", target_obs_mag)
     print("Large Block Names: ", large_block_nums)
 
     # Create shared memories
@@ -312,45 +309,29 @@ if __name__ == '__main__':
     all_block_probs: dict[str, dict[str, np.ndarray]] = {}
     all_partitioned_circs: dict[str, Circuit] = {}
     initial_circs: dict[str, Circuit]= {}
-    if mpi_rank == 0:
-        compiler = Compiler(num_workers=1)
     for large_block_num in large_block_nums:
         block_circs = {}
         block_probs = {}
-        block_inds = {}
         initial_circ_file = load_block(circ_name, large_block_num, extra="_tket")
         initial_circ: Circuit = Circuit.from_file(initial_circ_file)
         print("Original CX Count: ", initial_circ.count(CNOTGate()))
         initial_circs[large_block_num] = initial_circ
         small_block_nums = get_sub_block_nums(circ_name, large_block_num)
-        if mpi_rank == 0:
-            sub_block_circs, small_partitioned_circ = partition_circs(compiler, 
-                                                        large_block_num, 
-                                                        small_block_nums)
-        else:
-            sub_block_circs = None
-            small_partitioned_circ = None
-        small_partitioned_circ: Circuit = MPI.COMM_WORLD.bcast(small_partitioned_circ, root=0)
-        sub_block_circs: list[Circuit] = MPI.COMM_WORLD.bcast(sub_block_circs, root=0)
+        sub_block_circs, small_partitioned_circ = partitioned_data[large_block_num]
         all_partitioned_circs[large_block_num] = small_partitioned_circ
-        # block_targets = {}
-
-        # Get sub-block data
-        counts = []
         shms: dict[str, SharedMemory] = {}
         param_shapes = {}
         for small_block_num in small_block_nums:
             use, count = get_sub_block_count(circ_name, large_block_num, 
                                             small_block_num, max_tol)
             orig_count = sub_block_circs[small_block_num].count(CNOTGate())
-            if (count >= orig_count and use_noise) or (not use):
+            if (not use):
                 # We need to use the original count
                 continue
             else:
                 shm, param_shape = create_shared_memory(circ_name, large_block_num,
                                                             small_block_num, 
-                                                            max_tol,
-                                                            mpi_rank=mpi_rank)
+                                                            max_tol)
                 shms[small_block_num] = shm
                 param_shapes[small_block_num] = param_shape
 
@@ -381,33 +362,20 @@ if __name__ == '__main__':
 
         all_block_circs[large_block_num] = block_circs
         all_block_probs[large_block_num] = block_probs
-        print("Waiting at Barrier, ", mpi_rank, flush=True)
-        MPI.COMM_WORLD.barrier()
 
-    if mpi_rank == 0:
-        compiler.close()
-        print("Closed Compiler", flush=True)
     ensemble_sizes = [1, 4, 8, 64, 128, 256, 512, 1024]
-    num_trials = 8
+    num_trials = 10
     for ens_size in ensemble_sizes:
-        if use_noise:
-            noise_text = "_noisy"
+        if use_qp:
+            noise_text = "_qp"
         else:
             noise_text = ""
 
-        if use_qp:
-            noise_text += "_qp"
-
-        ens_data_file = f"ensemble_costs_{circ_name}_obs{noise_text}_mpi/{max_tol}_{ens_size}_{mpi_rank}.pkl"
+        ens_data_file = f"ensemble_dms_{circ_name}_obs{noise_text}_mpi/{max_tol}_{ens_size}.pkl"
         if os.path.exists(ens_data_file):
             print("Already exists: ", ens_data_file)
             continue
-        large_block_circs = {}
-        for large_block_num in large_block_nums:
-            if large_block_num not in shms:
-                print("Skipping large block: ", large_block_num, 
-                      " as no small blocks are available")
-                continue
+        for large_block_num, shms in all_shms.items():
             # print("Running LGT for block: ", large_block_num, max_tol)
             initial_circ: Circuit = initial_circs[large_block_num]
             # initial_circ = load_circuit(circ_name, opt=False)
@@ -429,37 +397,90 @@ if __name__ == '__main__':
                                         param_shapes,
                                         shms=shms,
                                         pcirc=small_partitioned_circ,
-                                        ens_size=(ens_size * num_trials // num_processes),
+                                        ens_size=ens_size * num_trials,
                                         use_qp=use_qp)
             
-            large_block_circs[large_block_num] = ens
             print(f"Generated {len(ens)} circuits for large block {large_block_num}", flush=True)
+            svs = [c.get_statevector(StateVector.zero(full_circ.num_qudits)).numpy for c in ens]
+            sub_svs = [svs[i * ens_size:(i + 1) * ens_size] for i in range(num_trials)]
+            sub_dms = [get_average_density_matrix(sub_sv) for sub_sv in sub_svs]
+            ensemble_mags = [get_obs(ham, sub_dm) for sub_dm in sub_dms]
+            print(f"Ensemble Magnitudes for block {large_block_num}: {ensemble_mags}", flush=True)
+            Path(ens_data_file).parent.mkdir(parents=True, exist_ok=True)
+            pickle.dump((ensemble_mags), open(ens_data_file, "wb"))
 
-        num_shots = shots // ens_size
-        full_ens = generate_full_circuits(large_block_circs,
-                                          large_block_nums,
-                                          ens_size=(ens_size * num_trials // num_processes),
-                                          partitioned_circ=partitioned_circ)
+
+if __name__ == "__main__":
+    # circ_name = argv[1]
+    # circ_name_tx = "QITE_8_{timestep}"
+    circ_name = "lgt_11"
+    timesteps = list(range(7))
+    tols = [1.0, 2.0, 3.0, 4.0, 5.0]
+    use_qps = [False, True]
+
+    compiler = Compiler(num_workers=256)
+
+    all_partitioned_ids = {}
+    all_partitioned_data = {}
+
+    # for timestep in timesteps:
+    #     circ_name = circ_name_tx.format(timestep=timestep)
+    all_partitioned_ids[circ_name] = {}
+    for large_block_num in get_block_names(circ_name, extra="_tket"):
+        id = partition_circs(compiler, circ_name, large_block_num)
         
+        all_partitioned_ids[circ_name][large_block_num] = id
+    
+    # for timestep in timesteps:
+    #     circ_name = circ_name_tx.format(timestep=timestep)
+    all_partitioned_data[circ_name] = {}
+    for large_block_num in get_block_names(circ_name, extra="_tket"):
+        out_circ = compiler.result(all_partitioned_ids[circ_name][large_block_num])
+        sub_block_names = get_sub_block_nums(circ_name, large_block_num)
+        assert out_circ.num_operations == len(sub_block_names)
+        sub_block_circs = {}
+        for i, op in enumerate(out_circ.operations()):
+            assert isinstance(op.gate, CircuitGate)
+            block_name = sub_block_names[i]
+            sub_block_circs[block_name] = op.gate._circuit
+        print(f"Partitioned circuits for {circ_name}: ", 
+            all_partitioned_ids[circ_name], flush=True)
+        all_partitioned_data[circ_name][large_block_num] = (sub_block_circs, out_circ)
 
-        print(f"Generated {len(full_ens)} full circuits for ensemble size {ens_size}", flush=True)
+    compiler.close()
+    print("Closing Compiler.", flush=True)
+    ps = []
+    # for timestep in timesteps:
+    #     circ_name = circ_name_tx.format(timestep=timestep)
+    for max_tol in tols:
+        for use_qp in use_qps:
+            print(f"Running for {circ_name} with max_tol={max_tol} and use_qp={use_qp}")
+            p = mp.Process(target=run_circ_tol, args=(circ_name, max_tol, use_qp, all_partitioned_data[circ_name]))
+            p.start()
+            ps.append(p)
 
-        all_mags = run_cudaq_nisq_circs(circs=full_ens, 
-                                        ham=None, 
-                                        add_coherent_error=COHERENT_ERROR, 
-                                        use_noise=use_noise, 
-                                        num_shots=num_shots, 
-                                        average=False)
-        sub_counts = [all_mags[i * ens_size:(i + 1) * ens_size] for i in range(num_trials // num_processes)]
-        ensemble_mags = [aggregate_counts(counts) for counts in sub_counts]
-        Path(ens_data_file).parent.mkdir(parents=True, exist_ok=True)
-        pickle.dump((ensemble_mags), open(ens_data_file, "wb"))
+    for p in ps:
+        shms = p.join()
 
-    # Close all shared memories
-    for large_block_num in all_shms.keys():
-        shms = all_shms[large_block_num]
-        for small_block_num in shms.keys():
-            shm = shms[small_block_num]
-            shm.close()
-            shm.unlink()
-        del all_shms[large_block_num]
+
+    # for timestep in timesteps:
+    #     circ_name = circ_name_tx.format(timestep=timestep)
+    for max_tol in tols:
+        for use_qp in use_qps:
+            # Close corresponding shared memories
+            small_block_nums = get_sub_block_nums(circ_name, large_block_num)
+            for small_block_num in small_block_nums:
+                shm_name = f"{circ_name}_{large_block_num}_{small_block_num}_{max_tol}"
+                try:
+                    shm = SharedMemory(name=shm_name, create=False)
+                    shm.close()
+                    shm.unlink()
+                except FileNotFoundError:
+                    print(f"Shared memory {shm_name} not found, skipping.", flush=True)
+
+
+
+    print("All processes completed.", flush=True)
+    print("Done running small block circuits.", flush=True)
+    print("Exiting script.", flush=True)
+    exit(0)

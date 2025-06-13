@@ -51,7 +51,7 @@ def cuda_kernel(circ: Circuit):
     return kernel
 
 shots = 2 ** 15   
-checkpoint_folder = "small_block_checkpoints_tket/{circ_name}"
+checkpoint_folder = "/pscratch/sd/j/jkalloor/bqskit/small_block_checkpoints_tket/{circ_name}"
 
 lang = OPENQASM2Language()
 
@@ -238,7 +238,7 @@ if __name__ == '__main__':
     # large_block_num = argv[2] if len(argv) > 2 else "00"
     large_block_nums = get_block_names(circ_name, extra="_tket")
 
-    full_circ = Circuit.from_file(f"ensemble_benchmarks/{circ_name}.qasm")
+    full_circ = Circuit.from_file(f"/pscratch/sd/j/jkalloor/bqskit/ensemble_benchmarks/{circ_name}.qasm")
 
     if circ_name.startswith("lgt_"):
         ham = generate_lgt_hamiltonian_cudaq(full_circ.num_qudits, 2)
