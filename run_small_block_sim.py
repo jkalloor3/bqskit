@@ -21,40 +21,58 @@ import csv
 
 from common.io import (load_block, load_ensemble, get_block_names)
 
-from sim_lib.sim_lib import (run_cudaq_nisq_circs, 
-                             generate_lgt_hamiltonian_cudaq,
-                             generate_tfim_hamiltonian_cudaq)
+from sim_lib.sim_lib import (run_cudaq_nisq_circs)
 from mpi4py import MPI
-
-def fix_phase(circuit: Circuit, target: UnitaryMatrix) -> float:
-    unitary = circuit.get_unitary()
-    global_phase_correction = target.get_target_correction_factor(unitary)
-    # old_cost = frob_cost.calc_cost(circuit, target)
-    circuit.append_gate(GlobalPhaseGate(1, 
-                                        global_phase=global_phase_correction),
-                                        (0,))
-
-# CUDAQ SIMULATION
-def cuda_kernel(circ: Circuit):
-    kernel = cudaq.make_kernel()
-    qubits = kernel.qalloc(circ.num_qudits)
-    for op in circ.operations():
-        q0 = op.location[0]
-        if isinstance(op.gate, CNOTGate):
-            q1 = op.location[1]
-            kernel.cx(qubits[q0], qubits[q1])
-        elif isinstance(op.gate, U3Gate):
-            kernel.u3(op.params[0], op.params[1], op.params[2], 
-                      qubits[q0])
-            
-    kernel.mz(qubits)
-    return kernel
 
 shots = 2 ** 15   
 checkpoint_folder = "/pscratch/sd/j/jkalloor/bqskit/small_block_checkpoints_tket/{circ_name}"
+checkpoint_folder_2 = "/pscratch/sd/j/jkalloor/bqskit/small_block_checkpoints_tket_2/{circ_name}"
 
 lang = OPENQASM2Language()
 
+base_bqskit_dir = "/pscratch/sd/j/jkalloor/bqskit"
+
+def load_circuit(circ_name: str, timestep: int = 0, opt: bool = False) -> Circuit:
+    if "JW" in circ_name:
+        circ_name = f"JWCircs/{circ_name}.qasm"
+
+    if opt:
+        extra = "_tket"
+    else:
+        extra = ""
+    
+    file_name = f"{base_bqskit_dir}/ensemble_benchmarks{extra}/{circ_name}.qasm"
+    if not os.path.exists(file_name):
+        file_name = f"{base_bqskit_dir}/qce23_qfactor_benchmarks{extra}/{circ_name}.qasm"
+
+    if not os.path.exists(file_name):
+        file_name = f"{base_bqskit_dir}/ensemble_benchmarks_new{extra}/{circ_name}.qasm"
+
+    return Circuit.from_file(filename=file_name)
+
+def generate_full_circuits(block_circs: dict[str, list[Circuit]], 
+                           block_names: list,
+                           ens_size: int,
+                           partitioned_circ: Circuit) -> list[Circuit]:
+    all_circs = []
+    for i in range(ens_size):
+        circ = partitioned_circ.copy()
+        ind = 0
+        for cycle, op in circ.operations_with_cycles():
+            pt = CircuitPoint(cycle, op.location[0])
+            block_name = block_names[ind]
+            ind += 1
+            assert isinstance(op.gate, CircuitGate)
+            assert isinstance(op.gate._circuit, Circuit)
+            if block_name in block_circs:
+                new_block_circ = block_circs[block_name][i]
+                assert isinstance(new_block_circ, Circuit)
+                assert op.gate._circuit.num_qudits == new_block_circ.num_qudits
+                circ.replace_with_circuit(pt, new_block_circ, 
+                                          as_circuit_gate=True)
+        circ.unfold_all()
+        all_circs.append(circ)
+    return all_circs
 # Get partitioned circuits for all 8-qubit blocks
 def partition_circs(compiler: Compiler, block_num: str, 
                      sub_block_names: list[str]) -> tuple[dict[str, Circuit], Circuit]:
@@ -89,21 +107,37 @@ def get_sub_block_count(circ_name: str,
                         max_tol: float) -> tuple[bool, int]:
     qasm_file = f"{checkpoint_folder.format(circ_name=circ_name)}_{large_block_num}_{max_tol}/block_{small_block_num}/ensemble_final.qasms"
     csv_file = f"{checkpoint_folder.format(circ_name=circ_name)}_{large_block_num}_{max_tol}/block_{small_block_num}.csv"
+
+    qasm_file_2 = f"{checkpoint_folder_2.format(circ_name=circ_name)}_{large_block_num}_{max_tol}/block_{small_block_num}/ensemble_final.qasms"
+    csv_file_2 = f"{checkpoint_folder_2.format(circ_name=circ_name)}_{large_block_num}_{max_tol}/block_{small_block_num}.csv"
     # Read CSV file, if the ratio is < 20 then we can read counts
-    if not os.path.exists(csv_file):
+    if not os.path.exists(csv_file) and not os.path.exists(csv_file_2):
+        print(f"CSV file does not exist: {csv_file}", flush=True)
         return False, 0
-    with open(csv_file, 'r') as f:
-        reader = csv.DictReader(f)
-        min_ratio = float("inf")
-        final_frob_cost = float("inf")
-        for row in reader:
-            if "Ratio" in row:  # Check if the column value is not empty
-                min_ratio = min(min_ratio, float(row["Ratio"]))
-                final_frob_cost = min(final_frob_cost, float(row["Norm. Bias"]))
+    
+    def get_min_ratio(csv_file: str) -> float:
+        with open(csv_file, 'r') as f:
+            reader = csv.DictReader(f)
+            min_ratio = float("inf")
+            final_frob_cost = float("inf")
+            for row in reader:
+                if "Ratio" in row:  # Check if the column value is not empty
+                    min_ratio = min(min_ratio, float(row["Ratio"]))
+                    final_frob_cost = min(final_frob_cost, float(row["Norm. Bias"]))
+    
+        return min_ratio
+    
+    min_ratio = get_min_ratio(csv_file)
         
     # Now we need to check if the ratio is less than 20
-    if min_ratio > 5:
-        return False, 0
+    if min_ratio > 10:
+        min_ratio_2 = get_min_ratio(csv_file_2)
+        if min_ratio_2 > 10:
+            return False, 0
+        else:
+            qasm_file = qasm_file_2
+            csv_file = csv_file_2
+            min_ratio = min_ratio_2
     # Now we need to get the avg. number of CNOTs
     qasm_str = open(qasm_file, 'r').read()
     count = qasm_str.count("cx ")
@@ -144,6 +178,20 @@ def get_random_circs(num_circs: int,
         circ_strs.append(rand_circ)
 
     return circ_strs
+
+def aggregate_counts(counts: list[dict[str, int]]) -> dict[str, int]:
+    '''
+    Aggregate the counts from multiple circuits.
+    '''
+    aggregated_counts = {}
+    for count in counts:
+        for key, value in count.items():
+            if key in aggregated_counts:
+                aggregated_counts[key] += value
+            else:
+                aggregated_counts[key] = value
+    return aggregated_counts
+
 
 def generate_small_block_circuits(block_circs: dict[str, list[Circuit]], 
                            block_names: list,
@@ -222,6 +270,7 @@ def create_shared_memory(circ_name: str,
     shm_array[:] = params
     return shm, param_shape
 
+
 if __name__ == '__main__':
     cudaq.set_target('nvidia')
     np.set_printoptions(precision=2, threshold=np.inf, linewidth=np.inf)
@@ -229,6 +278,8 @@ if __name__ == '__main__':
     max_tol = float(argv[2]) if len(argv) > 1 else 1.0
     use_noise = bool(int(argv[3])) if len(argv) > 2 else True
     use_qp = bool(int(argv[4])) if len(argv) > 3 else False
+
+    partitioned_circ = pickle.load(open(f"/pscratch/sd/j/jkalloor/bqskit/partitioned_circs/{circ_name}.pickle", "rb"))
 
     if use_noise:
         COHERENT_ERROR = 1e-4  # Coherent error to add to the circuits
@@ -238,24 +289,20 @@ if __name__ == '__main__':
     # large_block_num = argv[2] if len(argv) > 2 else "00"
     large_block_nums = get_block_names(circ_name, extra="_tket")
 
-    full_circ = Circuit.from_file(f"/pscratch/sd/j/jkalloor/bqskit/ensemble_benchmarks/{circ_name}.qasm")
-
-    if circ_name.startswith("lgt_"):
-        ham = generate_lgt_hamiltonian_cudaq(full_circ.num_qudits, 2)
-    else:
-        ham = generate_tfim_hamiltonian_cudaq(full_circ.num_qudits)
+    # full_circ = Circuit.from_file(f"ensemble_benchmarks/{circ_name}.qasm")
+    full_circ = load_circuit(circ_name, opt=False)
 
     num_processes = MPI.COMM_WORLD.Get_size()
     mpi_rank = MPI.COMM_WORLD.Get_rank()
 
     full_circ.unfold_all()
     target_obs_mag = run_cudaq_nisq_circs([full_circ],
-                                          ham=ham,
+                                          ham=None,
                                           add_coherent_error=COHERENT_ERROR,
                                            use_noise=use_noise, 
                                            num_shots=shots,
-                                           average=True)
-    print("Target Observable Magnitude: ", target_obs_mag)
+                                           average=False)
+    print("Target Results: ", target_obs_mag)
     print("Large Block Names: ", large_block_nums)
 
     # Create shared memories
@@ -296,7 +343,7 @@ if __name__ == '__main__':
             use, count = get_sub_block_count(circ_name, large_block_num, 
                                             small_block_num, max_tol)
             orig_count = sub_block_circs[small_block_num].count(CNOTGate())
-            if count >= orig_count or (not use):
+            if (count >= orig_count and use_noise) or (not use):
                 # We need to use the original count
                 continue
             else:
@@ -357,6 +404,10 @@ if __name__ == '__main__':
             continue
         large_block_circs = {}
         for large_block_num in large_block_nums:
+            if large_block_num not in shms:
+                print("Skipping large block: ", large_block_num, 
+                      " as no small blocks are available")
+                continue
             # print("Running LGT for block: ", large_block_num, max_tol)
             initial_circ: Circuit = initial_circs[large_block_num]
             # initial_circ = load_circuit(circ_name, opt=False)
@@ -381,19 +432,28 @@ if __name__ == '__main__':
                                         ens_size=(ens_size * num_trials // num_processes),
                                         use_qp=use_qp)
             
+            large_block_circs[large_block_num] = ens
             print(f"Generated {len(ens)} circuits for large block {large_block_num}", flush=True)
-            num_shots = shots // ens_size
-            all_mags = run_cudaq_nisq_circs(circs=ens, 
-                                            ham=ham, 
-                                            add_coherent_error=COHERENT_ERROR, 
-                                            use_noise=use_noise, 
-                                            num_shots=num_shots, 
-                                            average=False)
-            sub_mags = [all_mags[i * ens_size:(i + 1) * ens_size] for i in range(num_trials // num_processes)]
-            ensemble_mags = [np.mean(mags) for mags in sub_mags]
-            print(f"Ensemble Magnitudes for block {large_block_num}: {ensemble_mags}", flush=True)
-            Path(ens_data_file).parent.mkdir(parents=True, exist_ok=True)
-            pickle.dump((ensemble_mags), open(ens_data_file, "wb"))
+
+        num_shots = shots // ens_size
+        full_ens = generate_full_circuits(large_block_circs,
+                                          large_block_nums,
+                                          ens_size=(ens_size * num_trials // num_processes),
+                                          partitioned_circ=partitioned_circ)
+        
+
+        print(f"Generated {len(full_ens)} full circuits for ensemble size {ens_size}", flush=True)
+
+        all_mags = run_cudaq_nisq_circs(circs=full_ens, 
+                                        ham=None, 
+                                        add_coherent_error=COHERENT_ERROR, 
+                                        use_noise=use_noise, 
+                                        num_shots=num_shots, 
+                                        average=False)
+        sub_counts = [all_mags[i * ens_size:(i + 1) * ens_size] for i in range(num_trials // num_processes)]
+        ensemble_mags = [aggregate_counts(counts) for counts in sub_counts]
+        Path(ens_data_file).parent.mkdir(parents=True, exist_ok=True)
+        pickle.dump((ensemble_mags), open(ens_data_file, "wb"))
 
     # Close all shared memories
     for large_block_num in all_shms.keys():

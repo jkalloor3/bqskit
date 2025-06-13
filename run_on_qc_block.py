@@ -1,286 +1,356 @@
 from bqskit.ir.circuit import Circuit
-from bqskit.ir.gates import CNOTGate
+from bqskit.ir.gates import CNOTGate, XGate, YGate, ZGate, IdentityGate, RXGate
 from sys import argv
-from scipy.stats import entropy
 import numpy as np
-from pathlib import Path
-import json
-
+import pickle
 import matplotlib.pyplot as plt
-import random
-from bqskit.ir.gates.parameterized import U3Gate, VariableUnitaryGate
+from pathlib import Path
+from multiprocessing.shared_memory import SharedMemory
+
+from qiskit import QuantumCircuit
+from qiskit.quantum_info import Statevector
+
+from bqskit.qis import UnitaryMatrix
+
 from bqskit.ir.point import CircuitPoint
-from bqskit.compiler.passdata import PassData
+from bqskit.ir.lang.qasm2 import OPENQASM2Language
+from bqskit.ext import bqskit_to_qiskit
 
-from itertools import chain
-from qiskit import QuantumCircuit, transpile
-from qiskit.circuit.library import UnitaryGate
-from qiskit_ibm_runtime import QiskitRuntimeService
+from qiskit.quantum_info import random_statevector
 from qiskit_aer import AerSimulator
-from qiskit.quantum_info import Statevector, DensityMatrix, hellinger_fidelity
-from qiskit_aer.noise import NoiseModel, pauli_error, depolarizing_error
-import multiprocessing as mp
+from qiskit_aer.noise import (NoiseModel, depolarizing_error, 
+                              mixed_unitary_error)
 
-from bqskit.ext import bqskit_to_qiskit, qiskit_to_bqskit
+from util import (get_block_names, check_param_shape, 
+                  load_block, load_compiled_circs_params_separate, 
+                  trace_distance, normalized_gp_frob_cost)
 
-from util import load_block, load_compiled_block_circuits, frobenius_cost, tvd_dict, cross_entropy_fidelity_dict
+import os
 
-shots = 1000
-one_q_err = 1e-4
-two_q_err = 4e-3
-
-def run_circuits(all_circs: list[list[QuantumCircuit]], shots: int, backend: AerSimulator = None) -> list[dict[str, int]]:
+def over_rotated_cnot(eps: float) -> Circuit:
     '''
-    Run a set of noisy circuits on a given backend
+    Over-rotated CNOT gate.
+
+    Return a list of unitary matrices and probabilities.
+
+    We are assuming that we always over-rotate the CNOT gate by eps.
+    Then, with probability eps, we also have Pauli X, Y, and Z errors
     '''
-    if backend is None:
-        sampler = AerSimulator()
-        print("Running on Aer Simulator: ", sampler.description, flush=True)
-    else:
-        # sampler = BackendSampler(backend=backend)
-        print("Running on Noisy Sim with Noise Model: ", backend.description, flush=True)
-        sampler = backend
 
-    # Return aggregated results for each random circuit
-    all_results = []
-    for circs in all_circs:
-        result = sampler.run(circs, shots=shots).result()
-        # print(f">>> Job ID: {job.job_id()}")
-        # print(f">>> Job Status: {job.status()}")
-        if len(all_results) == 0:
-            all_results = [result.get_counts(j)for j in range(len(circs))]
-        else:
-            results = [result.get_counts(j) for j in range(len(circs))]
-            all_results = [aggregate_results([all_results[i], results[i]]) for i in range(len(circs))]
-    return all_results
+    print("Eps: ", eps)
+    mat = np.array([[1, 0, 0, 0],
+                    [0, 1, 0, 0],
+                    [0, 0, np.cos(np.pi/2 + eps), -np.sin(np.pi/2 + eps)],
+                    [0, 0, np.sin(np.pi/2 + eps), np.cos(np.pi/2 + eps)]])
+    
+    # Actual effect is on a CNOT gate
+    # cnot_un = CNOTGate().get_unitary()
 
-def run_noisy_ensemble(ens_size, shots: int = 1, random_states: list[np.ndarray] = None, backend: AerSimulator = None) -> tuple[list[dict[str, int]], np.ndarray]:
+    # Over-rotate X
+    effect = np.kron(IdentityGate().get_unitary(), RXGate().get_unitary([eps]))
+
+    # effect = np.array([[1, 0, 0, 0],
+    #                       [0, 1, 0, 0],
+    #                       [0, 0, 1, 0],
+    #                       [0, 0, 0, 1]])
+
+    # effect = cnot_un.dagger @ mat @ cnot_un.dagger
+
+    print("Effect: ", effect)
+    print("RX Gate: ", RXGate().get_unitary([eps]))
+
+    probs = [1 - eps, eps/3, eps/3, eps/3]
+
+    errors = []
+    # pauli errors
+    for i, q1_err in enumerate([IdentityGate(), XGate(), YGate(), ZGate()]):
+        for j, q2_err in enumerate([IdentityGate(), XGate(), YGate(), ZGate()]):
+            err = np.kron(q1_err.get_unitary(), q2_err.get_unitary())
+            p1 = probs[i]
+            p2 = probs[j]
+            effect = effect @ err
+            errors.append((effect, p1 * p2))
+
+    # Assert probabilities sum to 1
+    assert np.isclose(sum([p for _, p in errors]), 1.0)
+
+    return errors
+
+def create_noise_model(one_q_err: float, 
+                             two_q_err: float) -> NoiseModel:
     '''
-    Run an ensemble of size `ens_size` on a noisy backend.
+    Noise Model with overrotated CNOT and stochastic depolarizing noise.
 
-    Returns a list of list of TVDs with shape (ens_size, num_random_states)
-
-    Also, if the number of qubits is less than 10, returns the mean unitary of the ensemble.
     '''
-    global all_qcircs
-    # global uns
-
-    ensemble_inds: list[int] = np.random.choice(len(all_qcircs), ens_size)
-    ensemble: list[QuantumCircuit] = [all_qcircs[i] for i in ensemble_inds]
-    # ensemble_uns = [uns[i] for i in ensemble_inds]
-    # mean_un = np.mean(np.array(ensemble_uns), axis=0)
-    print("Avg CNOT count: ", np.mean([c.count_ops()['cx'] for c in ensemble]))
-    all_circs = [[c] for c in ensemble]
-    # all_circs = [get_random_init_state_circuits(c, random_states, backend=backend) for c in ensemble]
-    final_svs = run_circuits(all_circs, shots=shots, backend=backend)
-    return final_svs #, mean_un
-
-def get_qcirc(circ: Circuit):
-    for cycle, op in circ.operations_with_cycles():
-        if op.num_qudits == 1 and not isinstance(op.gate, U3Gate):
-            params = U3Gate().calc_params(op.get_unitary())
-            point = CircuitPoint(cycle, op.location[0])
-            circ.replace_gate(point, U3Gate(), op.location, params)
-        if op.num_qudits == 2 and isinstance(op.gate, VariableUnitaryGate):
-            # get decomp 
-            mini_qcirc = QuantumCircuit(2)
-            mini_qcirc.append(UnitaryGate(op.get_unitary()), [0, 1])
-            trans_qcirc = transpile(mini_qcirc, basis_gates=['cx', 'u3'])
-            # print(trans_qcirc.count_ops())
-            bqskit_circ = qiskit_to_bqskit(trans_qcirc)
-            circ.replace_with_circuit((cycle, op.location[0]), bqskit_circ, as_circuit_gate=True)
-    circ.unfold_all()
-    # print(circ.gate_counts)
-    q_circ = bqskit_to_qiskit(circ)
-    q_circ.measure_all()
-    # (time.time() - start)
-    return q_circ
-
-def get_random_states(num_qubits: int, num_random_states: int = 4) -> list[np.ndarray]:
-    states = []
-    for i in range(num_random_states):
-        state = np.random.randint(0, 5, num_qubits)
-        states.append(state)
-    return states
-
-def get_random_init_state_circuits(qcirc: QuantumCircuit, random_states: list[np.ndarray], backend: AerSimulator) -> list[QuantumCircuit]:
-    circs = []
-    for state in random_states:
-        init_circ: QuantumCircuit = QuantumCircuit(qcirc.num_qubits)
-        for i in range(init_circ.num_qubits):
-            if state[i] == 1:
-                init_circ.h(i)
-            elif state[i] == 2:
-                init_circ.x(i)
-            elif state[i] == 3:
-                init_circ.z(i)
-            elif state[i] == 4:
-                angles = np.random.uniform(0, 2 * np.pi, 3)
-                init_circ.u(*angles, i)
-        init_circ.compose(qcirc, inplace=True)
-        circs.append(init_circ)
-    return circs
-
-def aggregate_results(results: list[dict[str, int]]) -> dict[str, int]:
-    total_dict = {}
-    for y in results:
-        x = total_dict
-        total_dict = {k: x.get(k, 0) + y.get(k, 0) for k in set(x) | set(y)}
-    return total_dict
-
-def create_pauli_noise_model(rb_fid_1q, rb_fid_2q):
-    rb_err_1q = 1 - rb_fid_1q
-    rb_err_2q = 1 - rb_fid_2q
-
-    print("1Q Error: ", rb_err_1q, "2Q Error: ", rb_err_2q)
-
     # Create an empty noise model
     noise_model = NoiseModel()
 
     # Add depolarizing error to all single qubit u1, u2, u3 gates
-    # one_q_error = pauli_error([('X', rb_err_1q /3), ('Y', rb_err_1q /3), ('Z', rb_err_1q / 3), ('I', rb_fid_1q)])
-    one_q_error = depolarizing_error(rb_err_1q, 1)
-    two_q_error = depolarizing_error(rb_err_2q, 2)
+    one_q_error = depolarizing_error(one_q_err, 1)
+    # two_q_error = depolarizing_error(two_q_err, 2)
     # two_q_error = one_q_error.tensor(one_q_error)
     noise_model.add_all_qubit_quantum_error(one_q_error, ['u', 'u3'])
-    noise_model.add_all_qubit_quantum_error(two_q_error, ['cx'])
+    # noise_model.add_all_qubit_quantum_error(two_q_error, ['cx'])
+
+    coherent_utries = over_rotated_cnot(two_q_err)
+    cnot_error = mixed_unitary_error(coherent_utries)
+    noise_model.add_all_qubit_quantum_error(cnot_error, ['cx'])
 
     return noise_model
 
-def get_sim_backend(num_1q_gates: int, num_2q_gates: int):
-    x_fid = 1 - one_q_err
-    y_fid = 1 - two_q_err
-    pred_fid = x_fid ** num_1q_gates * y_fid ** num_2q_gates
-    print("Final pred fid: ", pred_fid, "X: ", x_fid, "Y: ", y_fid, flush=True)
+ensemble_sizes = [1, 5, 10, 20, 40, 80, 160, 1280, 2560]
+TOTAL_SHOTS = 100 * max(ensemble_sizes)
+NUM_RANDOM_STATES = 2
 
-    return AerSimulator(noise_model=create_pauli_noise_model(x_fid, y_fid)), pred_fid
+# circ_name = "qaoa10"
 
+lang = OPENQASM2Language()
+
+def get_random_circs(num_circs: int,
+                    block_circs: list[Circuit], 
+                    shm_name: str,
+                    param_shape: np.ndarray = None) -> list[str]:
+    '''
+    Generate a random circuit from the block_circs.
+    '''
+    if len(block_circs) == 1:
+        return [block_circs[0].to("qasm")] * num_circs
+    
+    shm = SharedMemory(name=shm_name, create=False)
+    # Now pick a random param from the shared memory
+    shm_array = np.ndarray(param_shape, dtype=np.float64, buffer=shm.buf)
+
+    # Else, we are using an ensemble
+    rand_circ_inds = np.random.randint(0, len(block_circs), size=num_circs)
+    rand_param_inds = np.random.randint(0, shm_array.shape[1], size=num_circs)
+    circ_strs = []
+    for c_ind, p_ind in zip(rand_circ_inds, rand_param_inds):
+        # Now we need to get the random circuits
+        rand_circ: Circuit = block_circs[c_ind]
+        circ_param = shm_array[c_ind][p_ind]
+
+        # Now we need to set the params of the circuit
+        rand_circ.set_params(circ_param)
+        # fix_phase(rand_circ, target)
+        circ_strs.append(rand_circ.to("qasm"))
+    return circ_strs
+
+def sim_full_circuits(circ_name: str,
+                      block_name: str,
+                      noisy_backend: AerSimulator,
+                      random_states: list[np.ndarray],
+                      block_circs: dict[str, list[Circuit]], 
+                      param_shapes: dict[str, tuple[int]],
+                      max_tol: float, 
+                      target: UnitaryMatrix,
+                      ens_size: int) -> dict[str, int]:
+    all_circs = []
+
+    shm_name = circ_name + "_" + str(max_tol) + "_" + block_name
+    param_shape = param_shapes.get(block_name, None)
+    circ_strs = get_random_circs(ens_size,
+                                    block_circs[block_name], 
+                                    shm_name=shm_name, 
+                                    param_shape=param_shape)
+    
+
+    dists = []
+    for circ_str in circ_strs:
+        circ = lang.decode(circ_str)
+        # dists.append(normalized_gp_frob_cost(circ.get_unitary(), target))
+        qc = bqskit_to_qiskit(circ)
+        qc.save_density_matrix()
+        all_circs.append(qc)
+    
+    # print("Avg Dist: ", np.mean(dists))
+
+    # Now we need to sim the circuits
+    shots = TOTAL_SHOTS / ens_size
+    avg_dms = run_noisy_sim(all_circs, 
+                            random_states=random_states, 
+                            shots=shots, 
+                            backend=noisy_backend)
+    # agg_results = aggregate_results(all_dicts)
+    return avg_dms
+
+
+def run_noisy_sim(circs: list[QuantumCircuit], 
+                 random_states: list[np.ndarray],
+                 shots: int, backend: AerSimulator) -> np.ndarray:
+    '''
+    Run a noisy simulation of the circuits. Returns an averaged density matrix
+    over the circuits for each random state.
+    '''
+    # Now we need to run the circuits over the random states
+    all_dms = []
+    for qc in circs:
+        random_qcs = []
+        for state in random_states:
+            new_qc: QuantumCircuit = qc.copy()
+            new_qc.initialize(state, range(qc.num_qubits))
+            # print(new_qc.count_ops())
+            random_qcs.append(new_qc)
+        # Now we need to run the circuits
+        noisy_results = backend.run(random_qcs, shots=shots).result()
+        # Now we need to get the density matrix
+        noisy_dms = [noisy_results.data(i)['density_matrix'] for i in range(len(random_qcs))]
+        all_dms.append(noisy_dms)
+    # Now we have len(circs) x len(random_states) density matrices
+    # Now we need to average the density matrices over the circuits
+    avg_dms = np.mean(all_dms, axis=0)
+    return avg_dms
+
+def run_block(circ_name: str,
+              block_name: str,
+              tol: float,
+              two_q_err: float) -> Circuit:
+    
+    cost_path = f"ensemble_trace_dists_block/ensemble_trace_dist_qc_{circ_name}/{block_name}/{two_q_err}/{tol}_all.pickle"
+    if os.path.exists(cost_path):
+        print("Already ran block: ", circ_name, block_name)
+        return
+
+    # Create backends
+    perfect_backend = AerSimulator(method="density_matrix")
+    noise_model = create_noise_model(1e-7, two_q_err=two_q_err)
+    noisy_backend = AerSimulator(method="density_matrix", noise_model=noise_model)
+
+    # Get the circuit
+    # initial_circ: Circuit = load_circuit(circ_name, opt=False)
+    initial_circ_file = load_block(circ_name, block_name)
+    initial_circ = Circuit.from_file(initial_circ_file)
+    num_q = initial_circ.num_qudits
+    initial_cnot_count = initial_circ.count(CNOTGate())
+    print("Original CX Count: ", initial_cnot_count)
+    initial_qcirc = bqskit_to_qiskit(initial_circ)
+    initial_qcirc.save_density_matrix()
+
+    # Run perfect simulation
+    random_states = [random_statevector(2 ** num_q) for _ in range(NUM_RANDOM_STATES)]
+    # random_states_2 = [random_statevector(2 ** num_q) for _ in range(NUM_RANDOM_STATES)]
+    perfect_dms = run_noisy_sim([initial_qcirc], random_states=random_states, shots=TOTAL_SHOTS, backend=perfect_backend)
+
+    # Run initial noisy simulation
+    noisy_dms = run_noisy_sim([initial_qcirc, initial_qcirc, initial_qcirc], random_states=random_states, shots=TOTAL_SHOTS, backend=noisy_backend)
+    initial_dists = [trace_distance(perfect_dm, noisy_dm) for perfect_dm, noisy_dm in zip(perfect_dms, noisy_dms)]
+
+    print("Initial Trace Distance: ", initial_dists)
+
+    # Figure out how many ensembles we need, and calculate shared memory space
+    try:
+        param_shapes = {block_name: check_param_shape(circ_name,
+                                                    block_name,
+                                                    tol,
+                                                    extra="_tket")}
+    except:
+        print("No Checkpoint found for block: ", circ_name, block_name)
+        return
+    shm_names = {block_name: circ_name + "_" + str(tol) + "_" + block_name} 
+    
+    # Now for the shared memory
+    # We will use a different shared memory space for each block
+    float_size = np.dtype(np.float64).itemsize
+    # Handles to shared memory objects
+    shms: dict[str, SharedMemory] = {}
+    param_shape = param_shapes[block_name]
+    shm_name = shm_names[block_name]
+    try:
+        shm = SharedMemory(name=shm_name, 
+                        create=True, 
+                        size=np.prod(param_shape)*float_size)
+    except:
+        shm = SharedMemory(name=shm_name, 
+                        create=False)
+        shm.close()
+        shm.unlink()
+        shm = SharedMemory(name=shm_name, create=True, 
+                            size=np.prod(param_shape)*float_size)
+
+    print("Shared Memory: ", shm_name, shm.size)
+    # Now we need to create a numpy array in the shared memory
+    shm_array = np.ndarray(param_shape, dtype=np.float64, buffer=shm.buf)
+    # Now we need to fill the array with the parameters
+    shm_array.fill(0)
+    shms[block_name] = shm
+
+    print("Created Shared Memories: ", shms.keys())
+
+    # Get all the circuits
+    # inds, probs = load_compiled_block_circuits_qp_inds(*block_data)
+    circuits, params = load_compiled_circs_params_separate(circ_name,
+                                                           block_name,
+                                                           tol=tol,
+                                                           extra="_tket")
+    print("Num Circuits: ", len(circuits), flush=True)
+    avg_cnot_count = np.mean([circ.count(CNOTGate()) for circ in circuits])
+    print("Avg CX Count: ", avg_cnot_count)
+    if avg_cnot_count >= initial_cnot_count:
+        print("No CX reduction, skipping block: ", circ_name, block_name)
+        return
+    # Now we need to load params into shared memory
+    shm = shms[block_name]
+    param_shape = params.shape
+
+
+    shm_array = np.ndarray(param_shape, dtype=np.float64, buffer=shm.buf)
+    # Now we need to fill the array with the parameters
+    shm_array[:] = params
+    block_circs[block_name] = circuits
+
+    print("LOADED CIRCUITS", flush=True)
+    # ensemble_sizes = [2, 10, 20]
+
+    num_trials = 6
+    ensemble_costs = []
+
+    # Get avg cost
+    target = initial_circ.get_unitary()
+    for ens_size in ensemble_sizes:
+        mean_costs = []
+        print("Ensemble Size: ", ens_size, flush=True)
+        ens_cost_path = f"ensemble_trace_dists_block/ensemble_trace_dist_qc_{circ_name}/{block_name}/{two_q_err}/{tol}_{ens_size}.pickle"
+        if os.path.exists(ens_cost_path):
+            continue
+        for i in range(num_trials):
+            # print("Trial: ", i, flush=True)
+            avg_dms = sim_full_circuits(circ_name,
+                                        block_name,
+                                       noisy_backend,
+                                       random_states,
+                                       block_circs, 
+                                       param_shapes,
+                                       max_tol=tol,
+                                       target=target,
+                                       ens_size=ens_size)
+            # mean_tvd = trace_distance(perfect_dm, avg_dm)
+            tds = [trace_distance(perfect_dm, avg_dm) for perfect_dm, avg_dm in zip(perfect_dms, avg_dms)]
+            mean_tvd = np.mean(tds)
+            mean_costs.append(mean_tvd)
+        Path(ens_cost_path).parent.mkdir(parents=True, exist_ok=True)
+        pickle.dump(mean_costs, open(ens_cost_path, 'wb'))
+        ensemble_costs.append(mean_costs)
+        print("Avg Trace Distance: ", np.mean(mean_costs))
+    
+
+    for block_name, shm in shms.items():
+        print("Closing Shared Memory: ", shm_name)
+        shm.close()
+        shm.unlink()
+
+    Path(cost_path).parent.mkdir(parents=True, exist_ok=True)
+    pickle.dump(ensemble_costs, open(cost_path, 'wb'))
+
+
+# Circ 
 if __name__ == '__main__':
-    global all_qcircs
-    # global uns
-    global target
+    block_circs = {}
+    block_names = []
 
     np.set_printoptions(precision=2, threshold=np.inf, linewidth=np.inf)
+    circ_name = str(argv[1])
+    two_q_err = float(argv[3]) if len(argv) > 3 else 5e-3
+    tol = float(argv[2]) if len(argv) > 2 else 3.0
 
-    circ_name = argv[1]
-    block_num = argv[2]
-    tol = float(argv[3])
-    num_unique_circs = int(argv[4])
-    # target_err = int(argv[5])
-    # target_fid = 1 - (10 ** (-1 * target_err))
-    cliff = False
-
-    circ_path = load_block(circ_name, block_num, good=True)
-    initial_circ = Circuit.from_file(circ_path)
-    target = initial_circ.get_unitary()
-
-    # _ , backend = setup_ibm(initial_circ.num_qudits)
-    num_1q_gates = len([op for op in initial_circ.operations() if op.num_qudits == 1])
-    num_2q_gates = len([op for op in initial_circ.operations() if op.num_qudits == 2])
-    noisy_backend, pred_fid = get_sim_backend(num_1q_gates, num_2q_gates)
-
-    # exit(0)
-
-    circs = load_compiled_block_circuits(circ_name, block_num, tol, num_unique_circs)
-    print("Num Circs: ", len(circs), flush=True)
-
-    # dists = [target.get_frobenius_distance(c.get_unitary()) for c in circs[:20]]
-    bqskit_circs = circs
-    # uns = [c.get_unitary() for c in bqskit_circs]
-    # frob_dists = [frobenius_cost(target, un) for un in uns]
-    # print("Avg Norm. Dist: ", np.mean(dists))
-    # print("Avg Dist: ", np.mean(frob_dists))
-    print("Original CX Count: ", initial_circ.count(CNOTGate()))
-
-    print("LOADED CIRCUITS", flush=True)
-
-    all_qcircs = [get_qcirc(c) for c in bqskit_circs]
-    print("Got MAP", flush=True)
-
-    print("LOADED CIRCUITS", flush=True)
-    # print("NUM Circs: ", len(circs), flush=True)
-
-    # Store approximate solutions
-    all_utries = []
-    basic_circs = []
-    circ_files = []
-    base_excitations = []
-    noisy_excitations = []
-
-    ensemble_sizes = [1, 10, 50, 500] #, 2000, 4000]
-    shot_ratio = max(ensemble_sizes)
-
-    num_random_states = 1
-    random_states = get_random_states(initial_circ.num_qudits, num_random_states=num_random_states)
-    qiskit_circ = bqskit_to_qiskit(initial_circ)
-    qiskit_circ.measure_all()
-    qiskit_circs = [qiskit_circ]
-    # qiskit_circs = get_random_init_state_circuits(qiskit_circ, random_states, backend=noisy_backend)
-    print("Num Random Circuits: ", len(qiskit_circs))
-
-    # Get the base results
-    base_svs = run_circuits([qiskit_circs], shots=shots*shot_ratio)
-    noisy_svs = run_circuits([qiskit_circs], shots=shots*shot_ratio, backend=noisy_backend)
-    
-    # print(base_svs)
-    # print(noisy_svs)
-
-    orig_noisy_tvds = [tvd_dict(base_svs[i], noisy_svs[i]) for i in range(num_random_states)]
-    orig_hellinger_fids = [hellinger_fidelity(base_svs[i], noisy_svs[i]) for i in range(num_random_states)]
-
-    print("Noisy TVDs: ", orig_noisy_tvds)
-    # print("Noisy TVD: ", np.mean(orig_noisy_tvds))
-    # print("Noisy Hellinger Fids ", np.mean(orig_hellinger_fids))
-
-    '''
-    Calculate values for ensemble sizes
-    '''
-    # ensemble_mags = [0,0,0,0,0,0]
-
-    print("Runing Noisy ENSEMBLES: ")
-    # print(f"Base TVD: {base_excitations[0]}, Noisy TVD {noisy_excitations[0]}")
-    final_tvds = []
-    final_frobs = []
-    final_fids = []
-
-    # Get outputs using mp Pool
-    # with mp.Pool(mp.cpu_count()) as pool:
-    results = []
-    for ens_size in ensemble_sizes:
-        ens_result = run_noisy_ensemble(ens_size, shots * (shot_ratio // ens_size), random_states, noisy_backend)
-        print("Ensemble Size: ", ens_size)
-        results.append(ens_result)
-
-
-    for j, data in enumerate(results):
-        ens_size = ensemble_sizes[j]
-        shots_per_circuit = shots * (shot_ratio // ens_size)
-        final_svs = data
-        avg_noisy_tvds = np.array([tvd_dict(base_svs[i], final_svs[i]) 
-                                    for i in range(num_random_states)])
-        avg_hell_fids = np.array([hellinger_fidelity(base_svs[i], final_svs[i]) 
-                                    for i in range(num_random_states)])
-        # frob_dist = frobenius_cost(mean_un, target)
-        frob_dist = 0
-        print(f"Ensemble Size: {ens_size}, Frobenius Distance: {frob_dist}")
-
-        print("Avg Noisy TVD: ", avg_noisy_tvds)
-        final_tvds.append(np.mean(avg_noisy_tvds))
-        # final_frobs.append(np.mean(frob_dist))
-        final_fids.append(np.mean(avg_hell_fids))
-
-    
-    headers = ["Ensemble Size", "TVD", "Frobenius Distance"]
-    out_data = {}
-    out_data["Ensemble Size"] = ensemble_sizes
-    out_data["Original Circuit TVD"] = np.mean(orig_noisy_tvds)
-    out_data["Original Circuit Hellinger Fidelity"] = np.mean(orig_hellinger_fids)
-    out_data["TVD"] = final_tvds
-    out_data["Hellinger Fidelity"] = final_fids
-    out_data["Frobenius Distance"] = final_frobs
-    # file_name = f"{circ_name}_conv_data_noisy_{two_q_err:.1e}__{one_q_err:.1e}/{circ_name}_{block_num}_{tol}_{num_unique_circs}.json"
-    file_name = f"no_qp_conv_data/{circ_name}_{block_num}_{tol}_{num_unique_circs}.json"
-    Path(file_name).parent.mkdir(parents=True, exist_ok=True)
-    json.dump(out_data, open(file_name, "w"))
-
-
+    block_names = get_block_names(circ_name, extra="_tket")
+    for block_name in block_names:
+        run_block(circ_name, block_name, tol, two_q_err=two_q_err)

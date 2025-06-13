@@ -320,4 +320,4 @@ if __name__ == '__main__':
         shm.close()
         shm.unlink()
 
-    pickle.dump(ensemble_costs, open(f"ensemble_trace_dist_qc_{circ_name}_{max_tol}.pickle", 'wb'))
+    pickle.dump(ensemble_costs, open(f"ensemble_trace_dists/ensemble_trace_dist_qc_{circ_name}_{max_tol}.pickle", 'wb'))

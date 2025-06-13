@@ -3,8 +3,10 @@ from bqskit.ir.gates import CNOTGate, CircuitGate
 from sys import argv
 import numpy as np
 import pickle
+from pathlib import Path
+import os
 import matplotlib.pyplot as plt
-import seaborn as sns
+import concurrent.futures
 from multiprocessing.shared_memory import SharedMemory
 
 from bqskit.ir.gates import GlobalPhaseGate
@@ -28,8 +30,6 @@ import time
 shots = 100
 partitioned_circ_save_file = "/pscratch/sd/j/jkalloor/bqskit/partitioned_circs/{circ_name}.pickle"
 
-circ_name = "qae11"
-
 USE_QP = False
 
 lang = OPENQASM2Language()
@@ -40,6 +40,18 @@ def get_qcirc(circ: Circuit) -> QuantumCircuit:
     circ.remove_all(GlobalPhaseGate())
     return bqskit_to_qiskit(circ)
 
+
+def get_circs(circs: list[Circuit], params: list[np.ndarray], 
+              target: UnitaryMatrix) -> list[Circuit]:
+    # Set the params of the circuit
+    new_circs = []
+    for i, circ in enumerate(circs):
+        param = params[i]
+        new_circ = circ.copy()
+        new_circ.set_params(param)
+        fix_phase(new_circ, target)
+        new_circs.append(new_circ)
+    return new_circs
 
 def get_random_circs(num_circs: int,
                     block_circs: list[Circuit],
@@ -67,19 +79,29 @@ def get_random_circs(num_circs: int,
     else:
         rand_circ_inds = np.random.randint(0, len(block_circs), size=num_circs)
         rand_param_inds = np.random.randint(0, shm_array.shape[1], size=num_circs)
-    circ_strs = []
-    for c_ind, p_ind in zip(rand_circ_inds, rand_param_inds):
-        # Now we need to get the random circuits
-        rand_circ: Circuit = block_circs[c_ind].copy()
-        circ_param = shm_array[c_ind][p_ind]
-        # Now we need to set the params of the circuit
-        rand_circ.set_params(circ_param)
-        fix_phase(rand_circ, target)
-        circ_strs.append(rand_circ)
-    return circ_strs
+    all_block_circs = []
+    # for c_ind, p_ind in zip(rand_circ_inds, rand_param_inds):
+    rand_circs = [block_circs[c_ind] for c_ind in rand_circ_inds]
+    circ_params = [shm_array[c_ind][p_ind] for c_ind, p_ind in zip(rand_circ_inds, rand_param_inds)]
+
+    # Group into groups of 10
+    group_size = 40
+    rand_circ_groups = [rand_circs[i:i + group_size] for i in range(0, len(rand_circs), group_size)]
+    circ_param_groups = [circ_params[i:i + group_size] for i in range(0, len(circ_params), group_size)]
+    num_workers = min(256, len(rand_circ_groups))
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=num_workers) as executor:
+        futures = []
+        for rand_circs, circ_params in zip(rand_circ_groups, circ_param_groups):
+            future = executor.submit(get_circs, rand_circs, circ_params, target)
+            futures.append(future)
+        for future in concurrent.futures.as_completed(futures):
+            all_block_circs.extend(future.result())
+    return all_block_circs
 
 
-def generate_full_circuits(block_circs: dict[str, list[Circuit]], 
+def generate_full_circuits(circ_name: str,
+                           block_circs: dict[str, list[Circuit]], 
                            block_names: list,
                            block_inds: dict[str, np.ndarray],
                            block_probs: dict[str, np.ndarray],
@@ -107,9 +129,9 @@ def generate_full_circuits(block_circs: dict[str, list[Circuit]],
                                                   param_shape=param_shape,
                                                   target=target)
         
-    # print("Finish Getting Circs: ", time.time() - start, flush=True)
+    print("Finish Getting Circs: ", time.time() - start, flush=True)
     start = time.time()
-
+    
     for i in range(ens_size):
         circ = pcirc.copy()
         ind = 0
@@ -124,8 +146,31 @@ def generate_full_circuits(block_circs: dict[str, list[Circuit]],
             circ.replace_with_circuit(pt, new_block_circ, as_circuit_gate=True)
         all_circs.append(circ)
 
-    # print("Finish Generating Circs: ", time.time() - start, flush=True)
+    print("Finish Generating Circs: ", time.time() - start, flush=True)
     return all_circs
+
+
+def get_data(ens: list[Circuit],
+              ens_size: int,
+              target: UnitaryMatrix,
+              target_dm: np.ndarray,
+              target_sv_prob: np.ndarray):
+    '''
+    Get the data for the ensemble of circuits.
+    '''
+    ens = all_ens[i * ens_size:(i + 1) * ens_size]
+    mean_un = np.mean(np.array([c.get_unitary() for c in ens]), axis=0)
+    # print(ens[0].gate_counts)
+    qiskit_circs = [get_qcirc(c) for c in ens]
+    svs = [Statevector.from_instruction(circ).data for circ in qiskit_circs]
+    sv_probs = [np.abs(sv)**2 for sv in svs]
+    mean_sv_prob = np.mean(np.array(sv_probs), axis=0)
+    mean_dm = get_average_density_matrix(svs)
+    mean_frob_cost = normalized_gp_frob_cost(mean_un, target)
+    mean_trace_dist = trace_distance(target_dm, mean_dm)
+    mean_tvd_cost = tvd(target_sv_prob, mean_sv_prob)
+    return mean_frob_cost, mean_trace_dist, mean_tvd_cost
+
 
 # Circ 
 if __name__ == '__main__':
@@ -135,7 +180,8 @@ if __name__ == '__main__':
     block_inds = {}
 
     np.set_printoptions(precision=2, threshold=np.inf, linewidth=np.inf)
-    max_tol = float(argv[1]) if len(argv) > 1 else 0.01
+    circ_name = argv[1]
+    max_tol = float(argv[2]) if len(argv) > 2 else 0.01
 
     initial_circ = load_circuit(circ_name, opt=False)
     print("Original CX Count: ", initial_circ.count(CNOTGate()))
@@ -234,14 +280,11 @@ if __name__ == '__main__':
 
     pcirc_file = partitioned_circ_save_file.format(circ_name=circ_name)
     partitioned_circ: Circuit = pickle.load(open(pcirc_file, 'rb'))
-    # print("Partitioned Circuit: ", partitioned_circ.gate_counts)
-    # print(partitioned_circ_save_file)
 
-    ensemble_sizes = [640, 2560]
-    # ensemble_sizes = [2, 10, 20]
+    ensemble_sizes = [1, 5, 10, 40, 160, 640, 2560]
 
     ensemble_circuits = []
-    num_trials = 2
+    num_trials = 15
     ensemble_frob_costs = []
     ensemble_tvd_costs = []
     ensemble_trace_dist_costs = []
@@ -249,31 +292,45 @@ if __name__ == '__main__':
     # Get avg cost
     target = initial_circ.get_unitary()
     for ens_size in ensemble_sizes:
+        ens_size_path = f"ensemble_sim_{circ_name}_{max_tol}/{ens_size}.pickle"
+        if os.path.exists(ens_size_path):
+            print("Ensemble Size: ", ens_size, 
+                  " already exists, skipping", flush=True)
+            continue
         mean_frob_costs = []
         mean_tvd_costs = []
         mean_trace_dist_costs = []
         print("Ensemble Size: ", ens_size, flush=True)
-        for i in range(num_trials):
+        start_time = time.time()
+        # for i in range(num_trials):
             # print("Trial: ", i, flush=True)
-            ens = generate_full_circuits(block_circs, 
-                                         block_names,
-                                         block_inds,
-                                         block_probs,
-                                         param_shapes,
-                                         block_targets,
-                                         partitioned_circ,
-                                         max_tol=max_tol, 
-                                         ens_size=ens_size)
-            mean_un = np.mean(np.array([c.get_unitary() for c in ens]), axis=0)
-            # print(ens[0].gate_counts)
-            qiskit_circs = [get_qcirc(c) for c in ens]
-            svs = [Statevector.from_instruction(circ).data for circ in qiskit_circs]
-            sv_probs = [np.abs(sv)**2 for sv in svs]
-            mean_sv_prob = np.mean(np.array(sv_probs), axis=0)
-            mean_dm = get_average_density_matrix(svs)
-            mean_frob_costs.append(normalized_gp_frob_cost(mean_un, target))
-            mean_trace_dist_costs.append(trace_distance(target_dm, mean_dm))
-            mean_tvd_costs.append(tvd(target_sv_prob, mean_sv_prob))
+        all_ens = generate_full_circuits(circ_name,
+                                        block_circs, 
+                                        block_names,
+                                        block_inds,
+                                        block_probs,
+                                        param_shapes,
+                                        block_targets,
+                                        partitioned_circ,
+                                        max_tol=max_tol, 
+                                        ens_size=ens_size * num_trials)
+        
+        with concurrent.futures.ProcessPoolExecutor(max_workers=num_trials) as executor:
+            futures = []
+            for i in range(num_trials):
+                ens = all_ens[i * ens_size:(i + 1) * ens_size]
+                future = executor.submit(get_data, ens, ens_size, 
+                                         UnitaryMatrix(target), 
+                                         target_dm.copy(), 
+                                         target_sv_prob.copy())
+                futures.append(future)
+            for future in concurrent.futures.as_completed(futures):
+                mean_frob_cost, mean_trace_dist_cost, mean_tvd_cost = future.result()
+                mean_frob_costs.append(mean_frob_cost)
+                mean_trace_dist_costs.append(mean_trace_dist_cost)
+                mean_tvd_costs.append(mean_tvd_cost)
+
+        print("Time: ", time.time() - start_time, flush=True)
         ensemble_frob_costs.append(mean_frob_costs)
         ensemble_tvd_costs.append(mean_tvd_costs)
         ensemble_trace_dist_costs.append(mean_trace_dist_costs)
@@ -283,7 +340,8 @@ if __name__ == '__main__':
             "tvd": mean_tvd_costs,
             "trace_dist": mean_trace_dist_costs
         }
-        pickle.dump(size_cost, open(f"ensemble_{circ_name}_{max_tol}_{ens_size}.pickle", 'wb'))
+        Path(ens_size_path).parent.mkdir(parents=True, exist_ok=True)
+        pickle.dump(size_cost, open(ens_size_path, 'wb'))
     
 
     for block_name, shm in shms.items():
@@ -297,4 +355,10 @@ if __name__ == '__main__':
         "trace_dist": ensemble_trace_dist_costs
     }
 
-    pickle.dump(all_costs, open(f"ensemble_costs_{circ_name}_{max_tol}_640_2560.pickle", 'wb'))
+    # Delete all ens_size_path files
+    for ens_size in ensemble_sizes:
+        ens_size_path = f"ensemble_sim_{circ_name}_{max_tol}/{ens_size}.pickle"
+        os.remove(ens_size_path)
+    # Save all costs
+    final_path = f"ensemble_sim_{circ_name}_{max_tol}/all_data.pickle"
+    pickle.dump(all_costs, open(final_path, 'wb'))

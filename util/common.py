@@ -16,7 +16,7 @@ from bqskit.utils.math import unitary_log_no_i
 
 from .gg import gg_gate_def, GridSynthGate
 
-base_bqskit_dir = "."
+base_bqskit_dir = "/pscratch/sd/j/jkalloor/bqskit"
 good_block_dir = f"{base_bqskit_dir}/good_blocks"
 bad_block_dir = f"{base_bqskit_dir}/bad_blocks"
 base_checkpoint_dir = f"{base_bqskit_dir}/block_checkpoints_final_paper"
