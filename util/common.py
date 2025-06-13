@@ -12,6 +12,7 @@ from bqskit.ir.lang.qasm2 import OPENQASM2Language
 from .distance import frobenius_cost, normalized_frob_cost, hs_cost
 import multiprocessing as mp
 from bqskit.runtime import get_runtime
+from bqskit.utils.math import unitary_log_no_i
 
 from .gg import gg_gate_def, GridSynthGate
 
@@ -71,11 +72,52 @@ def create_single_jiggled_ensemble(circ_params: tuple[Circuit, np.ndarray],
             ens.append(new_circ)
     return ens
 
+
+def get_ham_shift(circ: Circuit, target: UnitaryMatrix) -> float:
+    V = target.conj().T
+    un = circ.get_unitary()
+    shift = V @ un
+    ham = unitary_log_no_i(shift)
+    return ham
+
+def get_ham_shifts(circ_params: tuple[Circuit, np.ndarray, dict],
+                        target: UnitaryMatrix) -> float:    
+    circ, params, cache = circ_params
+    hams = []
+    if cache is not None:
+        # Get the worker cache
+        w_cache = get_runtime().get_cache()
+        w_cache.clear()
+        w_cache.update(cache)
+    for param in params.tolist():
+        new_circ = circ.copy()
+        new_circ.set_params(param)
+        try:
+            fix_phase(new_circ, target)
+        except:
+            print("Problem: ", target, flush=True)
+        hams.append(get_ham_shift(new_circ, target))
+
+    return hams
+
+
 def create_avg_utry(circ_params: tuple[Circuit, np.ndarray, dict], 
                     target: UnitaryMatrix,  
                     add_cost: bool = False) -> UnitaryMatrix | tuple[UnitaryMatrix, 
                                                                      float]:
     circ, params, cache = circ_params
+
+    if len(params) == 0:
+        new_circ = circ.copy()
+        fix_phase(new_circ, target)
+        un = new_circ.get_unitary()
+        if add_cost:
+            avg_dist = normalized_frob_cost(un, target)
+            avg_hs = hs_cost(un, target)
+            return (un, avg_dist, avg_hs)
+        else:
+            return un
+
     if cache is not None:
         # Get the worker cache
         w_cache = get_runtime().get_cache()
@@ -159,9 +201,9 @@ def create_jiggled_ensemble_mp(circ_params: list[tuple[Circuit, np.ndarray]]) ->
 
 def load_jiggled_ensemble_separate(file_name: str, jiggle_file_name: str) -> tuple[list[Circuit], np.ndarray]:
     circs = load_ensemble(file_name)
-    print("Num Circs: ", len(circs), flush=True)
+    # print("Num Circs: ", len(circs), flush=True)
     params: np.ndarray = np.load(jiggle_file_name)
-    print("Params Shape: ", params.shape, flush=True)
+    # print("Params Shape: ", params.shape, flush=True)
     return circs, params
 
 def load_jiggled_ensemble(file_name: str, jiggle_file_name: str, 
@@ -169,9 +211,9 @@ def load_jiggled_ensemble(file_name: str, jiggle_file_name: str,
                                                               np.ndarray, 
                                                               dict]]:
     circs = load_ensemble(file_name)
-    print("Num Circs: ", len(circs), flush=True)
+    # print("Num Circs: ", len(circs), flush=True)
     params: np.ndarray = np.load(jiggle_file_name)
-    print("Params Shape: ", params.shape, flush=True)
+    # print("Params Shape: ", params.shape, flush=True)
     try:
         caches = pickle.load(open(cache_file_name, "rb"))
     except:
@@ -193,9 +235,9 @@ def store_ensemble_strs(qasms: list[str], file_name: str):
 def load_ensemble(file_name: str) -> list[Circuit]:
     with open(file_name, "r") as f:
         qasms = f.read().split("\nBREAK\n")
-    print("SPlit String", flush=True)
+    # print("SPlit String", flush=True)
     circs = [qlang.decode(qasm, gate_defs = [("gg", gg_gate_def)]) for qasm in qasms]
-    print("Decoded", flush=True)
+    # print("Decoded", flush=True)
     return circs
 
 def load_ensemble_strs(file_name: str) -> list[Circuit]:

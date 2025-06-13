@@ -188,15 +188,13 @@ class ConvertToZXZXZSimple(BasePass):
         if group:
             GroupSingleQuditGatePass.group(circuit)
         # For each CircuitGate, replace with correspond ZXZXZ
-        pts = []
         for cycle, op in circuit.operations_with_cycles(reverse=True):
             if op.num_params >= 2:
                 pt = CircuitPoint(cycle, op.location[0])
                 new_circ = ZXZXZDecomposition.run_zxzxz_decomp_circ(op.get_unitary())
-                pts.append(CircuitPoint(cycle, op.location[0]))
+                # pts.append(CircuitPoint(cycle, op.location[0]))
+                # new_ops.append(Operation(CircuitGate(new_circ), op.location))
                 circuit.replace_with_circuit(pt, new_circ, as_circuit_gate=True)
-        
-        # print("Num U3s: ", len(uns))
         circuit.unfold_all()
 
     async def run(

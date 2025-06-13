@@ -5,7 +5,6 @@ import numpy as np
 
 # from multiprocessing import shared_memory, Lock
 from typing import TYPE_CHECKING
-from cachetools import LRUCache
 
 from bqskit.ir.circuit import Circuit, CircuitLocation
 from bqskit.ir.gates import (IdentityGate, ZGate, SGate, SdgGate, 

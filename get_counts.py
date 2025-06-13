@@ -3,7 +3,7 @@ from util import get_block_names
 import glob
 import concurrent.futures
 
-cliff_t = False
+cliff_t = True
 
 if not cliff_t:
     err_thresholds = [1e-1, 1e-2, 1e-3, 1e-4]
@@ -32,7 +32,6 @@ def print_row(circ_name:str, counts: list[tuple[int, int]]):
         print("")
 
 if __name__ == '__main__':
-    # circ_names = get_completed_blocks(cliff_t)
 
     dirs = ["good_blocks"]
     trial_circs = set()
@@ -51,21 +50,27 @@ if __name__ == '__main__':
 
     circs.remove("hhl8")
     for i in range(7):
-        circs.remove(f"QITE_8_{i}")
-    # circs.remove(f"QITE_8_{i}")
+        try:
+            circs.remove(f"QITE_8_{i}")
+        except KeyError:
+            continue
+    # circs = ["add17", "qae13", "qaoa10", "shor_12", "lgt_17"]
 
-    # for c in ["qae13", "qaoa10", "shor_12"]:
-    #     circs.remove(c)
+    for c in ["add17", "qae13", "qaoa10", "shor_12", "lgt_17"]:
+        try:
+            circs.remove(c)
+        except KeyError:
+            continue
 
     # print(circs)
     # exit(0)
     # circs = ["lgt_17"]
     all_counts: dict[str, list[concurrent.futures.Future]] = {}
-    with concurrent.futures.ProcessPoolExecutor(max_workers=120) as executor:
+    with concurrent.futures.ProcessPoolExecutor(max_workers=4) as executor:
         for circ_name in circs:
             all_counts[circ_name] = []
             for err_threshold in err_thresholds:
-                fut = executor.submit(get_circ_data_basic, circ_name, err_threshold, count_t=cliff_t)
+                fut = executor.submit(get_circ_data_basic, circ_name, err_threshold, count_t=cliff_t,)
                 all_counts[circ_name].append(fut)
     
     print_header()

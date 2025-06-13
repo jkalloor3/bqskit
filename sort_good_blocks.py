@@ -10,25 +10,25 @@ from bqskit.compiler import Compiler
 from bqskit import enable_logging
 import time
 import glob
-# from pathlib import Path
+from pathlib import Path
 import pickle
 import shutil
 
 # enable_logging(True)
 # input_folder = f"/pscratch/sd/j/jkalloor/bqskit/QITE_8"
-input_folder = "/pscratch/sd/j/jkalloor/bqskit/ensemble_benchmarks_tket"
+input_folder = "ensemble_benchmarks"
 good_output_folder = 'good_blocks'
 bad_output_folder = 'bad_blocks'
-block_save_dir = "/pscratch/sd/j/jkalloor/bqskit/block_qasms_{circ_name}/"
-partitioned_circ_save_file = "/pscratch/sd/j/jkalloor/bqskit/partitioned_circs/{circ_name}.pickle"
+block_save_dir = "block_qasms_{circ_name}/"
+partitioned_circ_save_file = "partitioned_circs/{circ_name}.pickle"
 
-LARGE_BLOCK_SIZE = 9
-SMALL_BLOCK_SIZE = 3
+LARGE_BLOCK_SIZE = 8
+SMALL_BLOCK_SIZE = 4
 QUICK_SMALL_BLOCK_SIZE = 6
 
 def partition_workflow(circ_name: str, num_qudits: int = 8) -> list:
-    if num_qudits < 18:
-        partitioner_1 = ScanPartitioner(SMALL_BLOCK_SIZE)
+    if num_qudits < 14:
+        partitioner_1 = ScanPartitioner(SMALL_BLOCK_SIZE, ignore_qft=True)
         partitioner_2 = ScanPartitioner(LARGE_BLOCK_SIZE)
     else:
         partitioner_1 = QuickPartitioner(QUICK_SMALL_BLOCK_SIZE)
@@ -43,8 +43,8 @@ def partition_workflow(circ_name: str, num_qudits: int = 8) -> list:
     ExtractMeasurements(),
     partitioner_1,
     ExtendBlockSizePass(SMALL_BLOCK_SIZE),
-    partitioner_2,
-    extend_pass,
+    # partitioner_2,
+    # extend_pass,
     ForEachBlockPass([
         UnfoldPass(),
         WriteQasmPass(block_save_dir.format(circ_name=circ_name),
@@ -88,13 +88,14 @@ def sort_blocks(circ_name: str, good_output_folder, bad_output_folder):
 
 if __name__ == '__main__':
     compiler = Compiler(num_workers=1)
-    circ_types = ['lgt_17']
+    circ_types = ['shor_12_no_qft']
     job_ids = []
     for circ_type in circ_types:
         circ_files = glob.glob(os.path.join(input_folder, f"{circ_type}.qasm"))
         circ_names = [circ_file.split('/')[-1].split('.')[0] for circ_file in circ_files]
         circ_data = list(zip(circ_names, circ_files))
         for name, file in circ_data:
+            print("Processing: ", name, flush=True)
             job_ids.append((name, process_files(name, file, compiler)))
 
     # print(job_ids, flush=True)
@@ -107,4 +108,6 @@ if __name__ == '__main__':
         out_circ = compiler.result(job_id)
         print("Finished: ", name, flush=True)
         sort_blocks(name, good_output_folder, bad_output_folder)
-        pickle.dump(out_circ, open(partitioned_circ_save_file.format(circ_name=name), 'wb'))
+        pcirc_file = partitioned_circ_save_file.format(circ_name=name)
+        Path(pcirc_file).parent.mkdir(parents=True, exist_ok=True)
+        pickle.dump(out_circ, open(pcirc_file, 'wb'))

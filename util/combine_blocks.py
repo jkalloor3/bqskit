@@ -6,9 +6,9 @@ from bqskit.ir import Circuit
 from .common import load_block, get_block_names, get_circ_names
 from .counter import (load_avg_ensemble_counts_est, load_avg_ensemble_counts_full, get_circ_counts)
 
-base_dir = "/pscratch/sd/j/jkalloor/bqskit"
+base_dir = "/home/jkalloor/bqskit"
 nisq_checkpoint_dir = f"{base_dir}/block_checkpoints_final_paper"
-clifft_checkpoint_dir = f"{base_dir}/block_checkpoints_final_paper_clifft"
+clifft_checkpoint_dir = f"{base_dir}/block_checkpoints_final_paper_clifft_tket_prev"
 
 
 frob_factor = lambda dim: np.sqrt(dim * 2)
@@ -209,7 +209,8 @@ def get_circ_data(circ_name: str, err_threshold: float, use_base: bool = True,
 def get_circ_data_basic(circ_name: str, 
                         err_threshold: float, 
                         count_rz: bool = False, 
-                        count_t: bool = False) -> tuple[int, int]:
+                        count_t: bool = False,
+                        use_cache: bool = False) -> tuple[int, int]:
     '''
     Takes in a circ name and total error, and calculates the 
     best combination of blocks that minimizes the count
@@ -243,7 +244,7 @@ def get_circ_data_basic(circ_name: str,
     tket_counts = get_circ_counts(circ_files_tket, 
                                         count_t=count_t, 
                                         count_rz=count_rz, 
-                                        target_error=err_threshold)
+                                        target_error=err_threshold) 
 
     for i, block_name in enumerate(block_names):
         orig_count = orig_counts[i]
@@ -266,6 +267,8 @@ def get_circ_data_basic(circ_name: str,
         else:
             num_qubits[block_name] = 8
 
+    # print(folder_files)
+
     for folder_name in folder_files:
         tol = float(folder_name.split('_')[-1])
         block_num = folder_name.split('_')[-2]
@@ -282,11 +285,14 @@ def get_circ_data_basic(circ_name: str,
             if count_t:
                 # Get params file as well
                 params_file = glob.glob(os.path.join(folder_name, f"ensemble_0_jiggles_.npy"))
-                cache_file = glob.glob(os.path.join(folder_name, f"ensemble_0_cache.pkl"))
-                if len(params_file) == 0 or len(cache_file) == 0:
+                if len(params_file) == 0:
                     continue
                 params_file = params_file[0]
-                cache_file = cache_file[0]
+                if use_cache:
+                    cache_file = glob.glob(os.path.join(folder_name, f"ensemble_0_cache.pkl"))
+                    if len(cache_file) == 0:
+                        continue
+                    cache_file = cache_file[0]
             dim = 2 ** num_qubits[block_num]
             if tol > 4.0:
                 add_factor = 100 # Bad scaling for smaller errors
@@ -299,19 +305,23 @@ def get_circ_data_basic(circ_name: str,
             if count_t:
                 # Get params file as well
                 params_file = glob.glob(os.path.join(folder_name, f"ensemble_final_jiggle.npy"))[0]
-                cache_file = glob.glob(os.path.join(folder_name, f"ensemble_final_cache.pkl"))[0]
+                if use_cache:
+                    cache_file = glob.glob(os.path.join(folder_name, f"ensemble_0_cache.pkl"))[0]
             reader = csv.DictReader(open(csv_file, 'r'))
             final_threshold = (10 ** -tol)
             for row in reader:
                 if "Norm. Bias" in row:  # Check if the column value is not empty
                     final_threshold = min(final_threshold, float(row["Norm. Bias"]))
 
+        if not use_cache:
+            assert cache_file is None
 
         if final_threshold < err_threshold:
             avg_count = load_avg_ensemble_counts_est(ensemble_file, params_file, 
                                                         err_threshold, 
                                                         count_t=count_t, 
                                                         count_rz=count_rz)
+            # print("Avg count: ", avg_count)
             if avg_count < block_data[block_num]:
                 avg_count_actual = load_avg_ensemble_counts_full(ensemble_file, 
                                                                  params_file,

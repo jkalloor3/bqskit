@@ -10,28 +10,51 @@ from bqskit.ir.gates import CNOTGate
 # Generate a super ensemble for some error bounds
 from bqskit.passes import CheckpointRestartPass
 from bqskit.passes import ForEachBlockPass, ScanPartitioner, IfThenElsePass, PassPredicate
-from util import JiggleEnsemblePass, CleanupBlockFiles
-from util import  LEAPSynthesisPass2, SecondLEAPSynthesisPass, EnsScanningGateRemovalPass
-from util import CheckEnsembleQualityPass, FixGlobalPhasePass
+from util import JiggleEnsemblePass, FixGlobalPhasePass
+from util import  LEAPSynthesisPass2, EnsScanningGateRemovalPass
+from util import CheckEnsembleQualityPass
 from util import GenerateProbabilityPass
-from util import CreateEnsemblePass
+from bqskit.passes import CheckpointRestartPass
+from bqskit.passes import ForEachBlockPass, ScanPartitioner
+from util import JiggleEnsemblePass
+from ntro import NumericalTReductionPass
+from util import LEAPSynthesisPass2, GenerateProbabilityPass, FixAnglesPass, UnFixTPass
+from util import CheckEnsembleQualityPass, FixGlobalPhasePass, ConvertToZXZXZSimple
 
-# from bqskit.ext import pytket_to_bqskit, bqskit_to_pytket
-# from pytket.passes import FullPeepholeOptimise
+from util.distance import normalized_gp_frob_cost
 
+class DoNothingPass(BasePass):
 
-# class TketPass(BasePass):
-#     async def run(self, circuit, data):
-#         print("Init CX Count: ", circuit.count(CNOTGate()), flush=True)
-#         tcirc = bqskit_to_pytket(circuit)
-#         FullPeepholeOptimise(allow_swaps=False).apply(tcirc)
-#         circuit = pytket_to_bqskit(tcirc)
-#         print("Post Tket CX Count: ", circuit.count(CNOTGate()), flush=True)
+    async def run(self, circuit: Circuit, data: PassData) -> None:
+        data['scan_sols'] = [(circuit.copy(), 0.0)]
+        print("Do Nothing Pass, final distance: 0.0", flush=True)
+        pass
 
+class PrintDistancesPass(BasePass):
+
+    async def run(self, circuit: Circuit, data: PassData) -> None:
+        scan_sols = data.get('scan_sols', [])
+        ds = [d for _, d in scan_sols]
+        actual_ds = [normalized_gp_frob_cost(c.get_unitary(), data.target) for c, _ in scan_sols]
+        print("Distances: ", ds, flush=True)
+        print("Actual Distances: ", actual_ds, flush=True)
+        pass 
+
+class FilterDistancesPass(BasePass):
+
+    def __init__(self, threshold: float = 0.001):
+        super().__init__()
+        self.threshold = threshold
+
+    async def run(self, circuit: Circuit, data: PassData) -> None:
+        scan_sols = data.get('scan_sols', [])
+        new_scan_sols = [(c, d) for c, d in scan_sols if d < self.threshold]
+        data['scan_sols'] = new_scan_sols
+        pass 
 
 class CountPredicate(PassPredicate):
     def get_truth_value(self, circuit, data):
-        return circuit.count(CNOTGate()) < 20
+        return circuit.count(CNOTGate()) < 26
 
 good_instantiation_options = {
     'multistarts': 8,
@@ -44,7 +67,7 @@ good_instantiation_options = {
 }
 
 SMALL_BLOCK_SIZE = 4
-base_checkpoint_dir_form = "small_block_checkpoints_final_paper_{block_size}_more_cx{extra}"
+base_checkpoint_dir_form = "small_block_checkpoints_final_paper_{block_size}_clifft{extra}"
 NUM_UNIQUE_CIRCS = 250
 
 def get_ensemble_workflow(circ_name: str, tol: float, extra: str = "") -> WorkflowLike:
@@ -60,7 +83,9 @@ def get_ensemble_workflow(circ_name: str, tol: float, extra: str = "") -> Workfl
     print("Checkpoint Dir: ", checkpoint_dir, flush=True)
     print("Error Threshold: ", err_thresh, flush=True)
 
+    # has_qft = "no_qft" in circ_name
     has_qft = False
+
     slow_partitioner_passes = [
         ScanPartitioner(block_size=small_block_size, ignore_qft=has_qft),
     ]
@@ -70,7 +95,7 @@ def get_ensemble_workflow(circ_name: str, tol: float, extra: str = "") -> Workfl
     synthesis_pass = LEAPSynthesisPass2(
         store_partial_solutions=True,
         success_threshold = extra_err_thresh,
-        partial_success_threshold=err_thresh,
+        partial_success_threshold=err_thresh / 5,
         max_layer_factor=1.01,
         instantiate_options=instantiation_options,
         max_layer=14,
@@ -79,32 +104,25 @@ def get_ensemble_workflow(circ_name: str, tol: float, extra: str = "") -> Workfl
     
     full_success_threshold = err_thresh * 0.001
     success_threshold = err_thresh
-    # second_synthesis_pass = SecondLEAPSynthesisPass(
-    #     success_threshold = full_success_threshold,
-    #     partial_success_threshold=success_threshold,
-    #     max_layer_factor=1.01,
-    #     instantiate_options=instantiation_options,
-    #     max_layer=14,
-    #     max_psols=10
-    # )
 
-    deletion_pass = EnsScanningGateRemovalPass(
-        success_threshold=err_thresh,
-        tree_depth=3,
-        max_psols=20
-    )
+    ntro = NumericalTReductionPass(
+        full_loops=3,
+        success_threshold=err_thresh * 5,
+        use_calculated_error=True)
 
-    jiggle_pass = JiggleEnsemblePass(success_threshold=err_thresh, 
+    jiggle_pass = JiggleEnsemblePass(success_threshold=err_thresh * 5, 
                                   num_circs=2000, 
                                   use_scan_sols=True,
                                   use_ensemble=False,
                                   use_calculated_error=False,
                                   jiggle_skew=0,
-                                  count_t=False,
+                                  count_t=True,
                                   do_u3_perturbation=True,
-                                  flood_circ=True)
+                                  flood_circ=False)
 
     leap_workflow = [
+        FixAnglesPass(15),
+        UnFixTPass(),
         CheckpointRestartPass(checkpoint_dir, 
                                 default_passes=partitioner_passes),
         ForEachBlockPass(
@@ -113,15 +131,20 @@ def get_ensemble_workflow(circ_name: str, tol: float, extra: str = "") -> Workfl
                 IfThenElsePass(
                     CountPredicate(),
                     synthesis_pass,
-                    deletion_pass
+                    DoNothingPass()
                 ),
-                # second_synthesis_pass,
+                FixAnglesPass(int(tol) * 2 + 2, run_scan_sols=True),
+                ConvertToZXZXZSimple(group=False),
+                ntro,
+                FixAnglesPass(int(tol) * 2 + 2, run_scan_sols=True),
+                FixGlobalPhasePass(),
+                FilterDistancesPass(threshold=(err_thresh * 5)),
+                # PrintDistancesPass(),
                 jiggle_pass,
                 GenerateProbabilityPass(run_on_ensemble_0=True),
-                CheckEnsembleQualityPass(False),
+                CheckEnsembleQualityPass(True),
             ]
         ),
-        # CheckEnsembleQualityPass(False, sample_blocks = True),
     ]
     return leap_workflow
 

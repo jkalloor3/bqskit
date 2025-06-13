@@ -29,7 +29,7 @@ good_instantiation_options = {
     'method': 'minimization'
 }
 
-base_checkpoint_dir_form = "/pscratch/sd/j/jkalloor/bqskit/block_checkpoints_final_paper{extra}_4"
+base_checkpoint_dir_form = "block_checkpoints_final_paper{extra}_4_2"
 NUM_UNIQUE_CIRCS = 250
 
 def get_ensemble_workflow(circ_name: str, tol: float, extra: str = "", 
@@ -71,8 +71,8 @@ def get_ensemble_workflow(circ_name: str, tol: float, extra: str = "",
             max_layer_factor=1.01,
             instantiate_options=instantiation_options,
             max_layer=14,
-            max_psols=5,
-            maximize_diversity=max_diversity,
+            max_psols=10,
+            maximize_diversity=True,
         )
     if max_diversity:
         full_success_threshold = err_thresh ** 2
@@ -104,7 +104,7 @@ def get_ensemble_workflow(circ_name: str, tol: float, extra: str = "",
         ForEachBlockPass(
             [
                 synthesis_pass,
-                second_synthesis_pass,
+                # second_synthesis_pass,
             ],
             skip_file="ensemble_0_.qasms"
         ),
@@ -112,7 +112,6 @@ def get_ensemble_workflow(circ_name: str, tol: float, extra: str = "",
         jiggle_pass,
         CleanupBlockFiles(),
         CheckEnsembleQualityPass(False, calculate_hs=True),
-        AddHSCostPass(),
     ]
     return leap_workflow
 
@@ -228,7 +227,7 @@ def get_circ_data(circ_name: str, block_num: str | int,
                   max_diversity: bool = False) -> list[tuple[str, str, float]]:
     # Categorize circs into different categories and run them
     if tol == -1.0:
-        tols = [1.0, 2.0, 3.0, 4.0, 5.0, 6.0]
+        tols = [1.0, 2.0, 3.0, 4.0, 5.0]
     else:
         tols = [tol]
     if max_diversity:

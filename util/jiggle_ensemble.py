@@ -157,8 +157,10 @@ class  JiggleEnsemblePass(BasePass):
         num_rzs = circ.count(RZGate())
         # print("Init Dist: ", dist, flush=True)
         if (num_u3s + num_rzs + num_ggs) == 0:
-            print("No U3s or Zs", flush=True)
-            return np.array([])
+            print("No U3s or Zs", circ.gate_counts, flush=True)
+            # Return a num x 1 array of zeros
+            empty_params = np.zeros((num * 2, circ.num_params))
+            return empty_params, None
         
         if num_ggs > 0:
             local_cache = {}
@@ -319,7 +321,8 @@ class  JiggleEnsemblePass(BasePass):
                         pts_to_remove.append(CircuitPoint(cycle, op.location[0]))
                 elif isinstance(op.gate, IdentityGate):
                     pts_to_remove.append(CircuitPoint(cycle, op.location[0]))
-            circ.batch_pop(pts_to_remove)
+            if len(pts_to_remove) > 0:
+                circ.batch_pop(pts_to_remove)
                             
             new_circ_str = lang.encode(circ)
             del circ
@@ -337,7 +340,6 @@ class  JiggleEnsemblePass(BasePass):
         # Collected one solution from synthesis
 
         checkpoint_dir = data["checkpoint_dir"]
-        print("Checkpoint Dir: ", checkpoint_dir, flush=True)
         print("Starting JIGGLE ENSEMBLE", flush=True)
         # checkpoint_dir = "/pscratch/sd/j/jkalloor/bqskit/block_checkpoints_final_paper_clifft/QITE_8_1_0_5.0"
         ensemble_file_name = os.path.join(checkpoint_dir, "ensemble_{ind}_{extra}.qasms")
@@ -430,6 +432,7 @@ class  JiggleEnsemblePass(BasePass):
         _logger.debug('Converting single-qubit general gates to U3Gates.')
 
         if circuit.num_params == 0 and self.count_t:
+            print("No Params in Circuit, skipping Jiggle Ensemble Pass", flush=True)
             return
 
         checkpoint_dir = data["checkpoint_dir"]
@@ -475,17 +478,19 @@ class  JiggleEnsemblePass(BasePass):
         store_ensemble_strs(circuit_strs, ens_file)
         print("Finished Jiggling Ensemble", flush=True)
         store_time = time.time() - store_start
-        store_params(all_params, jiggle_file)
+        if len(all_params[0]) > 0:
+            store_params(all_params, jiggle_file)
 
-        cache_file = os.path.join(checkpoint_dir, f"ensemble_cache_0.pkl")
-        Path(cache_file).parent.mkdir(parents=True, exist_ok=True)
-        pickle.dump(all_caches, open(cache_file, "wb"))
-        print("Stored Ensemble", store_time, flush=True)
-        if self.pass_ensemble:
-            # Calculate ensemble
-            data['ensemble_circs'] = circuit_strs
-            data['ensemble_jiggles'] = all_params
-            data["ensemble_cache"] = all_caches
+        if self.count_t:
+            cache_file = os.path.join(checkpoint_dir, f"ensemble_cache_0.pkl")
+            Path(cache_file).parent.mkdir(parents=True, exist_ok=True)
+            pickle.dump(all_caches, open(cache_file, "wb"))
+            print("Stored Ensemble", store_time, flush=True)
+            if self.pass_ensemble:
+                # Calculate ensemble
+                data['ensemble_circs'] = circuit_strs
+                data['ensemble_jiggles'] = all_params
+                data["ensemble_cache"] = all_caches
 
     async def run(self, circuit: Circuit, data: PassData) -> None:
         if self.use_ensemble:

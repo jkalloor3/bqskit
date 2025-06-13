@@ -1,4 +1,3 @@
-from cachetools import LRUCache
 import numpy as np
 from math import ceil
 from bqskit.ir import Circuit
@@ -28,8 +27,12 @@ class GateCounter:
     def __init__(self, est: bool = True, cache_file: str = None,
                  cache_ind: int = 0) -> None:
         self.est = est
-        caches = pickle.load(open(cache_file, "rb")) if cache_file is not None else [{}]
-        self.cache = caches[cache_ind]
+        self.cache = None
+        if cache_file is not None:
+            caches = pickle.load(open(cache_file, "rb"))
+            self.cache = caches[cache_ind]
+        if self.cache is None:
+            self.cache = {}
 
     @staticmethod
     def has_non_rz(circ: Circuit) -> bool:
@@ -104,7 +107,8 @@ class GateCounter:
         if target_error is None:
             precision = 18
         else:
-            num_params = circ.count(U3Gate()) * 3 + circ.count(RZGate())
+            num_params = (circ.count(U3Gate()) * 3 + circ.count(RZGate()) + 
+                            circ.count(GridSynthGate()))
             if num_params == 0:
                 return circ.count(TGate()) + circ.count(TdgGate())
             error_per_param = target_error / num_params
@@ -116,7 +120,6 @@ class GateCounter:
         else:
             out_circ = circ
 
-        # print("OutCirc Gate Counts: ", out_circ.gate_counts, flush=True)
 
         # Count the number of T gates
         num_t = out_circ.count(TGate()) + out_circ.count(TdgGate())
@@ -184,7 +187,8 @@ def load_ensemble_counts_est(ensemble_file: str, jiggle_file: str,
                 all_qasms.append(new_circ)
 
         # Ensemble should already be fixed
-        counts = [gate_counter_est.count_t(circ, target_error, skip_fix=True) for circ in all_qasms]
+        counts = [gate_counter_est.count_t(circ, target_error, skip_fix=True) 
+                  for circ in all_qasms]
     return counts
 
 def load_avg_ensemble_counts_est(ensemble_file: str, jiggle_file: str, target_error: float, 

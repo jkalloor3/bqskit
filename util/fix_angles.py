@@ -80,7 +80,7 @@ class FixAnglesPass(BasePass):
                     pt = CircuitPoint(cycle, op.location[0])
                     circuit.replace_with_circuit(pt, zxzxz_circ,as_circuit_gate=True)
                     # new_dist = normalized_gp_frob_cost(zxzxz_circ.get_unitary(), op.get_unitary())
-                if RXGate.is_rx(op.get_unitary()):
+                elif RXGate.is_rx(op.get_unitary()):
                     rz_unitary = HGate().get_unitary() @ op.get_unitary() @ HGate().get_unitary()
                     angle = RZGate.calc_params(rz_unitary)
                     zxzxz_circ = get_rz_gate_circ(angle, precision)
@@ -89,7 +89,7 @@ class FixAnglesPass(BasePass):
                     zxzxz_circ.append_gate(HGate(), (0,))
                     pt = CircuitPoint(cycle, op.location[0])
                     circuit.replace_with_circuit(pt, zxzxz_circ,as_circuit_gate=True)
-                if RYGate.is_ry(op.get_unitary()):
+                elif RYGate.is_ry(op.get_unitary()):
                     hy_unitary = SGate().get_unitary() @ HGate().get_unitary()
                     rz_unitary = hy_unitary.conj().T @ op.get_unitary() @ hy_unitary
                     angle = RZGate.calc_params(rz_unitary)
@@ -109,16 +109,15 @@ class FixAnglesPass(BasePass):
         if self.run_scan_sols:
             init_dists = [x[1] for x in data["scan_sols"]]
             orig_gate_counts = [x[0].gate_counts for x in data["scan_sols"]]
+            targets = [x[0].get_unitary() for x in data["scan_sols"]]
             for circ, _ in data["scan_sols"]:
                 FixAnglesPass.run_circ(circ, self.precision)
-            final_dists = np.array([normalized_gp_frob_cost(c.get_unitary(), data.target) for c, _ in data["scan_sols"]])
+            final_dists = np.array([normalized_gp_frob_cost(c[0].get_unitary(), target) for target, c in zip(targets, data["scan_sols"])])
             if np.any(final_dists > 0.001):
                 print("Circ Gates: ", orig_gate_counts, 
                       [x[0].gate_counts for x in data["scan_sols"]], flush=True)
                 print("Orig Gate Counts: ", circuit.gate_counts, flush=True)
-                print("Orig Unitary: ", circuit.get_unitary(), flush=True)
-                print("Target Unitary: ", data.target, flush=True)
-                print("Dists: ", init_dists, final_dists, flush=True)
+                print("Post-fix Angles: ", init_dists, final_dists, flush=True)
         else:
             FixAnglesPass.run_circ(circuit, self.precision)
 

@@ -50,7 +50,7 @@ class LEAPSynthesisPass2(BasePass):
         layer_generator: LayerGenerator | None = None,
         success_threshold: float = 1e-8,
         cost: CostFunctionGenerator = HilbertSchmidtResidualsGenerator(),
-        max_layer: int | None = 40,
+        max_layer: int | None = 25,
         max_layer_factor: float = 2.0,
         store_partial_solutions: bool = True,
         partials_per_depth: int = 25,
@@ -173,7 +173,7 @@ class LEAPSynthesisPass2(BasePass):
         self.partials_per_depth = partials_per_depth
         self.max_psols = max_psols
         if maximize_diversity:
-            self.max_layer_factor = 2.0
+            # self.max_layer_factor = 2.0
             self.max_psols *= 2
         self.maximize_diversity = maximize_diversity
 
@@ -254,7 +254,6 @@ class LEAPSynthesisPass2(BasePass):
         default_count = default_circuit.count(CNOTGate())
         max_layer = max(default_count + 2, int(default_count * self.max_layer_factor))
         max_layer = min(self.max_layer, max_layer)
-        print("Max Layer: ", max_layer, flush=True)
 
         # Main loop
         step = 0

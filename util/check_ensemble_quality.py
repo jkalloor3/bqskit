@@ -79,28 +79,6 @@ class CheckEnsembleQualityPass(BasePass):
 
         return ensemble_data
 
-
-    # def sample_sub_ensembles(self, 
-    #                          circuit: Circuit, 
-    #                          data: PassData) -> list[list[tuple[Circuit, np.ndarray, Any]]]:
-        
-    #     # Get ensembles for each block
-    #     block_data = data[ForEachBlockPass.key]
-    #     pts: list[CircuitPoint] = []
-    #     all_data = []
-    #     for i, block in enumerate(block_data):
-    #         pts.append(block['point'])
-    #         pcircs = block['ensemble_circs']
-    #         pparams = block['ensemble_params']
-    #         pcaches = block['ensemble_caches']
-    #         all_data.append((pcircs, pparams, pcaches))
-
-    #     final_circs = []
-    #     final_params = []
-    #     for _ in ra
-
-
-
     async def run(self, circuit: Circuit, data: PassData) -> None:
         # Check Ensemble Quality and output it to a CSV
         print("Check Ensemble Quality Pass", flush=True)
@@ -152,6 +130,11 @@ class CheckEnsembleQualityPass(BasePass):
 
         start_ens_ind = 0
 
+        if len(ensemble) == 0:
+            print("No ensembles found, skipping pass", flush=True)
+            return
+
+
         for ens in ensemble:
             if len(ens) > 0 and isinstance(ens[0], str):
                 ens_file, jiggle_file, cache_file = ens
@@ -159,6 +142,11 @@ class CheckEnsembleQualityPass(BasePass):
             else:
                 circ_params = ens
             circuits = [circ for circ, _, _ in circ_params]
+            params = [params for _, params, _ in circ_params]
+            if len(params[0]) == 0:
+                print("No params found in ensemble, skipping ensemble", 
+                      flush=True)
+                continue
             if len(circuits) < 4:
                 # Make 10 copies of each circuit and split the params amongst them
                 new_circ_params = []
@@ -212,6 +200,10 @@ class CheckEnsembleQualityPass(BasePass):
             jiggle_file = jiggle_file_name.format(ind=start_ens_ind, extra=self.checkpoint_extra_str)
             cache_file = cache_file_name.format(ind=start_ens_ind, extra=self.checkpoint_extra_str)
         
+        if len(csv_dict) == 0:
+            print("No ensembles found, skipping pass", flush=True)
+            return
+
         if "checkpoint_dir" in data:
             checkpoint_data_file: str = data["checkpoint_data_file"]
             csv_file = checkpoint_data_file.replace(".data", f"{self.csv_name}.csv")
