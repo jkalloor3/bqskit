@@ -1,10 +1,11 @@
 import os
 import csv
+import pickle
 import pandas as pd
 import matplotlib.pyplot as plt
 import glob
 import numpy as np
-from util import load_block, GateCounter, load_avg_ensemble_counts_full
+from util import load_block, GateCounter, load_avg_ensemble_counts_full, get_block_names
 from bqskit.compiler import Compiler
 from bqskit.passes import ScanPartitioner
 from bqskit.ir import Circuit
@@ -13,7 +14,7 @@ from bqskit.ir.gates import CircuitGate, CNOTGate, QFTGate
 # List of circuits
 # circs = ["shor_12", "qft_16", "draper_adder_12", "qae13", "qpe_14", "lgt_17"]  # Replace with your list of circuits
 # circs = ["lgt_17", "mult16", "add17", "LiH", "qpe_14"] 
-circs = ["add17", "shor_12_w_qft", "lgt_17", "qae13", "qpe_14", "QITE_8_0", "LiH", "mult16"]
+circs = ["add17", "shor_12_w_qft", "lgt_17", "qae13", "qpe_14", "QITE_8_0", "LiH", "mult16", "draper_adder_12", "qae11"]
 
 from matplotlib.patches import Patch
 
@@ -47,18 +48,12 @@ jiggle_form = "{circ}_{large_block_num}_{tol}/block_{small_block_num}/ensemble_f
 
 cx_counter = GateCounter(est=True)
 # Function to read data.csv from each folder
-def read_cx_data_from_folders(circuits, checkpoints_dir, small_block = False,
+def read_cx_data_from_folders(circuits, orig_cx_counts, 
+                              checkpoints_dir, small_block = False,
                               cliff_t: bool = False):
     all_data = {}
     if checkpoints_dir is None:
         return all_data
-    orig_cx_counts = {}
-    compiler = Compiler()
-
-    workflow = [
-        ScanPartitioner(4),
-    ]
-
     for circ_name in circuits:
         all_data[circ_name] = {}
         orig_cx_counts[circ_name] = {}
@@ -67,42 +62,7 @@ def read_cx_data_from_folders(circuits, checkpoints_dir, small_block = False,
         for qasms_file in qasms_files:
             folder = os.path.dirname(qasms_file).split('/')[-2]
             tol = float(folder.split("_")[-1])
-            block_num = str(folder.split("_")[-2])
-            if block_num not in all_data[circ_name]:
-                all_data[circ_name][block_num] = {}
-                orig_cx_counts[circ_name][block_num] = {}
-                if not small_block:
-                    # Load original CX counts
-                    tket_file = load_block(circ_name=circ, block_num=block_num,
-                                            extra="_tket")
-                    if cliff_t:
-                        t_counter = GateCounter(est = False)
-                        block_circ = Circuit.from_file(tket_file)   
-                        for err in [1.0, 2.0, 3.0, 4.0, 5.0, 6.0]:
-                            orig_cx_counts[circ_name][block_num][err] = t_counter.count_t(block_circ, 10 ** (-err * 2))
-                    else:
-                        orig_cx_counts[circ_name][block_num] = cx_counter.count_qasm_file(tket_file)
-                else:
-                    # Load original CX counts
-                    tket_file = load_block(circ_name=circ_name, block_num=block_num,
-                                            extra="_tket")
-                    circ = Circuit.from_file(tket_file)
-                    out_circ = compiler.compile(circ, workflow)
-                    num_digits = len(str(out_circ.num_operations))
-                    for i, (_, op) in enumerate(out_circ.operations_with_cycles()):
-                        assert isinstance(op.gate, CircuitGate)
-                        # Check if checkpoint exists:
-                        # Need to zero pad block ids for consistency
-                        small_block_num = str(i).zfill(num_digits)
-                        if cliff_t:
-                            orig_cx_counts[circ_name][block_num][small_block_num] = {}
-                            t_counter = GateCounter(est = False)
-                            for err in [1.0, 2.0, 3.0, 4.0, 5.0, 6.0]:
-                                orig_cx_counts[circ_name][block_num][small_block_num][err] = t_counter.count_t(op.gate._circuit, 10 ** (-err))
-                        else:
-                            orig_cx_counts[circ_name][block_num][small_block_num] = op.gate._circuit.count(CNOTGate())
-
-            
+            block_num = str(folder.split("_")[-2]) 
             folder = os.path.dirname(qasms_file).split('/')[-1]
             small_block_num = folder.split("_")[-1]
             if cliff_t:
@@ -129,7 +89,12 @@ def read_cx_data_from_folders(circuits, checkpoints_dir, small_block = False,
                 if cliff_t:
                     orig_count = orig_cx_counts[circ_name][block_num][small_block_num][tol]
                 else:
-                    orig_count = orig_cx_counts[circ_name][block_num][small_block_num]
+                    try:
+                        orig_count = orig_cx_counts[circ_name][block_num][small_block_num]
+                    except KeyError:
+                        print(f"KeyError: {circ_name}, {block_num}, {small_block_num}")
+                        print(list(orig_cx_counts[circ_name].keys()))
+                        exit(1)
                 diff = orig_count - avg_count
                 if small_block_num not in all_data[circ_name][block_num]:
                     all_data[circ_name][block_num][small_block_num] = {}
@@ -293,7 +258,57 @@ def output_csv(data: dict, file_name: str, cliff_t: bool = False):
     print(f"Data saved to {file_name}")
 
 
+def get_orig_counts(circuits: list[str], cliff_t: bool = False) -> dict:
+    orig_cx_counts = {}
+    compiler = Compiler()
 
+    cliff_t_text = "_cliff_t" if cliff_t else ""
+    save_file = f"orig_counts{cliff_t_text}.pickle"
+
+    if os.path.exists(save_file):
+        with open(save_file, 'rb') as f:
+            orig_cx_counts = pickle.load(f)
+        return orig_cx_counts
+
+    workflow = [
+        ScanPartitioner(4),
+    ]
+
+    all_ids = {}
+
+    for circ_name in circuits:
+        all_ids[circ_name] = {}
+        block_nums = get_block_names(circ_name=circ_name, extra="_tket")
+        for block_num in block_nums:
+            # orig_cx_counts[circ_name][block_num] = {}
+            # Load original CX counts
+            tket_file = load_block(circ_name=circ_name, block_num=block_num,
+                                    extra="_tket")
+            circ = Circuit.from_file(tket_file)
+            id = compiler.submit(circ, workflow)
+            all_ids[circ_name][block_num] = id
+
+    for circ_name in circuits:
+        orig_cx_counts[circ_name] = {}
+        for block_num in get_block_names(circ_name=circ_name, extra="_tket"):
+            out_circ: Circuit = compiler.result(all_ids[circ_name][block_num])
+            num_digits = len(str(out_circ.num_operations))
+            for i, (_, op) in enumerate(out_circ.operations_with_cycles()):
+                assert isinstance(op.gate, CircuitGate)
+                # Check if checkpoint exists:
+                # Need to zero pad block ids for consistency
+                small_block_num = str(i).zfill(num_digits)
+                if cliff_t:
+                    orig_cx_counts[circ_name][block_num][small_block_num] = {}
+                    t_counter = GateCounter(est = False)
+                    for err in [1.0, 2.0, 3.0, 4.0, 5.0, 6.0]:
+                        orig_cx_counts[circ_name][block_num][small_block_num][err] = t_counter.count_t(op.gate._circuit, 10 ** (-err))
+                else:
+                    orig_cx_counts[circ_name][block_num][small_block_num] = op.gate._circuit.count(CNOTGate())
+
+    with open(save_file, 'wb') as f:
+        pickle.dump(orig_cx_counts, f)
+    return orig_cx_counts
 
 if __name__ == '__main__':
     # Collect data from all folders
@@ -314,9 +329,16 @@ if __name__ == '__main__':
 
     print("Ratio data loaded", flush=True)
     if output_cx:
-        cx_data_more_cx= read_cx_data_from_folders(circs, small_block_checkpoints_dir_1, small_block=use_small_block, cliff_t=cliff_t)
-        good_cx_data = read_cx_data_from_folders(circs, small_block_checkpoints_dir_2, 
-                                            small_block=use_small_block, cliff_t=cliff_t)
+        orig_counts = get_orig_counts(circs, cliff_t=cliff_t)
+        cx_data_more_cx= read_cx_data_from_folders(circs, orig_counts,
+                                                    small_block_checkpoints_dir_1, 
+                                                    small_block=use_small_block, 
+                                                    cliff_t=cliff_t)
+        
+        good_cx_data = read_cx_data_from_folders(circs, orig_counts,
+                                                  small_block_checkpoints_dir_2, 
+                                                  small_block=use_small_block, 
+                                                  cliff_t=cliff_t)
 
     # Start with more_cx data, and update with good_ratio_data if its better
     ratio_data = good_ratio_data.copy()
