@@ -98,11 +98,14 @@ class CheckEnsembleQualityPass(BasePass):
         ensemble_file_name = os.path.join(checkpoint_dir, "ensemble_{ind}_{extra}.qasms")
         jiggle_file_name = os.path.join(checkpoint_dir, "ensemble_{ind}_jiggles_{extra}.npy")
         cache_file_name = os.path.join(checkpoint_dir, "ensemble_{ind}_cache.pkl")
+        cache_file_name_2 = os.path.join(checkpoint_dir, "ensemble_cache_{ind}.pkl")
         final_ens_file = os.path.join(checkpoint_dir, "ensemble_final.qasms")
         start_ens_ind = 0
         ens_file = ensemble_file_name.format(ind=start_ens_ind, extra=self.checkpoint_extra_str)
         jiggle_file = jiggle_file_name.format(ind=start_ens_ind, extra=self.checkpoint_extra_str)
         cache_file = cache_file_name.format(ind=start_ens_ind, extra=self.checkpoint_extra_str)
+        if not os.path.exists(cache_file):
+            cache_file = cache_file_name_2.format(ind=start_ens_ind)
         ensemble_counts = {}
 
         target = data.target

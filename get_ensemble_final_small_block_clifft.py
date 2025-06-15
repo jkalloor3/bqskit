@@ -22,6 +22,10 @@ from util import LEAPSynthesisPass2, GenerateProbabilityPass, FixAnglesPass, UnF
 from util import CheckEnsembleQualityPass, FixGlobalPhasePass, ConvertToZXZXZSimple
 
 from util.distance import normalized_gp_frob_cost
+from util import load_jiggled_ensemble, create_jiggled_unitaries
+
+from bqskit.runtime import get_runtime
+import itertools
 
 class DoNothingPass(BasePass):
 
@@ -32,10 +36,28 @@ class DoNothingPass(BasePass):
 
 class PrintDistancesPass(BasePass):
 
+    def __init__(self, load_jiggles: bool = False):
+        super().__init__()
+        self.load_jiggles = load_jiggles
+
     async def run(self, circuit: Circuit, data: PassData) -> None:
-        scan_sols = data.get('scan_sols', [])
-        ds = [d for _, d in scan_sols]
-        actual_ds = [normalized_gp_frob_cost(c.get_unitary(), data.target) for c, _ in scan_sols]
+        if self.load_jiggles:
+            checkpoint_dir: str = data["checkpoint_dir"]
+            print("Checkpoint Dir: ", checkpoint_dir, flush=True)
+            ens_file = os.path.join(checkpoint_dir, "ensemble_0_.qasms")
+            jiggle_file = os.path.join(checkpoint_dir, "ensemble_0_jiggles_.npy")
+            cache_file = os.path.join(checkpoint_dir, "ensemble_0_cache_0.pkl")
+            circ_params = load_jiggled_ensemble(ens_file, jiggle_file, cache_file)
+
+            ensemble = await get_runtime().map(create_jiggled_unitaries, circ_params, 
+                                    target=data.target, add_cost=True)
+            ensemble = list(itertools.chain.from_iterable(ensemble))
+            ds = [d for _, d in ensemble]
+            actual_ds = [normalized_gp_frob_cost(u, data.target) for u, _ in ensemble]
+        else:
+            scan_sols = data.get('scan_sols', [])
+            ds = [d for _, d in scan_sols]
+            actual_ds = [normalized_gp_frob_cost(c.get_unitary(), data.target) for c, _ in scan_sols]
         print("Distances: ", ds, flush=True)
         print("Actual Distances: ", actual_ds, flush=True)
         pass 
@@ -111,7 +133,7 @@ def get_ensemble_workflow(circ_name: str, tol: float, extra: str = "") -> Workfl
         use_calculated_error=True)
 
     jiggle_pass = JiggleEnsemblePass(success_threshold=err_thresh * 5, 
-                                  num_circs=2000, 
+                                  num_circs=400, 
                                   use_scan_sols=True,
                                   use_ensemble=False,
                                   use_calculated_error=False,
@@ -141,7 +163,8 @@ def get_ensemble_workflow(circ_name: str, tol: float, extra: str = "") -> Workfl
                 FilterDistancesPass(threshold=(err_thresh * 5)),
                 # PrintDistancesPass(),
                 jiggle_pass,
-                GenerateProbabilityPass(run_on_ensemble_0=True),
+                # PrintDistancesPass(load_jiggles=True),
+                # GenerateProbabilityPass(run_on_ensemble_0=True),
                 CheckEnsembleQualityPass(True),
             ]
         ),
@@ -259,6 +282,10 @@ def get_circ_data(circ_name: str, block_num: str | int,
     # Categorize circs into different categories and run them
     if tol == -1.0:
         tols = [1.0, 2.0, 3.0, 4.0, 5.0]
+    elif tol == -2.0:
+        tols = [1.0, 2.0, 3.0]
+    elif tol == -3.0:
+        tols = [4.0, 5.0]
     else:
         tols = [tol]
     ckpt_extra = extra

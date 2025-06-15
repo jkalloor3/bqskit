@@ -482,7 +482,7 @@ class  JiggleEnsemblePass(BasePass):
             store_params(all_params, jiggle_file)
 
         if self.count_t:
-            cache_file = os.path.join(checkpoint_dir, f"ensemble_cache_0.pkl")
+            cache_file = os.path.join(checkpoint_dir, f"ensemble_0_cache.pkl")
             Path(cache_file).parent.mkdir(parents=True, exist_ok=True)
             pickle.dump(all_caches, open(cache_file, "wb"))
             print("Stored Ensemble", store_time, flush=True)
