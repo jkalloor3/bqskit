@@ -31,30 +31,37 @@ class GenerateProbabilityPass(BasePass):
         M = ensemble.shape[0]
 
         # ensemble is of size (20000, 256, 256) complex 128
-        tr_V_Us = np.einsum("mij,ij->m", ensemble, target.conj(), optimize=True)
-        tr_Us = np.einsum("aij,bij->ab", ensemble.conj(), ensemble, optimize=True)
+        
+        # tr_V_Us = np.einsum("mij,ij->m", ensemble, target.conj(), optimize=True)
+        # tr_Us = np.einsum("aij,bij->ab", ensemble.conj(), ensemble, optimize=True)
+
+        tr_V_Us = np.zeros((M, ), dtype=np.complex128)
+        tr_Us = np.zeros((M, M), dtype=np.complex128)
+
+        for i, un in enumerate(ensemble):
+            trace_dist = np.trace(un @ target.conj().T)
+            tr_V_Us[i] = trace_dist
+
+        for i, un in enumerate(ensemble):
+            for j, un2 in enumerate(ensemble):
+                trace_dist = np.trace(un.conj().T @ un2)
+                tr_Us[i, j] = trace_dist
 
         # f is of size (20000,)
         # H is of size (20000, 20000) floats 64
         f = -2 * np.real(tr_V_Us)
         H = 2 * np.real(tr_Us)
 
-        del tr_Us
-        del tr_V_Us
-
         # Make pos definite
-        isposdef = False
+        evs = np.linalg.eigvals(H)
+        isposdef = np.all(evs > 0)
         trials = 0
         while not isposdef and trials < 20:
-            try:
-                R = np.linalg.cholesky(H)
-                isposdef = True
-            except np.linalg.LinAlgError:
-                # Off by a little
-                H += 1e-10 * np.eye(M)
-                print(f"Perturbing a little to make pos def try #: {trials}")
-                isposdef = False
-                trials += 1
+            H += 1e-10 * np.eye(M)
+            print(f"Perturbing a little to make pos def try #: {trials}")
+            evs = np.linalg.eigvals(H)
+            isposdef = np.all(evs > 0)
+            trials += 1
 
         if not isposdef:
             print('H not positive definite by a lot! Returning uniform dist')

@@ -18,6 +18,11 @@ from bqskit.ir.opt.cost.functions import NormalizedFrobeniusCostGenerator
 # hs_cost = HilbertSchmidtResidualsGenerator()
 frob_cost = NormalizedFrobeniusCostGenerator()
 
+def fix_un_phase(unitary: UnitaryMatrix, target: UnitaryMatrix) -> float:
+    global_phase_correction = target.get_target_correction_factor(unitary)
+    # old_cost = frob_cost.calc_cost(circuit, target)
+    return global_phase_correction * unitary
+
 
 def fix_phase(circuit: Circuit, target: UnitaryMatrix) -> float:
     unitary = circuit.get_unitary()

@@ -133,7 +133,7 @@ def get_ensemble_workflow(circ_name: str, tol: float, extra: str = "") -> Workfl
         use_calculated_error=True)
 
     jiggle_pass = JiggleEnsemblePass(success_threshold=err_thresh * 5, 
-                                  num_circs=400, 
+                                  num_circs=10000, 
                                   use_scan_sols=True,
                                   use_ensemble=False,
                                   use_calculated_error=False,
@@ -150,22 +150,22 @@ def get_ensemble_workflow(circ_name: str, tol: float, extra: str = "") -> Workfl
         ForEachBlockPass(
             [
                 # TketPass(),
-                IfThenElsePass(
-                    CountPredicate(),
-                    synthesis_pass,
-                    DoNothingPass()
-                ),
-                FixAnglesPass(int(tol) * 2 + 2, run_scan_sols=True),
-                ConvertToZXZXZSimple(group=False),
-                ntro,
-                FixAnglesPass(int(tol) * 2 + 2, run_scan_sols=True),
-                FixGlobalPhasePass(),
-                FilterDistancesPass(threshold=(err_thresh * 5)),
+                # IfThenElsePass(
+                #     CountPredicate(),
+                #     synthesis_pass,
+                #     DoNothingPass()
+                # ),
+                # FixAnglesPass(int(tol) * 2 + 2, run_scan_sols=True),
+                # ConvertToZXZXZSimple(group=False),
+                # ntro,
+                # FixAnglesPass(int(tol) * 2 + 2, run_scan_sols=True),
+                # FixGlobalPhasePass(),
+                # FilterDistancesPass(threshold=(err_thresh * 5)),
                 # PrintDistancesPass(),
                 jiggle_pass,
                 # PrintDistancesPass(load_jiggles=True),
                 # GenerateProbabilityPass(run_on_ensemble_0=True),
-                CheckEnsembleQualityPass(True),
+                # CheckEnsembleQualityPass(True),
             ]
         ),
     ]
