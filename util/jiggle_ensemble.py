@@ -32,7 +32,7 @@ from bqskit.runtime import get_runtime
 
 import os
 from .common import (store_params, load_ensemble_strs, store_ensemble_strs, 
-                     load_jiggled_ensemble, create_jiggled_ensemble)
+                     calc_num_circs)
 from .counter import count_params_str
 from .gg import GridSynthGate, gg_gate_def, MIN_EPSILON, get_rz_perturbations
 
@@ -443,6 +443,13 @@ class  JiggleEnsemblePass(BasePass):
         jiggle_file_name = os.path.join(checkpoint_dir, "ensemble_{ind}_jiggles_{extra}.npy")
         ens_file = ensemble_file_name.format(ind=0, extra=self.checkpoint_extra_str)
         jiggle_file = jiggle_file_name.format(ind=0, extra=self.checkpoint_extra_str)
+        if os.path.exists(ens_file):
+            num_circs = calc_num_circs(jiggle_file)
+            if num_circs > self.num_circs:
+                print(f"Already have {num_circs} circuits in ensemble, " \
+                "skipping Jiggle Ensemble Pass", flush=True)
+                return
+                
         Path(ens_file).parent.mkdir(parents=True, exist_ok=True)
         Path(jiggle_file).parent.mkdir(parents=True, exist_ok=True)
         

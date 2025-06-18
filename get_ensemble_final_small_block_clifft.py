@@ -133,7 +133,7 @@ def get_ensemble_workflow(circ_name: str, tol: float, extra: str = "") -> Workfl
         use_calculated_error=True)
 
     jiggle_pass = JiggleEnsemblePass(success_threshold=err_thresh * 5, 
-                                  num_circs=10000, 
+                                  num_circs=4000, 
                                   use_scan_sols=True,
                                   use_ensemble=False,
                                   use_calculated_error=False,

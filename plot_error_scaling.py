@@ -1,5 +1,6 @@
 import os
 import csv
+import time
 import pickle
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -14,7 +15,7 @@ from bqskit.ir.gates import CircuitGate, CNOTGate, QFTGate
 # List of circuits
 # circs = ["shor_12", "qft_16", "draper_adder_12", "qae13", "qpe_14", "lgt_17"]  # Replace with your list of circuits
 # circs = ["lgt_17", "mult16", "add17", "LiH", "qpe_14"] 
-circs = ["add17", "shor_12_w_qft", "lgt_17", "qae13", "qpe_14", "QITE_8_0", "LiH", "mult16", "draper_adder_12", "qae11"]
+circs = ["add17", "lgt_17", "qae13", "qpe_14", "QITE_8_0", "LiH", "mult16", "draper_adder_12", "qae11"]
 
 from matplotlib.patches import Patch
 
@@ -136,7 +137,10 @@ def read_data_from_folders(circuits, checkpoints_dir, small_block = False):
                     if "Ratio" in row:  # Check if the column value is not empty
                         # final_ratio = min(final_ratio, float(row["Norm. Ratio"]))
                         if float(row["Ratio"]) < final_ratio:
-                            final_ratio = float(row["Ratio"])
+                            actual_eps = float(row["Norm. Epsilon"])
+                            if actual_eps > 100 * (10 ** (-tol)):
+                                continue
+                            final_ratio = min(final_ratio, float(row["Ratio"]))
                 if final_ratio < 1:
                     # For visual fidelity, we set this to 1. We can arbitrarily
                     # increase the final ratio by adding noise to the final
@@ -260,7 +264,7 @@ def output_csv(data: dict, file_name: str, cliff_t: bool = False):
 
 def get_orig_counts(circuits: list[str], cliff_t: bool = False) -> dict:
     orig_cx_counts = {}
-    compiler = Compiler()
+    compiler = Compiler(num_workers=128)
 
     cliff_t_text = "_cliff_t" if cliff_t else ""
     save_file = f"orig_counts{cliff_t_text}.pickle"
@@ -285,7 +289,12 @@ def get_orig_counts(circuits: list[str], cliff_t: bool = False) -> dict:
             tket_file = load_block(circ_name=circ_name, block_num=block_num,
                                     extra="_tket")
             circ = Circuit.from_file(tket_file)
-            id = compiler.submit(circ, workflow)
+            try:
+                id = compiler.submit(circ, workflow)
+                time.sleep(2)
+            except:
+                print(f"Error compiling {circ_name} {block_num}, skipping")
+                exit(1)
             all_ids[circ_name][block_num] = id
 
     for circ_name in circuits:
@@ -313,8 +322,8 @@ def get_orig_counts(circuits: list[str], cliff_t: bool = False) -> dict:
 if __name__ == '__main__':
     # Collect data from all folders
     use_small_block = True
-    output_cx = True
-    cliff_t = False
+    output_cx = False
+    cliff_t = True
 
     if not cliff_t:
         small_block_checkpoints_dir_1 = f"small_block_checkpoints_final_paper_4_more_cx_tket"
@@ -339,15 +348,18 @@ if __name__ == '__main__':
                                                   small_block_checkpoints_dir_2, 
                                                   small_block=use_small_block, 
                                                   cliff_t=cliff_t)
+    else:
+        cx_data_more_cx = {}
+        good_cx_data = {}
 
     # Start with more_cx data, and update with good_ratio_data if its better
     ratio_data = good_ratio_data.copy()
     ratio_data.update(ratio_data_more_cx)
-
+    
     cx_data = good_cx_data.copy()
     cx_data.update(cx_data_more_cx)
 
-    RATIO_LIMIT = 5
+    RATIO_LIMIT = 10
 
     # For all circ, block_num, small_block_num
     if not cliff_t:
@@ -362,11 +374,14 @@ if __name__ == '__main__':
                                 good_ratio = good_ratio_data[circ][block_num][small_block_num].get(eps, float("inf"))
                                 if good_ratio < RATIO_LIMIT:
                                     ratio_data[circ][block_num][small_block_num][eps] = good_ratio_data[circ][block_num][small_block_num][eps]
-                                    cx_data[circ][block_num][small_block_num][eps] = good_cx_data[circ][block_num][small_block_num][eps]
+                                    if output_cx:
+                                        cx_data[circ][block_num][small_block_num][eps] = good_cx_data[circ][block_num][small_block_num][eps]
                                 else:
-                                    cx_data[circ][block_num][small_block_num][eps] = 0 # Don't count reduction
+                                    if output_cx:
+                                        cx_data[circ][block_num][small_block_num][eps] = 0 # Don't count reduction
                             else:
-                                cx_data[circ][block_num][small_block_num][eps] = 0 # Don't count reduction
+                                if output_cx:
+                                    cx_data[circ][block_num][small_block_num][eps] = 0 # Don't count reduction
 
     # Combine all data frames into a single data frame (optional)
     # combined_data = pd.concat(data_frames, ignore_index=True)
@@ -422,5 +437,6 @@ if __name__ == '__main__':
 
 
     # Output CX data to a csv file
-    csv_file_name = f"error_scaling_4_all_cx{extra}{extra_2}.csv"
-    output_csv(cx_data, csv_file_name)
+    if output_cx:
+        csv_file_name = f"error_scaling_4_all_cx{extra}{extra_2}.csv"
+        output_csv(cx_data, csv_file_name)
