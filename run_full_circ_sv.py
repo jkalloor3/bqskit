@@ -287,6 +287,31 @@ def create_shared_memory(circ_name: str,
     shm_array[:] = params
     return shm, param_shape
 
+def generate_large_circuits(large_block_circs: dict[str, list[Circuit]],
+                            partitioned_circ: Circuit,
+                            ens_size: int) -> list[Circuit]:
+    all_circs = []
+    num_digits = len(str(partitioned_circ.num_operations))
+    for i in range(ens_size):
+        circ = partitioned_circ.copy()
+        for block_ind, (cycle, op) in enumerate(circ.operations_with_cycles()):
+            pt = CircuitPoint(cycle, op.location[0])
+            block_name = str(block_ind).zfill(num_digits)
+            assert isinstance(op.gate, CircuitGate)
+            assert isinstance(op.gate._circuit, Circuit)
+            if block_name in large_block_circs:
+                new_block_circ = large_block_circs[block_name][i]
+                assert isinstance(new_block_circ, Circuit)
+                if (op.gate._circuit.num_qudits != new_block_circ.num_qudits):
+                    print("Mismatch in qudits: ", block_name, 
+                            op.gate._circuit.num_qudits, 
+                            new_block_circ.num_qudits)
+                assert op.gate._circuit.num_qudits == new_block_circ.num_qudits
+                circ.replace_with_circuit(pt, new_block_circ, 
+                                          as_circuit_gate=True)
+        all_circs.append(circ)
+    return all_circs
+
 def run_circ_tol(circ_name: str, max_tol: float, use_qp: bool = False,
                  partitioned_data: dict[str, tuple] = {}) -> None:
     np.set_printoptions(precision=2, threshold=np.inf, linewidth=np.inf)
@@ -295,6 +320,8 @@ def run_circ_tol(circ_name: str, max_tol: float, use_qp: bool = False,
     # full_circ = Circuit.from_file(f"/pscratch/sd/j/jkalloor/bqskit/ensemble_benchmarks/{circ_name}.qasm")
     full_circ = load_circuit(circ_name)
     full_circ.remove_all_measurements()
+    partitioned_circ_file = f"partitioned_circs/{circ_name}.pickle"
+    partitioned_circ = pickle.load(open(partitioned_circ_file, "rb"))
     ham = None
     if circ_name.startswith("lgt_"):
         ham = generate_lgt_hamiltonian(full_circ.num_qudits, 2)
@@ -320,7 +347,7 @@ def run_circ_tol(circ_name: str, max_tol: float, use_qp: bool = False,
         block_probs = {}
         initial_circ_file = load_block(circ_name, large_block_num, extra="_tket")
         initial_circ: Circuit = Circuit.from_file(initial_circ_file)
-        print("Original CX Count: ", initial_circ.count(CNOTGate()))
+        # print("Original CX Count: ", initial_circ.count(CNOTGate()))
         initial_circs[large_block_num] = initial_circ
         small_block_nums = get_sub_block_nums(circ_name, large_block_num)
         sub_block_circs, small_partitioned_circ = partitioned_data[large_block_num]
@@ -352,7 +379,7 @@ def run_circ_tol(circ_name: str, max_tol: float, use_qp: bool = False,
 
         # Get all the circuits
         for small_block_num  in shms.keys():
-            print("Loading Circuits: ", small_block_num)
+            # print("Loading Circuits: ", small_block_num)
             circ_dir = f"{checkpoint_folder.format(circ_name=circ_name)}_{large_block_num}_{max_tol}/block_{small_block_num}"
             full_path = f"{circ_dir}/ensemble_final.qasms"
             circs = load_ensemble(full_path)
@@ -381,6 +408,7 @@ def run_circ_tol(circ_name: str, max_tol: float, use_qp: bool = False,
         if os.path.exists(ens_data_file):
             print("Already exists: ", ens_data_file)
             continue
+        large_block_circs: dict[str, list[Circuit]] = {}
         for large_block_num, shms in all_shms.items():
             # print("Running LGT for block: ", large_block_num, max_tol)
             initial_circ: Circuit = initial_circs[large_block_num]
@@ -395,7 +423,9 @@ def run_circ_tol(circ_name: str, max_tol: float, use_qp: bool = False,
             block_probs = all_block_probs[large_block_num]
             small_partitioned_circ = all_partitioned_circs[large_block_num]
 
-            print("LOADED CIRCUITS", flush=True)
+
+
+            # print("LOADED CIRCUITS", flush=True)
 
             ens = generate_small_block_circuits(block_circs, 
                                         small_block_nums,
@@ -407,17 +437,24 @@ def run_circ_tol(circ_name: str, max_tol: float, use_qp: bool = False,
                                         use_qp=use_qp)
             
             print(f"Generated {len(ens)} circuits for large block {large_block_num}", flush=True)
-            svs = [c.get_statevector(StateVector.zero(full_circ.num_qudits)).numpy for c in ens]
-            sub_svs = [svs[i * ens_size:(i + 1) * ens_size] for i in range(num_trials)]
-            sub_dms = [get_average_density_matrix(sub_sv) for sub_sv in sub_svs]
-            if ham is None:
-                # Calculate the observable for each sub_dm
-                ensemble_mags = [trace_distance(target_dm, sub_dm) for sub_dm in sub_dms]
-            else:
-                ensemble_mags = [get_obs(ham, sub_dm) for sub_dm in sub_dms]
-            print(f"Ensemble Values for block {large_block_num}: {ensemble_mags}", flush=True)
-            Path(ens_data_file).parent.mkdir(parents=True, exist_ok=True)
-            pickle.dump((ensemble_mags), open(ens_data_file, "wb"))
+            large_block_circs[large_block_num] = ens
+
+        full_ens = generate_large_circuits(large_block_circs,
+                                        partitioned_circ,
+                                        ens_size=ens_size * num_trials)
+        print(f"Generated {len(full_ens)} full circuits", flush=True)
+        svs = [c.get_statevector(StateVector.zero(full_circ.num_qudits)).numpy for c in ens]
+        sub_svs = [svs[i * ens_size:(i + 1) * ens_size] for i in range(num_trials)]
+        sub_dms = [get_average_density_matrix(sub_sv) for sub_sv in sub_svs]
+        print(f"Calculate Density Matrices for block full circuit", flush=True)
+        if ham is None:
+            # Calculate the observable for each sub_dm
+            ensemble_mags = [trace_distance(target_dm, sub_dm) for sub_dm in sub_dms]
+        else:
+            ensemble_mags = [get_obs(ham, sub_dm) for sub_dm in sub_dms]
+        print(f"Ensemble Values for block {large_block_num}: {ensemble_mags}", flush=True)
+        Path(ens_data_file).parent.mkdir(parents=True, exist_ok=True)
+        pickle.dump((ensemble_mags), open(ens_data_file, "wb"))
 
 
 if __name__ == "__main__":
@@ -463,6 +500,8 @@ if __name__ == "__main__":
     for max_tol in tols:
         for use_qp in use_qps:
             print(f"Running for {circ_name} with max_tol={max_tol} and use_qp={use_qp}")
+            # run_circ_tol(circ_name, max_tol, use_qp=use_qp,
+            #             partitioned_data=all_partitioned_data[circ_name])
             p = mp.Process(target=run_circ_tol, args=(circ_name, max_tol, use_qp, all_partitioned_data[circ_name]))
             p.start()
             ps.append(p)

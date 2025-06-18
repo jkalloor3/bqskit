@@ -96,8 +96,10 @@ def get_az(H):
     # Return imaginary part of the last coefficient
     return np.imag(X[-1])
 
+
 def get_rz_perturbations(starting_angle, 
-                         epsilon: int) -> tuple[list[RealVector], 
+                         epsilon: int,
+                         target_angle: float = None) -> tuple[list[RealVector], 
                                                 list[str], list[float]]:
     '''
     Returns a list of 4 parameters and a list of strings to put in the the
@@ -108,8 +110,10 @@ def get_rz_perturbations(starting_angle,
         # Try with epsilon
         epsilon = MIN_EPSILON
 
+    if target_angle is None:
+        target_angle = starting_angle
 
-    V = RZGate().get_unitary([starting_angle])
+    V = RZGate().get_unitary([target_angle])
     U_1_t_str = get_approx_t_str(starting_angle, epsilon)
     U_1_t_circ = gridsynth_gates_to_cir(U_1_t_str)
     U_1 = U_1_t_circ.get_unitary()
@@ -190,6 +194,23 @@ class GridSynthGate(QubitGate, CachedClass):
             t_str = None
 
         if t_str is None:
+            t_str = get_approx_t_str(ang, epsilon)            
+        if z_twirl == 1:
+            t_str = "Z" + t_str + "Z"
+        
+        un = gridsynth_gates_to_cir(t_str).get_unitary()
+        return un
+    
+    def get_unitary_w_cache(self, params: RealVector = [], cache: dict = {}) -> UnitaryMatrix:
+        """Return the unitary for this gate, see :class:`Unitary` for more."""
+        ang = round(params[0], 18)
+        epsilon = int(params[1])
+        z_twirl = int(params[2])
+        ind = (ang, epsilon)
+        t_str = cache.get(ind, None)
+
+        if t_str is None:
+            print("Cache miss for: ", ind, flush=True)
             t_str = get_approx_t_str(ang, epsilon)            
         if z_twirl == 1:
             t_str = "Z" + t_str + "Z"

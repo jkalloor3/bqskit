@@ -1,4 +1,5 @@
 import os
+from sys import argv
 import pickle
 import glob
 import numpy as np
@@ -14,6 +15,7 @@ from bqskit.ext import bqskit_to_qiskit
 
 from util.distance import (normalized_gp_frob_cost, trace_distance, tvd, 
                            get_density_matrix, get_average_density_matrix)
+from util.common import load_circuit
 
 def get_qcirc(circ: Circuit) -> QuantumCircuit:
     circ.unfold_all()
@@ -38,7 +40,7 @@ def get_sv(counts: dict[str, int]) -> np.ndarray:
     
     return sv
 
-def get_obs(dm: np.ndarray) -> float:
+def get_obs(ham, dm: np.ndarray) -> float:
     '''
     Get the observable for the output density matrix.
     '''
@@ -103,52 +105,119 @@ def generate_hamiltonian(num_qubits: int, x: int) -> SparsePauliOp:
     op = SparsePauliOp.from_list(He + Hb)
     return op.to_matrix()
 
-ham = generate_hamiltonian(11, 2)
 
-# print(ham.shape)
+def generate_tfim_hamiltonian(num_qubits: int) -> SparsePauliOp:
+    '''
+    1D Transverse Field Ising Model Hamiltonian:
+    H = J * sum_{i=0}^{N-2} Z_i Z_{i+1} + mu_x * sum_{i=0}^{N-1} X_i
+    '''
 
-full_circ = Circuit.from_file("ensemble_benchmarks/lgt_11.qasm")
-full_circ.unfold_all()
-# target = full_circ.get_unitary()
-# full_qc = get_qcirc(full_circ)
-full_sv = full_circ.get_statevector(StateVector.zero(11))
+    Jz = 1.0
+    mu_x = 1.0
 
-# shots = 1048576  
-# target_counts = AerSimulator().run(full_qc, shots=shots).result().get_counts()
-# target_sv = get_sv(target_counts)
-true_val = get_obs(get_density_matrix(full_sv.numpy))
-print("True Value: ", true_val)
-full_circ_val = -3.986027240753174
-noisy_full_circ_val = -3.9144861698150635
+    He = []
+    Hb = []
+
+    for i in range(num_qubits - 1):
+        Z_term = ("I" * i + "ZZ" + "I" * (num_qubits - i - 2), Jz)
+        He.append(Z_term)
+
+    for i in range(num_qubits):
+        X_term = ("I" * i + "X" + "I" * (num_qubits - i - 1), mu_x)
+        Hb.append(X_term)
+
+    op = SparsePauliOp.from_list(He + Hb)
+    return op.to_matrix()
+
 
 
 if __name__ == '__main__':
     # Directory containing pickle files
-    data_dir = 'ensemble_costs'
-    circ_name = 'lgt_11'
-    full_path = f"{data_dir}_{circ_name}_obs_noisy"
+    # data_dir = 'ensemble_costs'
+    data_dir = 'ensemble_dms'
+    circ_name = argv[1]
+    max_tol = float(argv[2]) if len(argv) > 2 else 1.0
+    diff = bool(int(argv[3])) if len(argv) > 3 else False
+
+    full_circ = load_circuit(circ_name)
+    full_circ.remove_all_measurements()
+
+    if circ_name.startswith("QITE_8_"):
+        ham = generate_tfim_hamiltonian(full_circ.num_qudits)
+    elif circ_name.startswith("lgt"):
+        ham = generate_hamiltonian(full_circ.num_qudits, 2)
+    else:
+        ham = None
+    
+    # full_circ_val = -3.986027240753174
+    # noisy_full_circ_val = -3.9144861698150635
+
+
+    # target = full_circ.get_unitary()
+    # full_qc = get_qcirc(full_circ)
+    full_sv = full_circ.get_statevector(StateVector.zero(full_circ.num_qudits))
+
+    # shots = 1048576  
+    # target_counts = AerSimulator().run(full_qc, shots=shots).result().get_counts()
+    # target_sv = get_sv(target_counts)
+    if ham:
+        true_val = get_obs(ham, get_density_matrix(full_sv.numpy))
+        print("True Value: ", true_val)
+    else:
+        true_val = 0
+
+    
+    full_path = f"{data_dir}_{circ_name}_obs_mpi"
+    full_path_qp = f"{data_dir}_{circ_name}_obs_qp_mpi"
 
     # Collect all pickle files
     pickle_files = glob.glob(os.path.join(full_path, '*.pkl'))
+    qp_pickle_files = glob.glob(os.path.join(full_path_qp, '*.pkl'))
 
     # Store data for plotting
     ens_sizes = []
     cost_means = []
     cost_maxes = []
     cost_mins = []
+    qp_cost_means = []
+    qp_cost_maxes = []
+    qp_cost_mins = []
 
     for fname in sorted(pickle_files):
         filename = os.path.basename(fname)
         tol = filename.split('_')[0]
+        if float(tol) != max_tol:
+            continue
         ens_size = filename.split('_')[1].split('.')[0]
         ens_size = int(ens_size)
         print(f"Processing file: {filename} with tol={tol} and ens_size={ens_size}")
         ens_sizes.append(ens_size)
         with open(fname, 'rb') as f:
             costs = pickle.load(f)
+            if diff:
+                # If diff is True, we only want the costs that are different from the true value
+                costs = [abs(cost - true_val) for cost in costs]
             cost_means.append(np.mean(costs))
             cost_maxes.append(np.max(costs))
             cost_mins.append(np.min(costs))
+    
+    for fname in sorted(qp_pickle_files):
+        filename = os.path.basename(fname)
+        tol = filename.split('_')[0]
+        if float(tol) != max_tol:
+            continue
+        ens_size = filename.split('_')[1].split('.')[0]
+        ens_size = int(ens_size)
+        print(f"Processing QP file: {filename} with tol={tol} and ens_size={ens_size}")
+        ens_sizes.append(ens_size)
+        with open(fname, 'rb') as f:
+            costs = pickle.load(f)
+            if diff:
+                # If diff is True, we only want the costs that are different from the true value
+                costs = [abs(cost - true_val) for cost in costs]
+            qp_cost_means.append(np.mean(costs))
+            qp_cost_maxes.append(np.max(costs))
+            qp_cost_mins.append(np.min(costs))
 
 
     # Sort the data by ensemble sizes
@@ -160,10 +229,24 @@ if __name__ == '__main__':
     color = 'blue'
     ax.plot(ens_sizes, cost_means, label='Mean Cost', marker='o', color=color)
     ax.fill_between(ens_sizes, cost_mins, cost_maxes, color=color, alpha=0.2, label='Min-Max Range')
-    ax.hlines(y=noisy_full_circ_val, xmin=1, xmax=max(ens_sizes), color='red', linestyle='--', label='Full Circuit')
-    ax.hlines(y=true_val, xmin=1, xmax=max(ens_sizes), color='black', linestyle='--', label='True Value')
+    # ax.plot(ens_sizes, qp_cost_means, label='QP Mean Cost', marker='o', color='orange')
+    # ax.fill_between(ens_sizes, qp_cost_mins, qp_cost_maxes, color='orange', alpha=0.2, label='QP Min-Max Range')
+    # ax.hlines(y=noisy_full_circ_val, xmin=1, xmax=max(ens_sizes), color='red', linestyle='--', label='Full Circuit')
+    if (not diff) and (ham is not None): 
+        ax.hlines(y=true_val, xmin=1, xmax=max(ens_sizes), color='black', linestyle='--', label='True Value')
     ax.legend()
     ax.set_xlabel('Ensemble Size', fontdict={"size": 24})
-    ax.set_ylabel('Magnitude w/ Noise', fontdict={"size": 24})
+    if ham:
+        if circ_name.startswith("QITE_8_"):
+            ax.set_ylabel('GS Energy', fontdict={"size": 24})
+        else:
+            ax.set_ylabel('Electronic Energy', fontdict={"size": 24})
+    else:
+        ax.set_ylabel('Trace Distance', fontdict={"size": 24})
 
-    fig.savefig(f'{circ_name}_mag_noisy.png', dpi=300)
+    if diff:
+        ax.set_yscale('log')
+
+    diff_text = "_diff" if diff else ""
+
+    fig.savefig(f'{circ_name}_mag_dm_{max_tol}{diff_text}.png', dpi=300)
