@@ -32,20 +32,20 @@ class GenerateProbabilityPass(BasePass):
 
         # ensemble is of size (20000, 256, 256) complex 128
         
-        # tr_V_Us = np.einsum("mij,ij->m", ensemble, target.conj(), optimize=True)
-        # tr_Us = np.einsum("aij,bij->ab", ensemble.conj(), ensemble, optimize=True)
+        tr_V_Us = np.einsum("mij,ij->m", ensemble, target.conj(), optimize=True)
+        tr_Us = np.einsum("aij,bij->ab", ensemble.conj(), ensemble, optimize=True)
 
-        tr_V_Us = np.zeros((M, ), dtype=np.complex128)
-        tr_Us = np.zeros((M, M), dtype=np.complex128)
+        # tr_V_Us = np.zeros((M, ), dtype=np.complex128)
+        # tr_Us = np.zeros((M, M), dtype=np.complex128)
 
-        for i, un in enumerate(ensemble):
-            trace_dist = np.trace(un @ target.conj().T)
-            tr_V_Us[i] = trace_dist
+        # for i, un in enumerate(ensemble):
+        #     trace_dist = np.trace(un @ target.conj().T)
+        #     tr_V_Us[i] = trace_dist
 
-        for i, un in enumerate(ensemble):
-            for j, un2 in enumerate(ensemble):
-                trace_dist = np.trace(un.conj().T @ un2)
-                tr_Us[i, j] = trace_dist
+        # for i, un in enumerate(ensemble):
+        #     for j, un2 in enumerate(ensemble):
+        #         trace_dist = np.trace(un.conj().T @ un2)
+        #         tr_Us[i, j] = trace_dist
 
         # f is of size (20000,)
         # H is of size (20000, 20000) floats 64

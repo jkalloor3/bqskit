@@ -14,7 +14,7 @@ from bqskit.ir.gates import CircuitGate, CNOTGate, QFTGate
 # List of circuits
 # circs = ["shor_12", "qft_16", "draper_adder_12", "qae13", "qpe_14", "lgt_17"]  # Replace with your list of circuits
 # circs = ["lgt_17", "mult16", "add17", "LiH", "qpe_14"] 
-circs = ["add17", "shor_12_w_qft", "lgt_17", "qae13", "qpe_14", "QITE_8_0", "LiH", "mult16", "draper_adder_12", "qae11"]
+circs = ["add17", "shor_12_no_qft", "lgt_17", "qae13", "qpe_14", "QITE_8_0", "LiH", "mult16", "draper_adder_12", "qae11"]
 
 from matplotlib.patches import Patch
 
@@ -56,7 +56,6 @@ def read_cx_data_from_folders(circuits, orig_cx_counts,
         return all_data
     for circ_name in circuits:
         all_data[circ_name] = {}
-        orig_cx_counts[circ_name] = {}
         qasms_file_form = os.path.join(checkpoints_dir, block_qasms_form.format(circ=circ_name))
         qasms_files = glob.glob(qasms_file_form)
         for qasms_file in qasms_files:
@@ -65,6 +64,8 @@ def read_cx_data_from_folders(circuits, orig_cx_counts,
             block_num = str(folder.split("_")[-2]) 
             folder = os.path.dirname(qasms_file).split('/')[-1]
             small_block_num = folder.split("_")[-1]
+            if block_num not in all_data[circ_name]:
+                all_data[circ_name][block_num] = {}
             if cliff_t:
                 cache_file = os.path.join(checkpoints_dir, 
                                             cache_form.format(circ=circ_name, 
@@ -232,35 +233,41 @@ def plot_violin_plot(data: dict, axs: plt.Axes, color: str,
 
 def output_csv(data: dict, file_name: str, cliff_t: bool = False):
     # Create a DataFrame from the data
+    # Step 1: Collect all unique eps values and sort them
+    all_eps = set()
+    for block_data in data.values():
+        for small_block_data in block_data.values():
+            for eps_data in small_block_data.values():
+                all_eps.update(eps_data.keys())
+
+    sorted_eps = sorted(all_eps, key=float)
+
+    # Step 2: Build rows
     rows = []
     for circ, block_data in data.items():
-        # For each circuit, add up all diffs across blocks and small blocks
-        # for each eps
-        total_diffs = {}
+        total_diffs = {eps: 0 for eps in sorted_eps}  # Pre-fill with zeros
+
         for block_num, small_block_data in block_data.items():
             for small_block_num, eps_data in small_block_data.items():
                 for eps, value in eps_data.items():
-                    if eps not in total_diffs:
-                        total_diffs[eps] = 0
                     if value > 0:
                         total_diffs[eps] += value
-        for eps, value in total_diffs.items():
-            rows.append([circ, eps, value])
 
-    if cliff_t:
-        diff_label = "T Gates Saved"
-    else:
-        diff_label = "CNOTs Saved"
-    df = pd.DataFrame(rows, columns=['Circuit', 'Epsilon', diff_label])
+        row = [circ] + [total_diffs[eps] for eps in sorted_eps]
+        rows.append(row)
 
-    # Save the DataFrame to a CSV file
-    df.to_csv(file_name, index=False)
+    eps_labels = [f"10e-{int(eps * 2)}" for eps in sorted_eps]
+    # Step 3: Write to CSV
+    with open(file_name, 'w', newline='') as f:
+        writer = csv.writer(f)
+        writer.writerow(['Circuit'] + eps_labels)  # Header
+        writer.writerows(rows)
     print(f"Data saved to {file_name}")
 
 
-def get_orig_counts(circuits: list[str], cliff_t: bool = False) -> dict:
+def get_orig_counts(circuits: list[str], cliff_t: bool = False, 
+                    compiler: Compiler = None) -> dict:
     orig_cx_counts = {}
-    compiler = Compiler()
 
     cliff_t_text = "_cliff_t" if cliff_t else ""
     save_file = f"orig_counts{cliff_t_text}.pickle"
@@ -268,30 +275,44 @@ def get_orig_counts(circuits: list[str], cliff_t: bool = False) -> dict:
     if os.path.exists(save_file):
         with open(save_file, 'rb') as f:
             orig_cx_counts = pickle.load(f)
+            print(orig_cx_counts["add17"]["03"]["0"])
         return orig_cx_counts
 
     workflow = [
         ScanPartitioner(4),
     ]
 
-    all_ids = {}
+    # all_ids = {}
 
-    for circ_name in circuits:
-        all_ids[circ_name] = {}
-        block_nums = get_block_names(circ_name=circ_name, extra="_tket")
-        for block_num in block_nums:
-            # orig_cx_counts[circ_name][block_num] = {}
-            # Load original CX counts
-            tket_file = load_block(circ_name=circ_name, block_num=block_num,
-                                    extra="_tket")
-            circ = Circuit.from_file(tket_file)
-            id = compiler.submit(circ, workflow)
-            all_ids[circ_name][block_num] = id
+    # for circ_name in circuits:
+    #     all_ids[circ_name] = {}
+    #     block_nums = get_block_names(circ_name=circ_name, extra="_tket")
+    #     for block_num in block_nums:
+    #         # orig_cx_counts[circ_name][block_num] = {}
+    #         # Load original CX counts
+    #         tket_file = load_block(circ_name=circ_name, block_num=block_num,
+    #                                 extra="_tket")
+    #         circ = Circuit.from_file(tket_file)
+    #         id = compiler.submit(circ, workflow)
+    #         all_ids[circ_name][block_num] = id
 
     for circ_name in circuits:
         orig_cx_counts[circ_name] = {}
         for block_num in get_block_names(circ_name=circ_name, extra="_tket"):
-            out_circ: Circuit = compiler.result(all_ids[circ_name][block_num])
+            orig_cx_counts[circ_name][block_num] = {}
+            tket_file = load_block(circ_name=circ_name, block_num=block_num,
+                        extra="_tket")
+            circ = Circuit.from_file(tket_file)
+            if circ.num_operations == 0:
+                orig_cx_counts[circ_name][block_num]["0"] = 0
+                continue
+            try:
+                out_circ: Circuit = compiler.compile(circ.copy(), workflow)
+            except Exception as e:
+                print(f"Error compiling {circ_name}, block {block_num}: {e}")
+                print(out_circ.gate_counts)
+                print(circ.gate_counts)
+                exit(1)
             num_digits = len(str(out_circ.num_operations))
             for i, (_, op) in enumerate(out_circ.operations_with_cycles()):
                 assert isinstance(op.gate, CircuitGate)
@@ -304,6 +325,7 @@ def get_orig_counts(circuits: list[str], cliff_t: bool = False) -> dict:
                     for err in [1.0, 2.0, 3.0, 4.0, 5.0, 6.0]:
                         orig_cx_counts[circ_name][block_num][small_block_num][err] = t_counter.count_t(op.gate._circuit, 10 ** (-err))
                 else:
+                    # print(f"Counting CNOTs for {circ_name}, block {block_num}, small block {small_block_num}", op.gate._circuit.count(CNOTGate()))
                     orig_cx_counts[circ_name][block_num][small_block_num] = op.gate._circuit.count(CNOTGate())
 
     with open(save_file, 'wb') as f:
@@ -329,16 +351,25 @@ if __name__ == '__main__':
 
     print("Ratio data loaded", flush=True)
     if output_cx:
-        orig_counts = get_orig_counts(circs, cliff_t=cliff_t)
+        compiler = Compiler(num_workers=len(circs))
+        orig_counts = get_orig_counts(circs, cliff_t=cliff_t, compiler=compiler)
+        compiler.close()
+        print("Original counts loaded", flush=True)
+        print(orig_counts["add17"]["03"]["0"], flush=True)
         cx_data_more_cx= read_cx_data_from_folders(circs, orig_counts,
                                                     small_block_checkpoints_dir_1, 
                                                     small_block=use_small_block, 
                                                     cliff_t=cliff_t)
         
+        print("CX data loaded", flush=True)
+        
         good_cx_data = read_cx_data_from_folders(circs, orig_counts,
                                                   small_block_checkpoints_dir_2, 
                                                   small_block=use_small_block, 
                                                   cliff_t=cliff_t)
+    else:
+        cx_data_more_cx = {}
+        good_cx_data = {}
 
     # Start with more_cx data, and update with good_ratio_data if its better
     ratio_data = good_ratio_data.copy()
@@ -362,11 +393,14 @@ if __name__ == '__main__':
                                 good_ratio = good_ratio_data[circ][block_num][small_block_num].get(eps, float("inf"))
                                 if good_ratio < RATIO_LIMIT:
                                     ratio_data[circ][block_num][small_block_num][eps] = good_ratio_data[circ][block_num][small_block_num][eps]
-                                    cx_data[circ][block_num][small_block_num][eps] = good_cx_data[circ][block_num][small_block_num][eps]
+                                    if output_cx:
+                                        cx_data[circ][block_num][small_block_num][eps] = good_cx_data[circ][block_num][small_block_num][eps]
                                 else:
-                                    cx_data[circ][block_num][small_block_num][eps] = 0 # Don't count reduction
+                                    if output_cx:
+                                        cx_data[circ][block_num][small_block_num][eps] = 0 # Don't count reduction
                             else:
-                                cx_data[circ][block_num][small_block_num][eps] = 0 # Don't count reduction
+                                if output_cx:
+                                    cx_data[circ][block_num][small_block_num][eps] = 0 # Don't count reduction
 
     # Combine all data frames into a single data frame (optional)
     # combined_data = pd.concat(data_frames, ignore_index=True)
@@ -422,5 +456,6 @@ if __name__ == '__main__':
 
 
     # Output CX data to a csv file
-    csv_file_name = f"error_scaling_4_all_cx{extra}{extra_2}.csv"
-    output_csv(cx_data, csv_file_name)
+    if output_cx:
+        csv_file_name = f"error_scaling_4_all_cx{extra_2}.csv"
+        output_csv(cx_data, csv_file_name)
