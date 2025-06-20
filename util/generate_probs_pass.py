@@ -128,24 +128,31 @@ class GenerateProbabilityPass(BasePass):
 
         final_probs_file = f"{checkpoint_dir}/ensemble_final_probs.npy"
 
-        # if os.path.exists(probs_file):
-        #     print("Already calculated probabilities, skipping", flush=True)
-        #     return
-
-        target = data.target
         try:
             circ_params = load_jiggled_ensemble(ens_file, jiggle_file,
                                                 cache_file, probs_file)
         except:
             print("Corrupted ensemble files, skipping", checkpoint_dir, flush=True)
             return
+
+        # if os.path.exists(probs_file):
+        #     print("Already calculated probabilities, skipping", flush=True)
+        #     return
+
+        target = data.target
         
         orig_circs = load_ensemble(ens_file)
         orig_uns = [get_corrected_un(c.get_unitary(), target) for c in orig_circs]
         ensemble = await get_runtime().map(create_jiggled_unitaries, circ_params, 
                                             target=target, add_cost=False)
-        all_probs = np.load(probs_file)
+        
 
+        num_params_per_circ = circ_params[0][1].shape[1]
+        try:
+            all_probs = np.load(probs_file)
+        except:
+            all_probs = None
+            pass
         # To seed Frank-Wolf, we will first use Frank-Wolf on un-jiggled 
         # unitaries and then calculate the joint distribution of the full
         # ensemble
@@ -155,22 +162,25 @@ class GenerateProbabilityPass(BasePass):
                                                              target)
         
         # Calculate joint distribution for seeding FW
-        init_probs = [[p * qp_p for p in probs] for probs, qp_p in zip(all_probs, orig_probs)]
-        init_probs = np.hstack(init_probs)
+        if all_probs is not None:
+            init_probs = [[p * qp_p for p in probs] for probs, qp_p in zip(all_probs, orig_probs)]
+            init_probs = np.hstack(init_probs)
+        else:
+            init_probs = None
 
         ensemble = np.concatenate(ensemble, axis=0)
 
-        if len(ensemble) > NUM_CIRCS_PER_PROB:
-            rand_un_inds = np.random.choice(ensemble.shape[0], 
-                                            size=NUM_CIRCS_PER_PROB, 
-                                            replace=False)
-            # Save random indices
-            rand_inds_file = f"{checkpoint_dir}/ensemble_final_rand_inds.npy"
-            np.save(rand_inds_file, rand_un_inds)
-            ensemble = ensemble[rand_un_inds]
-            init_probs = init_probs[rand_un_inds]
-            # Normalize init_probs
-            init_probs = init_probs / np.sum(init_probs)
+        # if len(ensemble) > NUM_CIRCS_PER_PROB:
+        #     rand_un_inds = np.random.choice(ensemble.shape[0], 
+        #                                     size=NUM_CIRCS_PER_PROB, 
+        #                                     replace=False)
+        #     # Save random indices
+        #     rand_inds_file = f"{checkpoint_dir}/ensemble_final_rand_inds.npy"
+        #     np.save(rand_inds_file, rand_un_inds)
+        #     ensemble = ensemble[rand_un_inds]
+        #     init_probs = init_probs[rand_un_inds]
+        #     # Normalize init_probs
+        #     init_probs = init_probs / np.sum(init_probs)
 
         print("Running Probaility on ensemble of size: ", ensemble.shape[0], flush=True)
             

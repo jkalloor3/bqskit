@@ -572,11 +572,12 @@ class  JiggleEnsemblePass(BasePass):
         cache_file = cache_file_name.format(ind=0, extra=self.checkpoint_extra_str)
 
         if os.path.exists(probs_file):
-            num_circs = calc_num_circs(jiggle_file)
-            if num_circs > 1000:
-                print(f"Already have {num_circs} circuits in ensemble, " \
-                "skipping Jiggle Ensemble Pass", flush=True)
-                return
+            # num_circs = calc_num_circs(jiggle_file)
+            # if num_circs > 1000:
+            #     print(f"Already have {num_circs} circuits in ensemble, " \
+            #     "skipping Jiggle Ensemble Pass", flush=True)
+            #     return
+            pass
                 
         Path(ens_file).parent.mkdir(parents=True, exist_ok=True)
         Path(jiggle_file).parent.mkdir(parents=True, exist_ok=True)
