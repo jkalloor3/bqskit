@@ -129,6 +129,8 @@ def get_ensemble_workflow(circ_name: str, tol: float, extra: str = "") -> Workfl
         success_threshold=err_thresh / 10,
         use_calculated_error=True)
 
+    extra_str = "_fw"
+
     jiggle_pass = JiggleEnsemblePass(success_threshold=err_thresh * 5, 
                                   num_circs=4000, 
                                   use_scan_sols=True,
@@ -137,7 +139,8 @@ def get_ensemble_workflow(circ_name: str, tol: float, extra: str = "") -> Workfl
                                   jiggle_skew=0,
                                   count_t=True,
                                   do_u3_perturbation=True,
-                                  flood_circ=False)
+                                  flood_circ=False,
+                                  checkpoint_extra_str=extra_str)
 
     leap_workflow = [
         FixAnglesPass(15),
@@ -161,8 +164,10 @@ def get_ensemble_workflow(circ_name: str, tol: float, extra: str = "") -> Workfl
                 # PrintDistancesPass(),
                 jiggle_pass,
                 # PrintDistancesPass(load_jiggles=True),
-                GenerateProbabilityPass(run_on_ensemble_0=True),
-                CheckEnsembleQualityPass(True),
+                GenerateProbabilityPass(run_on_ensemble_0=True,
+                                        checkpoint_extra_str=extra_str),
+                CheckEnsembleQualityPass(count_t=True,
+                                         checkpoint_extra_str=extra_str),
             ]
         ),
     ]

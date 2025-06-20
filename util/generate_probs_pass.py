@@ -15,15 +15,12 @@ import os
 import cvxpy as cp
 import cvxopt
 
-NUM_CIRCS_PER_PROB = 5000
-
 class GenerateProbabilityPass(BasePass):
     
-    def __init__(self, run_on_ensemble_0: bool = False) -> None:
+    def __init__(self, run_on_ensemble_0: bool = False, 
+                 checkpoint_extra_str: str = "") -> None:
         self.run_on_ensemble_0 = run_on_ensemble_0
-        self.checkpoint_extra_str = ""
-
-
+        self.checkpoint_extra_str = checkpoint_extra_str
 
     @staticmethod
     def calculate_probs(ensemble: np.ndarray, target: np.ndarray,
@@ -126,11 +123,11 @@ class GenerateProbabilityPass(BasePass):
             cache_file = f"{checkpoint_dir}/ensemble_cache_final.pkl"
             # probs_file = f"{checkpoint_dir}/ensemble_final_probs.npy"
 
-        final_probs_file = f"{checkpoint_dir}/ensemble_final_probs.npy"
+        final_probs_file = f"{checkpoint_dir}/ensemble_final_probs_{self.checkpoint_extra_str}.npy"
 
-        # if os.path.exists(probs_file):
-        #     print("Already calculated probabilities, skipping", flush=True)
-        #     return
+        if os.path.exists(final_probs_file):
+            print("Already calculated probabilities, skipping", flush=True)
+            return
 
         target = data.target
         try:

@@ -82,16 +82,18 @@ class CheckEnsembleQualityPass(BasePass):
         # Check Ensemble Quality and output it to a CSV
         print("Check Ensemble Quality Pass", flush=True)
         checkpoint_dir: str = data["checkpoint_dir"]
-        final_ens_file = f"{checkpoint_dir}/ensemble_final.qasms"
-        final_ens_jiggle_file = f"{checkpoint_dir}/ensemble_final_jiggle.npy"
+        checkpoint_data_file: str = data["checkpoint_data_file"]
+        csv_file = checkpoint_data_file.replace(".data", f"{self.csv_name}{self.checkpoint_extra_str}.csv")
+        final_ens_file = f"{checkpoint_dir}/ensemble_final{self.checkpoint_extra_str}.qasms"
+        final_ens_jiggle_file = f"{checkpoint_dir}/ensemble_final_jiggle{self.checkpoint_extra_str}.npy"
 
         print("Checkpoint Dir: ", checkpoint_dir, flush=True)
         print("Starting Check Ensemble Quality Pass", flush=True)
         
-        # if os.path.exists(final_ens_file):
-        #     # Load the ensemble from the checkpoint
-        #     print("Already Checked!", flush=True)
-        #     return
+        if os.path.exists(csv_file):
+            # Load the ensemble from the checkpoint
+            print("Already Checked!", flush=True)
+            return
         
         # Otherwise, reload from saved files - Would have done in 
         ensemble_file_name = os.path.join(checkpoint_dir, "ensemble_{ind}_{extra}.qasms")
@@ -207,8 +209,6 @@ class CheckEnsembleQualityPass(BasePass):
             return
 
         if "checkpoint_dir" in data:
-            checkpoint_data_file: str = data["checkpoint_data_file"]
-            csv_file = checkpoint_data_file.replace(".data", f"{self.csv_name}.csv")
             writer = csv.DictWriter(open(csv_file, "w", newline=""), 
                                     fieldnames=csv_dict[0].keys())
             writer.writeheader()
