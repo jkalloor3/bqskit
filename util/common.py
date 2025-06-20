@@ -9,14 +9,14 @@ import os
 import glob
 import numpy as np
 from bqskit.ir.lang.qasm2 import OPENQASM2Language
-from .distance import frobenius_cost, normalized_frob_cost, hs_cost
+from .distance import frobenius_cost, normalized_frob_cost, hs_cost, get_corrected_un
 import multiprocessing as mp
 from bqskit.runtime import get_runtime
 from bqskit.utils.math import unitary_log_no_i
 
 from .gg import gg_gate_def, GridSynthGate
 
-base_bqskit_dir = "/pscratch/sd/j/jkalloor/bqskit"
+base_bqskit_dir = "/home/jkalloor/bqskit"
 good_block_dir = f"{base_bqskit_dir}/good_blocks"
 bad_block_dir = f"{base_bqskit_dir}/bad_blocks"
 base_checkpoint_dir = f"{base_bqskit_dir}/block_checkpoints_final_paper"
@@ -40,6 +40,14 @@ def stack_padding(it: list[np.ndarray], vertical: bool = True) -> np.ndarray:
             exit(1)
         print("Final Param Arr Shape: ", result.shape, flush=True)
     return result
+
+def store_probs(probs: list[np.ndarray], probs_file_name: str):
+    # Get max param size
+    # print([p.shape for p in probs], flush=True)
+    # probs_arr = stack_padding(probs, vertical=True)
+    probs_arr = np.vstack(probs)
+    print("Final Probs Arr Shape: ", probs_arr.shape, flush=True)
+    np.save(probs_file_name, probs_arr)
 
 def store_params(all_params: list[np.ndarray], jiggle_file_name: str):
     # Get max param size
@@ -100,12 +108,33 @@ def get_ham_shifts(circ_params: tuple[Circuit, np.ndarray, dict],
 
     return hams
 
+def create_uns(circ_data: tuple[str, np.ndarray, np.ndarray, dict],
+                        target: UnitaryMatrix) -> list[UnitaryMatrix]:
+
+    circ_str, params, probs, cache = circ_data    
+    if cache is not None:
+        # Get the worker cache
+        w_cache = get_runtime().get_cache()
+        w_cache.clear()
+        w_cache.update(cache)
+
+    circ = qlang.decode(circ_str)
+    all_uns = []
+    for i, prob in enumerate(probs):
+        if prob == 0:
+            continue
+
+        un = get_corrected_un(circ.get_unitary(params[i]), target)
+        all_uns.append((un, prob))
+        # print(".", end="", flush=True)
+    return all_uns
+
 
 def create_avg_utry(circ_params: tuple[Circuit, np.ndarray, dict], 
                     target: UnitaryMatrix,  
                     add_cost: bool = False) -> UnitaryMatrix | tuple[UnitaryMatrix, 
                                                                      float]:
-    circ, params, cache = circ_params
+    circ, params, probs, cache = circ_params
 
     if len(params) == 0:
         new_circ = circ.copy()
@@ -123,22 +152,21 @@ def create_avg_utry(circ_params: tuple[Circuit, np.ndarray, dict],
         w_cache = get_runtime().get_cache()
         w_cache.clear()
         w_cache.update(cache)
+        print("Cache Keys: ", w_cache.keys(), flush=True)
 
     avg_utry = np.zeros_like(circ.get_unitary())
     avg_dist = 0
     avg_hs = 0
-    for param in params.tolist():
-        new_circ = circ.copy()
-        new_circ.set_params(param)
-        fix_phase(new_circ, target)
-        un = new_circ.get_unitary()
-        avg_utry += un
+    if np.sum(probs) == 0:
+        probs = np.ones(probs.shape)
+    probs = probs / np.sum(probs)
+    for i, param in enumerate(params.tolist()):
+        un = get_corrected_un(circ.get_unitary(param), target)
+        p = probs[i]
+        avg_utry += p * un
         if add_cost:
-            avg_dist += normalized_frob_cost(un, target)
-            avg_hs += hs_cost(un, target)
-    avg_utry = avg_utry / len(params)
-    avg_dist = avg_dist / len(params)
-    avg_hs = avg_hs / len(params)
+            avg_dist += p * normalized_frob_cost(un, target)
+            avg_hs += p * hs_cost(un, target)
     if add_cost:
         return (avg_utry, avg_dist, avg_hs)
     else:
@@ -160,10 +188,10 @@ def get_unitary(circ: Circuit, target: UnitaryMatrix) -> tuple[UnitaryMatrix, fl
     return (utry, cost_1)
 
 
-def create_jiggled_unitaries(circ_params: tuple[Circuit, np.ndarray, dict], 
+def create_jiggled_unitaries(circ_params: tuple[Circuit, np.ndarray, np.ndarray, dict], 
                                    target: UnitaryMatrix = None,
                                    add_cost: bool = True) -> np.ndarray[np.complex128] | list[tuple[UnitaryMatrix, float]]:
-    circ, params, cache = circ_params
+    circ, params, _,  cache = circ_params
     if cache is not None:
         # Get the worker cache if exists
         try:
@@ -207,7 +235,9 @@ def load_jiggled_ensemble_separate(file_name: str, jiggle_file_name: str) -> tup
     return circs, params
 
 def load_jiggled_ensemble(file_name: str, jiggle_file_name: str, 
-                          cache_file_name: str) -> list[tuple[Circuit, 
+                          cache_file_name: str,
+                          probs_file_name: str) -> list[tuple[Circuit, 
+                                                              np.ndarray,
                                                               np.ndarray, 
                                                               dict]]:
     circs = load_ensemble(file_name)
@@ -218,7 +248,14 @@ def load_jiggled_ensemble(file_name: str, jiggle_file_name: str,
         caches = pickle.load(open(cache_file_name, "rb"))
     except:
         caches = [None] * len(circs)
-    circ_params = list(zip(circs, params, caches))
+
+    try:
+        probs = np.load(probs_file_name)
+    except:
+        # Use uniform distribution
+        probs = [np.ones(p.shape[0],) / p.shape[0] for p in params]
+
+    circ_params = list(zip(circs, params, probs, caches))
     return circ_params
 
 def store_ensemble(ensemble: list[Circuit], file_name: str):
@@ -302,6 +339,11 @@ def check_param_shape(circ_name: str, block_num: int, tol: float, extra: str = "
         print("Using default ensemble 0", flush=True)
     params: np.ndarray = np.load(full_path)
     return params.shape
+
+
+def calc_num_circs(jiggle_file: str) -> int:
+    params: np.ndarray = np.load(jiggle_file)
+    return params.shape[0] * params.shape[1]
 
 def load_compiled_circs_params_separate(circ_name: str, block_num: int, tol: float, extra: str = "") -> tuple[list[Circuit], 
                                                                                              np.ndarray]:

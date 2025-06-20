@@ -117,19 +117,16 @@ def get_ensemble_workflow(circ_name: str, tol: float, extra: str = "") -> Workfl
     synthesis_pass = LEAPSynthesisPass2(
         store_partial_solutions=True,
         success_threshold = extra_err_thresh,
-        partial_success_threshold=err_thresh / 5,
+        partial_success_threshold=err_thresh / 10,
         max_layer_factor=1.01,
         instantiate_options=instantiation_options,
         max_layer=14,
         max_psols=20
     )
-    
-    full_success_threshold = err_thresh * 0.001
-    success_threshold = err_thresh
 
     ntro = NumericalTReductionPass(
         full_loops=3,
-        success_threshold=err_thresh * 5,
+        success_threshold=err_thresh / 10,
         use_calculated_error=True)
 
     jiggle_pass = JiggleEnsemblePass(success_threshold=err_thresh * 5, 
@@ -150,22 +147,22 @@ def get_ensemble_workflow(circ_name: str, tol: float, extra: str = "") -> Workfl
         ForEachBlockPass(
             [
                 # TketPass(),
-                # IfThenElsePass(
-                #     CountPredicate(),
-                #     synthesis_pass,
-                #     DoNothingPass()
-                # ),
-                # FixAnglesPass(int(tol) * 2 + 2, run_scan_sols=True),
-                # ConvertToZXZXZSimple(group=False),
-                # ntro,
-                # FixAnglesPass(int(tol) * 2 + 2, run_scan_sols=True),
-                # FixGlobalPhasePass(),
-                # FilterDistancesPass(threshold=(err_thresh * 5)),
+                IfThenElsePass(
+                    CountPredicate(),
+                    synthesis_pass,
+                    DoNothingPass()
+                ),
+                FixAnglesPass(int(tol) * 2 + 2, run_scan_sols=True),
+                ConvertToZXZXZSimple(group=False),
+                ntro,
+                FixAnglesPass(int(tol) * 2 + 2, run_scan_sols=True),
+                FixGlobalPhasePass(),
+                FilterDistancesPass(threshold=(err_thresh * 5)),
                 # PrintDistancesPass(),
                 jiggle_pass,
                 # PrintDistancesPass(load_jiggles=True),
-                # GenerateProbabilityPass(run_on_ensemble_0=True),
-                # CheckEnsembleQualityPass(True),
+                GenerateProbabilityPass(run_on_ensemble_0=True),
+                CheckEnsembleQualityPass(True),
             ]
         ),
     ]
