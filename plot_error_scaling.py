@@ -142,15 +142,15 @@ def read_data_from_folders(circuits, checkpoints_dir, small_block = False):
                             if actual_eps > 100 * (10 ** (-tol)):
                                 continue
                             final_ratio = min(final_ratio, float(row["Ratio"]))
-                if final_ratio < 1:
-                    # For visual fidelity, we set this to 1. We can arbitrarily
-                    # increase the final ratio by adding noise to the final
-                    # circuits
-                    final_ratio = 1
+                # if final_ratio < 1:
+                #     # For visual fidelity, we set this to 1. We can arbitrarily
+                #     # increase the final ratio by adding noise to the final
+                #     # circuits
+                #     final_ratio = 1
 
-                if final_ratio > 1e5:
-                    # Just ignore this data point, will not use this block at all
-                    continue
+                if final_ratio > 10000:
+                    # Just set it to 10000 and we will plot it as 10000+
+                    final_ratio = 10000
                 
                 if small_block:
                     small_block_num = os.path.basename(csv_file).split(".")[0].split("_")[-1]
@@ -280,7 +280,15 @@ def get_orig_counts(circuits: list[str], cliff_t: bool = False,
         with open(save_file, 'rb') as f:
             orig_cx_counts = pickle.load(f)
             print(orig_cx_counts["add17"]["03"]["0"])
-        return orig_cx_counts
+        
+        # If any circuits are missing, then compile only those
+        missing_circuits = [circ for circ in circuits if circ not in orig_cx_counts]
+        if len(missing_circuits) == 0:
+            print(f"Loaded original counts from {save_file}")
+            return orig_cx_counts
+        print(f"Missing circuits: {missing_circuits}, compiling those only")
+        circuits = missing_circuits
+        # return orig_cx_counts
 
     workflow = [
         ScanPartitioner(4),
@@ -325,8 +333,8 @@ def get_orig_counts(circuits: list[str], cliff_t: bool = False,
 if __name__ == '__main__':
     # Collect data from all folders
     use_small_block = True
-    output_cx = False
-    cliff_t = True
+    output_cx = True
+    cliff_t = False
 
     if not cliff_t:
         small_block_checkpoints_dir_1 = f"small_block_checkpoints_final_paper_4_more_cx_tket"
@@ -418,11 +426,13 @@ if __name__ == '__main__':
         else:
             ax.set_title("Error Scaling (NISQ)", fontdict={"size": 28})
         ax.set_xlabel("Average Frobenius Distance ($\epsilon$)", fontdict={"size": 24})
-        if output_cx:
-            ax.set_ylabel("CNOT Reduction", fontdict={"size": 24})
-        else:
-            ax.set_ylabel("Scaling Factor ($\gamma$)", fontdict={"size": 24})
-            ax.set_yscale("log")
+        ax.set_ylabel("Scaling Factor ($\gamma$)", fontdict={"size": 24})
+        ax.set_yscale("log")
+
+        # Set y tick label of 1000 to 1000+
+        ax.set_yticks([0.1, 1, 10, 100, 1000, 10000])
+        ax.set_yticklabels(["0.1", "1", "10", "100", "1000", "10000+"], fontdict={"size": 16})
+
         # ax.set_xbound(0.8, 5.2)
         # ax.set_ybound(-3, max(ax.get_ybound()[1], 10))
         ax.set_yticklabels(ax.get_yticks(), fontdict={"size": 16})
@@ -433,19 +443,14 @@ if __name__ == '__main__':
     # Save the figure
     # plt.tight_layout()
     fig.tight_layout()
-    if output_cx:
-        extra = "_cx"
-    else:
-        extra = "_ratio"
-
     if cliff_t:
-        extra_2 = "_cliff"
+        extra = "_cliff"
     else:
-        extra_2 = "_nisq"
-    fig.savefig(f"error_scaling_4_all_violin{extra}{extra_2}.png", dpi=300)
+        extra = "_nisq"
+    fig.savefig(f"error_scaling_4_all_violin_ratio{extra}.png", dpi=300)
 
 
     # Output CX data to a csv file
     if output_cx:
-        csv_file_name = f"error_scaling_4_all_cx{extra_2}.csv"
+        csv_file_name = f"error_scaling_4_all_cx{extra}.csv"
         output_csv(cx_data, csv_file_name)
