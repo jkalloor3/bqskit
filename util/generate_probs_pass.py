@@ -171,16 +171,16 @@ class GenerateProbabilityPass(BasePass):
         ensemble = np.concatenate(ensemble, axis=0)
 
         # if len(ensemble) > NUM_CIRCS_PER_PROB:
-        #     rand_un_inds = np.random.choice(ensemble.shape[0], 
-        #                                     size=NUM_CIRCS_PER_PROB, 
-        #                                     replace=False)
-        #     # Save random indices
-        #     rand_inds_file = f"{checkpoint_dir}/ensemble_final_rand_inds.npy"
-        #     np.save(rand_inds_file, rand_un_inds)
-        #     ensemble = ensemble[rand_un_inds]
-        #     init_probs = init_probs[rand_un_inds]
-        #     # Normalize init_probs
-        #     init_probs = init_probs / np.sum(init_probs)
+        # rand_un_inds = np.random.choice(ensemble.shape[0], 
+        #                                 size=NUM_CIRCS_PER_PROB, 
+        #                                 replace=False)
+        # Save random indices
+        # rand_inds_file = f"{checkpoint_dir}/ensemble_final_rand_inds.npy"
+        # np.save(rand_inds_file, rand_un_inds)
+        # ensemble = ensemble[rand_un_inds]
+        # init_probs = init_probs[rand_un_inds]
+        # # Normalize init_probs
+        # init_probs = init_probs / np.sum(init_probs)
 
         print("Running Probaility on ensemble of size: ", ensemble.shape[0], flush=True)
             

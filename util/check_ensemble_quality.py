@@ -50,7 +50,6 @@ class CheckEnsembleQualityPass(BasePass):
                           avg_hs: float = None) -> dict[str, Any]:
         ensemble_data = {}
         dim = avg_utry.shape[0]
-        print("Average Norm Epsilon: ", avg_dist, flush=True)
         frob_factor = np.sqrt(dim * 2)
         norm_e1 = avg_dist
         frob_e1 = avg_dist * frob_factor
@@ -89,15 +88,15 @@ class CheckEnsembleQualityPass(BasePass):
         print("Checkpoint Dir: ", checkpoint_dir, flush=True)
         print("Starting Check Ensemble Quality Pass", flush=True)
         
-        if os.path.exists(final_ens_file):
-            # Load the ensemble from the checkpoint
-            print("Already Checked!", flush=True)
-            return
+        # if os.path.exists(final_ens_file):
+        #     # Load the ensemble from the checkpoint
+        #     print("Already Checked!", flush=True)
+        #     return
         
         # Otherwise, reload from saved files - Would have done in 
         ensemble_file_name = os.path.join(checkpoint_dir, "ensemble_{ind}_{extra}.qasms")
         jiggle_file_name = os.path.join(checkpoint_dir, "ensemble_{ind}_jiggles_{extra}.npy")
-        cache_file_name = os.path.join(checkpoint_dir, "ensemble_{ind}_cache.pkl")
+        cache_file_name = os.path.join(checkpoint_dir, "ensemble_{ind}_cache_{extra}.pkl")
         cache_file_name_2 = os.path.join(checkpoint_dir, "ensemble_cache_{ind}.pkl")
         final_ens_file = os.path.join(checkpoint_dir, "ensemble_final.qasms")
         start_ens_ind = 0
@@ -107,6 +106,7 @@ class CheckEnsembleQualityPass(BasePass):
         if not os.path.exists(cache_file):
             cache_file = cache_file_name_2.format(ind=start_ens_ind)
         ensemble_counts = {}
+        probs_file = os.path.join(checkpoint_dir,"ensemble_final_probs.npy")
 
         target = data.target
         csv_dict = {}
@@ -116,20 +116,16 @@ class CheckEnsembleQualityPass(BasePass):
         best_ratio = float("inf")
         best_count = float("inf")
 
-        if self.sample_blocks:
-            # ensemble = self.sample_sub_ensembles(circuit, data)
-            pass
-        else:
-            ensemble_files = []
-            if os.path.exists(jiggle_file):
-                while os.path.exists(jiggle_file):
-                    ensemble_files.append((ens_file, jiggle_file, cache_file))
-                    start_ens_ind += 1
-                    ens_file = ensemble_file_name.format(ind=start_ens_ind, extra=self.checkpoint_extra_str)
-                    jiggle_file = jiggle_file_name.format(ind=start_ens_ind, extra=self.checkpoint_extra_str)
-                    cache_file = cache_file_name.format(ind=start_ens_ind, extra=self.checkpoint_extra_str)
+        ensemble_files = []
+        if os.path.exists(jiggle_file):
+            while os.path.exists(jiggle_file):
+                ensemble_files.append((ens_file, jiggle_file, cache_file, probs_file))
+                start_ens_ind += 1
+                ens_file = ensemble_file_name.format(ind=start_ens_ind, extra=self.checkpoint_extra_str)
+                jiggle_file = jiggle_file_name.format(ind=start_ens_ind, extra=self.checkpoint_extra_str)
+                cache_file = cache_file_name.format(ind=start_ens_ind, extra=self.checkpoint_extra_str)
 
-            ensemble = data.get("ensemble", ensemble_files)
+        ensemble = data.get("ensemble", ensemble_files)
 
         start_ens_ind = 0
 
@@ -137,51 +133,52 @@ class CheckEnsembleQualityPass(BasePass):
             print("No ensembles found, skipping pass", flush=True)
             return
 
-
         for ens in ensemble:
             if len(ens) > 0 and isinstance(ens[0], str):
-                ens_file, jiggle_file, cache_file = ens
-                circ_params = load_jiggled_ensemble(ens_file, jiggle_file, cache_file)
+                ens_file, jiggle_file, cache_file, probs_file = ens
+                circ_params = load_jiggled_ensemble(ens_file, jiggle_file, cache_file, probs_file)
             else:
                 circ_params = ens
-            circuits = [circ for circ, _, _ in circ_params]
-            params = [params for _, params, _ in circ_params]
-            if len(params[0]) == 0:
+            if len(circ_params[0][1]) == 0:
                 print("No params found in ensemble, skipping ensemble", 
                       flush=True)
                 continue
-            if len(circuits) < 4:
+            if len(circ_params) < 4:
                 # Make 10 copies of each circuit and split the params amongst them
                 new_circ_params = []
-                for circ, params, cache in circ_params:
+                for circ, params, probs, cache in circ_params:
                     param_chunks = np.array_split(params, 10)
+                    probs_chunks = np.array_split(probs, 10)
                     for i in range(10):
                         if param_chunks[i].shape[0] > 5000:
                             # pick a random subset of 5000
                             rand_inds = np.random.choice(param_chunks[i].shape[0], 5000, replace=False)
                             param_chunks[i] = param_chunks[i][rand_inds]
-                        new_circ_params.append((circ, param_chunks[i], cache))
+                            probs_chunks[i] = probs_chunks[i][rand_inds]
+                        new_circ_params.append((circ, param_chunks[i], probs_chunks[i], cache))
 
                 circ_params = new_circ_params
             avg_utries_dists = await get_runtime().map(create_avg_utry, 
-                                                        circ_params, 
+                                                        circ_params,
                                                         target=data.target, 
                                                         add_cost=True)
             
             utries = [avg_utry for avg_utry, _, _ in avg_utries_dists]
             dists = [dist for _, dist, _ in avg_utries_dists]
             hs_dists = [hs for _, _, hs in avg_utries_dists]
+            avg_utry_dists = [normalized_frob_cost(avg_utry, target) for avg_utry in utries]
+            print("Avg Utry Dists: ", avg_utry_dists, flush=True)
             avg_utry = np.mean(utries, axis=0)
             avg_dist = np.mean(dists)
             avg_hs = np.mean(hs_dists)
             print("Avg Dist: ", avg_dist, flush=True)
             csv_dict[start_ens_ind] = self.get_ensemble_data(avg_utry, avg_dist, target, None, avg_hs=avg_hs)
-            params = [params for _, params, _ in circ_params]
-            csv_dict[start_ens_ind]["Num Circs"] = len(circuits) * params[0].shape[0]
+            params = [params for _, params, _, _ in circ_params]
+            csv_dict[start_ens_ind]["Num Circs"] = len(circ_params) * params[0].shape[0]
             csv_dict[start_ens_ind]["Ensemble Generation Method"] = self.ensemble_names[start_ens_ind]
             ratio = csv_dict[start_ens_ind]["Ratio"]
             print("Ratio: ", ratio, flush=True)
-            count = np.mean([count_params(c) for c in circuits])
+            count = np.mean([count_params(c) for c, _, _,_ in circ_params])
             csv_dict[start_ens_ind]["Avg. Count"] = count
             ensemble_counts[start_ens_ind] = count
             print("Avg Count Post Jiggle Load: ", count, flush=True)
@@ -202,6 +199,8 @@ class CheckEnsembleQualityPass(BasePass):
             ens_file = ensemble_file_name.format(ind=start_ens_ind, extra=self.checkpoint_extra_str)
             jiggle_file = jiggle_file_name.format(ind=start_ens_ind, extra=self.checkpoint_extra_str)
             cache_file = cache_file_name.format(ind=start_ens_ind, extra=self.checkpoint_extra_str)
+            if not os.path.exists(cache_file):
+                cache_file = cache_file_name_2.format(ind=start_ens_ind)
         
         if len(csv_dict) == 0:
             print("No ensembles found, skipping pass", flush=True)
