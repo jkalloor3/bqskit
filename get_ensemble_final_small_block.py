@@ -15,6 +15,7 @@ from util import  LEAPSynthesisPass2, SecondLEAPSynthesisPass, EnsScanningGateRe
 from util import CheckEnsembleQualityPass, FixGlobalPhasePass
 from util import GenerateProbabilityPass
 from util import CreateEnsemblePass
+from util import get_block_names, load_block
 
 # from bqskit.ext import pytket_to_bqskit, bqskit_to_pytket
 # from pytket.passes import FullPeepholeOptimise
@@ -94,6 +95,8 @@ def get_ensemble_workflow(circ_name: str, tol: float, extra: str = "") -> Workfl
         max_psols=20
     )
 
+    extra_str = "_fw"
+
     jiggle_pass = JiggleEnsemblePass(success_threshold=err_thresh, 
                                   num_circs=2000, 
                                   use_scan_sols=True,
@@ -102,7 +105,8 @@ def get_ensemble_workflow(circ_name: str, tol: float, extra: str = "") -> Workfl
                                   jiggle_skew=0,
                                   count_t=False,
                                   do_u3_perturbation=True,
-                                  flood_circ=True)
+                                  flood_circ=True,
+                                  checkpoint_extra_str=extra_str)
 
     leap_workflow = [
         CheckpointRestartPass(checkpoint_dir, 
@@ -117,8 +121,10 @@ def get_ensemble_workflow(circ_name: str, tol: float, extra: str = "") -> Workfl
                 ),
                 # second_synthesis_pass,
                 jiggle_pass,
-                GenerateProbabilityPass(run_on_ensemble_0=True),
-                CheckEnsembleQualityPass(False),
+                GenerateProbabilityPass(run_on_ensemble_0=True,
+                                        checkpoint_extra_str=extra_str),
+                CheckEnsembleQualityPass(False,
+                                         checkpoint_extra_str=extra_str),
             ]
         ),
         # CheckEnsembleQualityPass(False, sample_blocks = True),
@@ -236,6 +242,10 @@ def get_circ_data(circ_name: str, block_num: str | int,
     # Categorize circs into different categories and run them
     if tol == -1.0:
         tols = [1.0, 2.0, 3.0, 4.0, 5.0]
+    elif tol == -2.0:
+        tols = [1.0, 2.0, 3.0]
+    elif tol == -3.0:
+        tols = [4.0, 5.0]
     else:
         tols = [tol]
     ckpt_extra = extra
@@ -266,26 +276,27 @@ def get_circ_data(circ_name: str, block_num: str | int,
         return circ_data
     
     else:
-        if block_num == "all_blocks":
-            # Get all blocks
-            good_circ_files = glob.glob(f"good_blocks{extra}/{circ_name}_*.qasm")
-            # Ignore bad blocks for now
-            bad_circ_files = glob.glob(f"bad_blocks{extra}/{circ_name}_*.qasm")
-            # bad_circ_files = []
-            all_circ_files = good_circ_files + bad_circ_files
-            block_nums = [file.split('_')[-1].split('.')[0] for file in all_circ_files]
+        if "blocks" in block_num:
+            # all_blocks, first_half_blocks, second_half_blocks
+            block_nums = get_block_names(circ_name, extra=extra)
+            print("Number of blocks: ", len(block_nums), flush=True)
+            if block_num.startswith("first_half"):
+                block_nums = block_nums[:len(block_nums) // 2]
+            elif block_num.startswith("second_half"):
+                block_nums = block_nums[len(block_nums) // 2:]
+
+            print("Running on blocks: ", len(block_nums), flush=True)
             circ_data = []
             for i, block_num in enumerate(block_nums):
                 name, circ_file = find_file(circ_name, block_num, extra=extra)
-                circ_file = all_circ_files[i]
                 for tol in tols:
                     circ_data.append((name, circ_file, tol))
 
-            # Only do 20 blocks
-            if len(circ_data) > 100:
-                rand_inds = np.random.choice(len(circ_data), 100, replace=False)
+            # Only do 250 blocks
+            if len(circ_data) > 250:
+                rand_inds = np.random.choice(len(circ_data), 250, replace=False)
                 circ_data = [circ_data[i] for i in rand_inds]
-                print("Limiting to 100 blocks", flush=True)
+                print("Limiting to 250 blocks", flush=True)
             return circ_data
         else:
             circ_name, circ_file = find_file(circ_name, block_num, extra=extra)
@@ -299,7 +310,7 @@ if __name__ == '__main__':
     block_num = argv[2] if len(argv) > 2 else "all_blocks"
     tol = float(argv[3]) if len(argv) > 3 else -1.0
     extra = argv[5] if len(argv) > 5 else "_tket"
-    circ_data = get_circ_data(circ_name, block_num, tol, extra=extra)
     np.random.seed(42)
+    circ_data = get_circ_data(circ_name, block_num, tol, extra=extra)
     print(circ_data)
     get_shortest_circuits(circ_data, extra=extra)
