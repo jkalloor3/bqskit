@@ -99,16 +99,13 @@ class CheckEnsembleQualityPass(BasePass):
         ensemble_file_name = os.path.join(checkpoint_dir, "ensemble_{ind}_{extra}.qasms")
         jiggle_file_name = os.path.join(checkpoint_dir, "ensemble_{ind}_jiggles_{extra}.npy")
         cache_file_name = os.path.join(checkpoint_dir, "ensemble_{ind}_cache_{extra}.pkl")
-        cache_file_name_2 = os.path.join(checkpoint_dir, "ensemble_cache_{ind}.pkl")
         final_ens_file = os.path.join(checkpoint_dir, "ensemble_final.qasms")
         start_ens_ind = 0
         ens_file = ensemble_file_name.format(ind=start_ens_ind, extra=self.checkpoint_extra_str)
         jiggle_file = jiggle_file_name.format(ind=start_ens_ind, extra=self.checkpoint_extra_str)
         cache_file = cache_file_name.format(ind=start_ens_ind, extra=self.checkpoint_extra_str)
-        if not os.path.exists(cache_file):
-            cache_file = cache_file_name_2.format(ind=start_ens_ind)
         ensemble_counts = {}
-        probs_file = os.path.join(checkpoint_dir,"ensemble_final_probs.npy")
+        probs_file = os.path.join(checkpoint_dir, f"ensemble_final_probs_{self.checkpoint_extra_str}.npy")
 
         target = data.target
         csv_dict = {}
@@ -150,6 +147,7 @@ class CheckEnsembleQualityPass(BasePass):
                 new_circ_params = []
                 for circ, params, probs, cache in circ_params:
                     param_chunks = np.array_split(params, 10)
+                    print("Probs: ", probs.shape, flush=True)
                     probs_chunks = np.array_split(probs, 10)
                     for i in range(10):
                         if param_chunks[i].shape[0] > 5000:
@@ -201,8 +199,8 @@ class CheckEnsembleQualityPass(BasePass):
             ens_file = ensemble_file_name.format(ind=start_ens_ind, extra=self.checkpoint_extra_str)
             jiggle_file = jiggle_file_name.format(ind=start_ens_ind, extra=self.checkpoint_extra_str)
             cache_file = cache_file_name.format(ind=start_ens_ind, extra=self.checkpoint_extra_str)
-            if not os.path.exists(cache_file):
-                cache_file = cache_file_name_2.format(ind=start_ens_ind)
+            # if not os.path.exists(cache_file):
+            #     cache_file = cache_file_name_2.format(ind=start_ens_ind)
         
         if len(csv_dict) == 0:
             print("No ensembles found, skipping pass", flush=True)
@@ -242,7 +240,7 @@ class AddHSCostPass(BasePass):
         # Otherwise, reload from saved files - Would have done in 
         ensemble_file_name = os.path.join(checkpoint_dir, "ensemble_{ind}_{extra}.qasms")
         jiggle_file_name = os.path.join(checkpoint_dir, "ensemble_{ind}_jiggles_{extra}.npy")
-        cache_file_name = os.path.join(checkpoint_dir, "ensemble_{ind}_cache.pkl")
+        cache_file_name = os.path.join(checkpoint_dir, "ensemble_{ind}_cache_{extra}.pkl")
         start_ens_ind = 0
         ens_file = ensemble_file_name.format(ind=start_ens_ind, extra=self.checkpoint_extra_str)
         jiggle_file = jiggle_file_name.format(ind=start_ens_ind, extra=self.checkpoint_extra_str)

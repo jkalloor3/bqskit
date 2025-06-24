@@ -163,7 +163,6 @@ def get_ensemble_workflow(circ_name: str, tol: float, extra: str = "") -> Workfl
                 FilterDistancesPass(threshold=(err_thresh * 5)),
                 # PrintDistancesPass(),
                 jiggle_pass,
-                # PrintDistancesPass(load_jiggles=True),
                 GenerateProbabilityPass(run_on_ensemble_0=True,
                                         checkpoint_extra_str=extra_str),
                 CheckEnsembleQualityPass(count_t=True,
@@ -201,29 +200,6 @@ def check_if_finished(circ_name: str, tol: float, extra: str = "") -> tuple[bool
     extra_str = extra_str.split(".npy")[0]
     return False, True, extra_str
 
-def get_final_workflow(circ_name: str, tol: float, extra: str = "") -> WorkflowLike | None:
-    # Check if already finished
-    # checkpoint_dir = f"{base_checkpoint_dir}/{circ_name}_{tol}/"
-    ckpt_extra = extra
-    base_checkpoint_dir = base_checkpoint_dir_form.format(block_size=SMALL_BLOCK_SIZE, 
-                                                          extra=ckpt_extra)
-    checkpoint_dir = os.path.join(base_checkpoint_dir, f"{circ_name}_{tol}")
-    print(f"Checkpoint Dir: {checkpoint_dir}", flush=True)
-    finished, jiggle_finished, _ = check_if_finished(circ_name, tol, extra=extra)
-    if finished:
-        print(f"Already finished {circ_name} {tol}", flush=True)
-        return None
-    if not jiggle_finished:
-        print(f"Jiggle not finished {circ_name} {tol}", flush=True)
-        return get_ensemble_workflow(circ_name, tol, extra=extra)
-    print("Finding Final Ensemble for ", circ_name, flush=True)
-    workflow = [
-        CheckpointRestartPass(checkpoint_dir, 
-                                default_passes=[]),
-        CheckEnsembleQualityPass(False),
-        # GenerateProbabilityPass()
-    ]
-    return workflow
 
 def get_shortest_circuits(circ_data: list[tuple[str, str, float]], extra: str = "") -> list[Circuit]:
     '''
@@ -233,7 +209,7 @@ def get_shortest_circuits(circ_data: list[tuple[str, str, float]], extra: str = 
         circ_data: list of tuples of the form (circ_name, circ_file, tol)
     '''
     workflows = [
-        get_final_workflow(circ_name, tol, extra)
+        get_ensemble_workflow(circ_name, tol, extra)
         for circ_name, _, tol in circ_data
     ]
 

@@ -34,14 +34,14 @@ import os
 from .common import (store_params, load_ensemble_strs, store_ensemble_strs, 
                      calc_num_circs, store_probs)
 from .counter import count_params_str
-from .gg import GridSynthGate, gg_gate_def, MIN_EPSILON, get_rz_perturbations
+from .gg import GridSynthGate, gg_gate_def, MIN_EPSILON, get_rz_perturbations, get_approx_t_str
 
 _logger = logging.getLogger(__name__)
 
 frob_cost = GPNormalizedFrobeniusCostGenerator()
 lang = OPENQASM2Language(gate_defs=[("gg", gg_gate_def)])
 
-MAX_GGS_TO_JIGGLE = 6
+MAX_GGS_TO_JIGGLE = 5
 MIN_PROBABILITY = 1e-8
 
 
@@ -188,30 +188,31 @@ class  JiggleEnsemblePass(BasePass):
 
             int_perturb_dists = split_float_to_int(perturb_dist, num_ggs) 
 
-
             # Only need to save the GG strings
             cache_to_save = {}
             # Reuse params and probabilities if possible
             total_cache = {}
             for op in circ.operations():
                 if isinstance(op.gate, GridSynthGate):
-                    angle = op.params[0]
-
-                    gg_params, gg_strs, probs = total_cache.get(angle, get_rz_perturbations(angle, 
-                                                                    int_perturb_dists[len(gg_param_options)]))
-                    
-                    total_cache[angle] = (gg_params, gg_strs, probs)
+                    if len(gg_probs) < num_ggs:
+                        angle = op.params[0]
+                        gg_params, gg_strs, probs = total_cache.get(angle, get_rz_perturbations(angle, 
+                                                                        int_perturb_dists[len(gg_param_options)]))
                         
-                    # Fill up cache to save with gg_strs
-                    for i, gg_str in enumerate(gg_strs):
-                        ind = (gg_params[i][0], gg_params[i][1])
-                        cache_to_save[ind] = gg_str
+                        total_cache[angle] = (gg_params, gg_strs, probs)
+                            
+                        # Fill up cache to save with gg_strs
+                        for i, gg_str in enumerate(gg_strs):
+                            ind = (gg_params[i][0], gg_params[i][1])
+                            cache_to_save[ind] = gg_str
 
-                    gg_param_options.append(gg_params)
-                    gg_probs.append(probs)
+                        gg_param_options.append(gg_params)
+                        gg_probs.append(probs)
 
-                    if len(gg_probs) >= num_ggs:
-                        break
+                    # Fill up cache with orig params as well
+                    ind_orig = (op.params[0], int(op.params[1]))
+                    if ind_orig not in cache_to_save:
+                        cache_to_save[ind_orig] = get_approx_t_str(op.params[0], int(op.params[1]))
 
             all_data.append((gg_param_options, gg_probs, cache_to_save))
 
@@ -283,7 +284,6 @@ class  JiggleEnsemblePass(BasePass):
 
         return final_params, final_probs
     
-
     @staticmethod
     def single_jiggle_ham(circ_str: str, target: UnitaryMatrix, 
                           num: int, success_threshold: float) -> np.ndarray[float]:
@@ -425,7 +425,7 @@ class  JiggleEnsemblePass(BasePass):
         num_params = count_params_str(circ_str)
         if num_params == 0:
             return circ_str
-        int_thresh = ceil(-1 * np.log10(success_threshold / num_params)) + 1
+        int_thresh = ceil(-1 * np.log10(success_threshold / num_params))
         # empty_circ = Circuit(1)
         if count_t:
             if circ_str.count("gg(") or circ_str.count("gg (") > 0:
@@ -436,7 +436,7 @@ class  JiggleEnsemblePass(BasePass):
             pts_to_remove = []
             for cycle, op in circ.operations_with_cycles():
                 if isinstance(op.gate, RZGate):
-                    gg_params = [op.params[0], min(MIN_EPSILON, int_thresh * 2 + 2), 0]
+                    gg_params = [op.params[0], min(MIN_EPSILON, int_thresh * 2), 0]
                     circ.replace_gate(CircuitPoint(cycle, op.location[0]), 
                                       GridSynthGate(), op.location, gg_params)
                 elif isinstance(op.gate, U3Gate):
@@ -541,7 +541,7 @@ class  JiggleEnsemblePass(BasePass):
             store_time = time.time() - store_start
             jiggle_file = jiggle_file_name.format(ind=ens_ind, extra=self.checkpoint_extra_str)
             store_params(all_params, jiggle_file)
-            cache_file = os.path.join(checkpoint_dir, f"ensemble_{ens_ind}_cache.pkl")
+            cache_file = os.path.join(checkpoint_dir, f"ensemble_{ens_ind}_cache_{self.checkpoint_extra_str}.pkl")
             # store_caches(all_caches, jiggle_file)
             pickle.dump(all_caches, open(cache_file, "wb"))
             print("Stored Ensemble", store_time, flush=True)

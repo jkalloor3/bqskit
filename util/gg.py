@@ -183,18 +183,22 @@ class GridSynthGate(QubitGate, CachedClass):
     _qasm_name = 'gg'
     def get_unitary(self, params: RealVector = []) -> UnitaryMatrix:
         """Return the unitary for this gate, see :class:`Unitary` for more."""
-        ang = round(params[0], 18)
+        ang = params[0]
+        if np.allclose(ang, 0, atol=1e-10, rtol=0):
+            return IdentityGate(1).get_unitary()
         epsilon = int(params[1])
         z_twirl = int(params[2])
         ind = (ang, epsilon)
         try:
             cache = get_runtime().get_cache()
-            t_str = cache.get(ind, None)
+            t_str = cache[ind]
         except:
             t_str = None
-
+            print("miss", end="", flush=True)
+            
         if t_str is None:
-            t_str = get_approx_t_str(ang, epsilon)            
+            t_str = get_approx_t_str(ang, epsilon)
+            cache[ind] = t_str            
         if z_twirl == 1:
             t_str = "Z" + t_str + "Z"
         

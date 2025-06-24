@@ -6,7 +6,9 @@ from bqskit.runtime import get_runtime
 from bqskit.compiler.basepass import BasePass
 from bqskit.compiler.passdata import PassData
 import numpy as np
-from .common import load_jiggled_ensemble, create_jiggled_unitaries, load_ensemble
+from math import ceil
+from .common import (load_jiggled_ensemble, create_jiggled_unitaries, 
+                     load_ensemble, store_params, store_probs)
 from .distance import get_corrected_un
 # from .distance import frobenius_cost, normalized_frob_cost
 # from qpsolvers import solve_qp
@@ -14,6 +16,8 @@ from .distance import get_corrected_un
 import os
 import cvxpy as cp
 import cvxopt
+
+MAX_QP_CIRCS = 6000
 
 class GenerateProbabilityPass(BasePass):
     
@@ -139,12 +143,19 @@ class GenerateProbabilityPass(BasePass):
         target = data.target
         
         orig_circs = load_ensemble(ens_file)
-        orig_uns = [get_corrected_un(c.get_unitary(), target) for c in orig_circs]
+        
+        orig_uns = []
+        all_caches = [c for _, _, _, c in circ_params]
+        for i , c in enumerate(orig_circs):
+            w_cache = get_runtime().get_cache()
+            w_cache.clear()
+            w_cache.update(all_caches[i])
+            print(all_caches[i].keys())
+            orig_uns.append(get_corrected_un(c.get_unitary(), target))
+
         ensemble = await get_runtime().map(create_jiggled_unitaries, circ_params, 
                                             target=target, add_cost=False)
         
-
-        num_params_per_circ = circ_params[0][1].shape[1]
         try:
             all_probs = np.load(probs_file)
         except:
@@ -165,23 +176,61 @@ class GenerateProbabilityPass(BasePass):
         else:
             init_probs = None
 
-        ensemble = np.concatenate(ensemble, axis=0)
+        full_ensemble = np.concatenate(ensemble, axis=0)
 
-        # if len(ensemble) > NUM_CIRCS_PER_PROB:
-        # rand_un_inds = np.random.choice(ensemble.shape[0], 
-        #                                 size=NUM_CIRCS_PER_PROB, 
-        #                                 replace=False)
-        # Save random indices
-        # rand_inds_file = f"{checkpoint_dir}/ensemble_final_rand_inds.npy"
-        # np.save(rand_inds_file, rand_un_inds)
-        # ensemble = ensemble[rand_un_inds]
-        # init_probs = init_probs[rand_un_inds]
-        # # Normalize init_probs
-        # init_probs = init_probs / np.sum(init_probs)
+        print("Full ensemble shape: ", full_ensemble.shape, flush=True)
 
-        print("Running Probaility on ensemble of size: ", ensemble.shape[0], flush=True)
+        if len(full_ensemble) > MAX_QP_CIRCS:
+            print(f"Ensemble size {len(full_ensemble)} exceeds max {MAX_QP_CIRCS}, "
+                  "shortening ensemble to reduce size", flush=True)
+            # Pick random params per circ
+            num_params_per_circ = ceil(MAX_QP_CIRCS / len(circ_params))
+
+            # Pick inds with largest probabilities
+            rand_inds = np.zeros((len(circ_params), num_params_per_circ), dtype=np.int64)
+            if all_probs is not None:
+                for i, p in enumerate(all_probs):
+                    # Get n largest inds from p
+                    sorted_inds = np.argsort(-p)
+                    # Get the top num_params_per_circ indices
+                    rand_inds[i, :] = sorted_inds[:num_params_per_circ]
+            else:
+                # If no probs, just pick random indices for each circ
+                rand_inds = np.zeros((len(circ_params), num_params_per_circ), dtype=np.int64)
+                for i, p in enumerate(all_probs):
+                    rand_ind = np.random.choice(p.shape[0], size=num_params_per_circ, 
+                                                replace=False)
+                    rand_inds[i, :] = rand_ind
+
+            # Pick the corresponding parameters from each item in circuits, params,
+            # probs
+            params = [p for _, p, _, _ in circ_params]
+            # Choose only rand_un_inds params from each circ
+            params = np.array([p[rand_inds[i], :] for i, p in enumerate(params)])
+            # Choose rand_un_inds probs as well
+            all_probs = np.array([p[rand_inds[i]] for i, p in enumerate(all_probs)])
+            # Normalize the probabilities
+            all_probs = all_probs / np.sum(all_probs, axis=1, keepdims=True)
             
-        all_probs = GenerateProbabilityPass.calculate_probs(ensemble, 
+            # Save the new ensemble
+            store_params(params, jiggle_file)
+            store_probs(all_probs, probs_file)
+
+            # Recalculate the initial probabilities
+            if init_probs is not None:
+                init_probs = [[p * qp_p for p in probs] for probs, qp_p in zip(all_probs, orig_probs)]
+                init_probs = np.hstack(init_probs)
+
+            # Recalculate full_ensemble by choosing rand inds
+            new_ensemble = []
+            for i, circ_ensemble in enumerate(ensemble):
+                new_circ_ensemble = [circ_ensemble[j] for j in rand_inds[i]]
+                new_ensemble.append(new_circ_ensemble)
+            full_ensemble = np.concatenate(new_ensemble, axis=0)
+
+        print("Running Probability on ensemble of size: ", full_ensemble.shape[0], flush=True)
+            
+        all_probs = GenerateProbabilityPass.calculate_probs(full_ensemble, 
                                                             target=target,
                                                             initial_probs=init_probs)
         
