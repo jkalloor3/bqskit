@@ -121,11 +121,6 @@ class GenerateProbabilityPass(BasePass):
             jiggle_file = jiggle_file_name.format(ind=0, extra=self.checkpoint_extra_str)
             probs_file = probs_file_name.format(ind=0, extra=self.checkpoint_extra_str)
             cache_file = cache_file_name.format(ind=0, extra=self.checkpoint_extra_str)
-        else:
-            ens_file = f"{checkpoint_dir}/ensemble_final.qasms"
-            jiggle_file = f"{checkpoint_dir}/ensemble_final_jiggle.npy"
-            cache_file = f"{checkpoint_dir}/ensemble_cache_final.pkl"
-            # probs_file = f"{checkpoint_dir}/ensemble_final_probs.npy"
 
         final_probs_file = f"{checkpoint_dir}/ensemble_final_probs_{self.checkpoint_extra_str}.npy"
 
@@ -182,63 +177,22 @@ class GenerateProbabilityPass(BasePass):
 
         if len(full_ensemble) > MAX_QP_CIRCS:
             print(f"Ensemble size {len(full_ensemble)} exceeds max {MAX_QP_CIRCS}, "
-                  "shortening ensemble to reduce size", flush=True)
-            # Pick random params per circ
-            num_params_per_circ = ceil(MAX_QP_CIRCS / len(circ_params))
+                  " Skipping Quadratic Program", flush=True)
+            all_probs = init_probs
+        else:
 
-            # Pick inds with largest probabilities
-            rand_inds = np.zeros((len(circ_params), num_params_per_circ), dtype=np.int64)
-            if all_probs is not None:
-                for i, p in enumerate(all_probs):
-                    # Get n largest inds from p
-                    sorted_inds = np.argsort(-p)
-                    # Get the top num_params_per_circ indices
-                    rand_inds[i, :] = sorted_inds[:num_params_per_circ]
-            else:
-                # If no probs, just pick random indices for each circ
-                rand_inds = np.zeros((len(circ_params), num_params_per_circ), dtype=np.int64)
-                for i, p in enumerate(all_probs):
-                    rand_ind = np.random.choice(p.shape[0], size=num_params_per_circ, 
-                                                replace=False)
-                    rand_inds[i, :] = rand_ind
-
-            # Pick the corresponding parameters from each item in circuits, params,
-            # probs
-            params = [p for _, p, _, _ in circ_params]
-            # Choose only rand_un_inds params from each circ
-            params = np.array([p[rand_inds[i], :] for i, p in enumerate(params)])
-            # Choose rand_un_inds probs as well
-            all_probs = np.array([p[rand_inds[i]] for i, p in enumerate(all_probs)])
-            # Normalize the probabilities
-            all_probs = all_probs / np.sum(all_probs, axis=1, keepdims=True)
-            
-            # Save the new ensemble
-            store_params(params, jiggle_file)
-            store_probs(all_probs, probs_file)
-
-            # Recalculate the initial probabilities
-            if init_probs is not None:
-                init_probs = [[p * qp_p for p in probs] for probs, qp_p in zip(all_probs, orig_probs)]
-                init_probs = np.hstack(init_probs)
-
-            # Recalculate full_ensemble by choosing rand inds
-            new_ensemble = []
-            for i, circ_ensemble in enumerate(ensemble):
-                new_circ_ensemble = [circ_ensemble[j] for j in rand_inds[i]]
-                new_ensemble.append(new_circ_ensemble)
-            full_ensemble = np.concatenate(new_ensemble, axis=0)
-
-        print("Running Probability on ensemble of size: ", full_ensemble.shape[0], flush=True)
-            
-        all_probs = GenerateProbabilityPass.calculate_probs(full_ensemble, 
-                                                            target=target,
-                                                            initial_probs=init_probs)
+            print("Running Probability on ensemble of size: ", full_ensemble.shape[0], flush=True)
+                
+            all_probs = GenerateProbabilityPass.calculate_probs(full_ensemble, 
+                                                                target=target,
+                                                                initial_probs=init_probs)
+    
+        print("Sum of all probs: ", np.sum(all_probs), flush=True)
+        print("Probs (post FW) shape: ", all_probs.shape, flush=True)
         
         # Reshape all_probs to be of shape (num_circs, num_probs)
         num_circs = len(circ_params)
         all_probs = np.array(all_probs).reshape(num_circs, -1)
 
-        if "checkpoint_dir" in data:
-            np.save(final_probs_file, all_probs)
-        return
+        store_probs(all_probs, final_probs_file)
 

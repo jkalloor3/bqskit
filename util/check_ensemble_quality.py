@@ -92,8 +92,6 @@ class CheckEnsembleQualityPass(BasePass):
         
         old_ratio = -1.4
         if os.path.exists(csv_file):
-            # Load the ensemble from the checkpoint
-            # print("Already Checked!", flush=True)
             # Read in CSV and get ratio
             with open(csv_file, mode='r') as f:
                 reader = csv.DictReader(f)
@@ -103,8 +101,10 @@ class CheckEnsembleQualityPass(BasePass):
                     print("Old Ratio: ", row["Ratio"], flush=True)
                     old_ratio = float(row["Ratio"])
 
-
             csv_file = checkpoint_data_file.replace(".data", f"{self.csv_name}{self.checkpoint_extra_str}_newest.csv")
+            if os.path.exists(csv_file):
+                print("Newest CSV already exists, skipping", flush=True)
+                return
         
         # Otherwise, reload from saved files - Would have done in 
         ensemble_file_name = os.path.join(checkpoint_dir, "ensemble_{ind}_{extra}.qasms")
@@ -115,7 +115,6 @@ class CheckEnsembleQualityPass(BasePass):
         ens_file = ensemble_file_name.format(ind=start_ens_ind, extra=self.checkpoint_extra_str)
         jiggle_file = jiggle_file_name.format(ind=start_ens_ind, extra=self.checkpoint_extra_str)
         cache_file = cache_file_name.format(ind=start_ens_ind, extra=self.checkpoint_extra_str)
-        ensemble_counts = {}
         probs_file = os.path.join(checkpoint_dir, f"ensemble_final_probs_{self.checkpoint_extra_str}.npy")
 
         target = data.target
@@ -126,38 +125,23 @@ class CheckEnsembleQualityPass(BasePass):
         best_ratio = float("inf")
         best_count = float("inf")
 
-        ensemble_files = []
+        ensemble = [(ens_file, jiggle_file, cache_file, probs_file)]
 
         if not os.path.exists(probs_file):
             # If the probs file does not exist, we will not use it
             print("Probs file does not exist, skipping", flush=True)
             return
 
-
-        if os.path.exists(jiggle_file):
-            while os.path.exists(jiggle_file):
-                ensemble_files.append((ens_file, jiggle_file, cache_file, probs_file))
-                start_ens_ind += 1
-                ens_file = ensemble_file_name.format(ind=start_ens_ind, extra=self.checkpoint_extra_str)
-                jiggle_file = jiggle_file_name.format(ind=start_ens_ind, extra=self.checkpoint_extra_str)
-                cache_file = cache_file_name.format(ind=start_ens_ind, extra=self.checkpoint_extra_str)
-
-        ensemble = ensemble_files
-
         start_ens_ind = 0
 
         if len(ensemble) == 0:
             print("No ensembles found, skipping pass", flush=True)
             return
-        
-        print("Ensemble Files: ", ensemble, flush=True)
 
         for ens in ensemble:
             if len(ens) > 0 and isinstance(ens[0], str):
                 ens_file, jiggle_file, cache_file, probs_file = ens
                 circ_params = load_jiggled_ensemble(ens_file, jiggle_file, cache_file, probs_file)
-            else:
-                circ_params = ens
             if len(circ_params[0][1]) == 0:
                 print("No params found in ensemble, skipping ensemble", 
                       flush=True)
@@ -199,7 +183,6 @@ class CheckEnsembleQualityPass(BasePass):
             print("New Ratio: ", ratio, "Old Ratio: ", old_ratio, flush=True)
             count = np.mean([count_params(c) for c, _, _,_ in circ_params])
             csv_dict[start_ens_ind]["Avg. Count"] = count
-            ensemble_counts[start_ens_ind] = count
             print("Avg Count Post Jiggle Load: ", count, flush=True)
             if ratio < 1:
                 best_ind = start_ens_ind
@@ -213,13 +196,6 @@ class CheckEnsembleQualityPass(BasePass):
                     best_ratio = ratio
                     best_count = count
                     print("FOUND BETTER ENSEMBLE", flush=True)
-            # Keep Looking
-            start_ens_ind += 1
-            ens_file = ensemble_file_name.format(ind=start_ens_ind, extra=self.checkpoint_extra_str)
-            jiggle_file = jiggle_file_name.format(ind=start_ens_ind, extra=self.checkpoint_extra_str)
-            cache_file = cache_file_name.format(ind=start_ens_ind, extra=self.checkpoint_extra_str)
-            # if not os.path.exists(cache_file):
-            #     cache_file = cache_file_name_2.format(ind=start_ens_ind)
         
         if len(csv_dict) == 0:
             print("No ensembles found, skipping pass", flush=True)
@@ -237,104 +213,3 @@ class CheckEnsembleQualityPass(BasePass):
             if os.path.exists(best_ensemble_file_name):
                 shutil.copyfile(best_ensemble_file_name, final_ens_file)
                 shutil.copyfile(best_file_name, final_ens_jiggle_file)
-
-
-class AddHSCostPass(BasePass):
-
-    def __init__(self,
-                 csv_name: str = "",
-                 checkpoint_extra_str: str = "",
-                 ) -> None:
-        self.csv_name = csv_name
-        self.checkpoint_extra_str = checkpoint_extra_str
-
-    async def run(self, circuit: Circuit, data: PassData) -> None:
-        # Check Ensemble Quality and output it to a CSV
-        print("Check Ensemble Quality Pass", flush=True)
-        checkpoint_dir: str = data["checkpoint_dir"]
-
-        print("Checkpoint Dir: ", checkpoint_dir, flush=True)
-        print("Starting Add HS Cost Pass", flush=True)
-        
-        # Otherwise, reload from saved files - Would have done in 
-        ensemble_file_name = os.path.join(checkpoint_dir, "ensemble_{ind}_{extra}.qasms")
-        jiggle_file_name = os.path.join(checkpoint_dir, "ensemble_{ind}_jiggles_{extra}.npy")
-        cache_file_name = os.path.join(checkpoint_dir, "ensemble_{ind}_cache_{extra}.pkl")
-        start_ens_ind = 0
-        ens_file = ensemble_file_name.format(ind=start_ens_ind, extra=self.checkpoint_extra_str)
-        jiggle_file = jiggle_file_name.format(ind=start_ens_ind, extra=self.checkpoint_extra_str)
-        cache_file = cache_file_name.format(ind=start_ens_ind, extra=self.checkpoint_extra_str)
-
-        target = data.target
-        csv_dict = {}
-
-        ensemble_files = []
-        if os.path.exists(jiggle_file):
-            while os.path.exists(jiggle_file):
-                ensemble_files.append((ens_file, jiggle_file, cache_file))
-                start_ens_ind += 1
-                ens_file = ensemble_file_name.format(ind=start_ens_ind, extra=self.checkpoint_extra_str)
-                jiggle_file = jiggle_file_name.format(ind=start_ens_ind, extra=self.checkpoint_extra_str)
-                cache_file = cache_file_name.format(ind=start_ens_ind, extra=self.checkpoint_extra_str)
-
-        ensemble = data.get("ensemble", ensemble_files)
-
-        print("Ensemble: ", ensemble, flush=True)
-
-        start_ens_ind = 0
-
-        # Read in data.csv
-        checkpoint_data_file: str = data["checkpoint_data_file"]
-        csv_file = checkpoint_data_file.replace(".data", f"{self.csv_name}.csv")
-        f = open(csv_file, "r")
-        reader = csv.DictReader(f)
-        csv_dict = [row for row in reader]
-        print("CSV Dict: ", csv_dict, flush=True)
-        out_csv_file = checkpoint_data_file.replace(".data", f"{self.csv_name}_hs.csv")
-        g = open(out_csv_file, "w", newline="")
-        field_names = csv_dict[0].keys()
-        field_names = list(field_names)
-        field_names.append("HS of Mean")
-        field_names.append("Avg. HS")
-        writer = csv.DictWriter(g, fieldnames=field_names)
-        writer.writeheader()
-
-        for ens_ind, ens in enumerate(ensemble):
-            if len(ens) > 0 and isinstance(ens[0], str):
-                ens_file, jiggle_file, cache_file = ens
-                circ_params = load_jiggled_ensemble(ens_file, jiggle_file, cache_file)
-            else:
-                circ_params = ens
-            circuits = [circ for circ, _, _ in circ_params]
-            if len(circuits) < 4:
-                # Make 10 copies of each circuit and split the params amongst them
-                new_circ_params = []
-                for circ, params, cache in circ_params:
-                    param_chunks = np.array_split(params, 10)
-                    for i in range(10):
-                        if param_chunks[i].shape[0] > 5000:
-                            # pick a random subset of 5000
-                            rand_inds = np.random.choice(param_chunks[i].shape[0], 5000, replace=False)
-                            param_chunks[i] = param_chunks[i][rand_inds]
-                        new_circ_params.append((circ, param_chunks[i], cache))
-
-                circ_params = new_circ_params
-            avg_utries_dists = await get_runtime().map(create_avg_utry, 
-                                                        circ_params, 
-                                                        target=data.target, 
-                                                        add_cost=True)
-            
-            utries = [avg_utry for avg_utry, _, _ in avg_utries_dists]
-            hs_dists = [hs for _, _, hs in avg_utries_dists]
-            avg_utry = np.mean(utries, axis=0)
-            avg_hs = np.mean(hs_dists)
-            avg_utry = np.mean(utries, axis=0)
-            mean_hs = hs_cost(avg_utry, target)
-            row = csv_dict[ens_ind]
-            row["HS of Mean"] = mean_hs
-            row["Avg. HS"] = avg_hs
-            writer.writerow(row)
-
-        f.close()
-        g.close()
-        print("Finished writing HS data to CSV", flush=True)
