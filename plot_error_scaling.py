@@ -44,10 +44,74 @@ small_block_checkpoints_dir_2 = f"small_block_checkpoints_final_paper_4_tket"
 # block_form = "{circ}_*/data.csv"
 block_csv_form = "{circ}_*/block_*.csv"
 block_qasms_form = "{circ}_*/block_*/ensemble_final.qasms"
-cache_form = "{circ}_{large_block_num}_{tol}/block_{small_block_num}/ensemble_cache_0.pkl"
+cache_form = "{circ}_{large_block_num}_{tol}/block_{small_block_num}/*cache*.pkl"
 jiggle_form = "{circ}_{large_block_num}_{tol}/block_{small_block_num}/ensemble_final_jiggle.npy"
 
 cx_counter = GateCounter(est=True)
+
+
+def get_avg_count(checkpoints_dir: str,
+                  circ_name: str, 
+                  block_num: str,
+                  tol: float,
+                  small_block_num: str, 
+                  cliff_t: bool = False):
+    qasms_form = "{circ}_{large_block_num}_{tol}/block_{small_block_num}/ensemble_0_*.qasms"
+
+    qasms_file = os.path.join(checkpoints_dir, 
+                                qasms_form.format(circ=circ_name, 
+                                                 large_block_num=block_num, 
+                                                 tol=tol, 
+                                                 small_block_num=small_block_num))
+    
+    qasms_files = glob.glob(qasms_file)
+    use_fw = False
+    final_qasm_file = None
+    for qasms_file in qasms_files:
+        if "_fw" in qasms_file:
+            use_fw = True
+            final_qasm_file = qasms_file
+            break
+
+    if final_qasm_file is None and len(qasms_files) > 0:
+        final_qasm_file = qasms_files[0]
+    elif final_qasm_file is None:
+        return float('inf')
+
+    if use_fw:
+        extra_str = "_fw"
+    else:
+        extra_str = ""
+
+    if cliff_t:
+        cache_form = "{circ}_{large_block_num}_{tol}/block_{small_block_num}/ensemble_0_cache_{extra}.pkl"
+        jiggle_form = "{circ}_{large_block_num}_{tol}/block_{small_block_num}/ensemble_0_jiggles_{extra}.npy"
+
+        cache_file = os.path.join(checkpoints_dir, 
+                                    cache_form.format(circ=circ_name,
+                                                    large_block_num=block_num,
+                                                    tol=tol,
+                                                    small_block_num=small_block_num,
+                                                    extra=extra_str))
+        if not os.path.exists(cache_file):
+            cache_file = None
+
+        jiggle_file = os.path.join(checkpoints_dir,
+                                    jiggle_form.format(circ=circ_name,
+                                                    large_block_num=block_num,
+                                                    tol=tol,
+                                                    small_block_num=small_block_num,
+                                                    extra=extra_str))
+    else:
+        cache_file = None
+        jiggle_file = None
+
+    return load_avg_ensemble_counts_full(
+        qasms_file, jiggle_file=jiggle_file, cache_file=cache_file,
+        target_error=(10 ** (-tol * 2)), count_t =cliff_t,
+    )
+
+
 # Function to read data.csv from each folder
 def read_cx_data_from_folders(circuits, orig_cx_counts, 
                               checkpoints_dir, small_block = False,
@@ -67,26 +131,13 @@ def read_cx_data_from_folders(circuits, orig_cx_counts,
             small_block_num = folder.split("_")[-1]
             if block_num not in all_data[circ_name]:
                 all_data[circ_name][block_num] = {}
-            if cliff_t:
-                cache_file = os.path.join(checkpoints_dir, 
-                                            cache_form.format(circ=circ_name, 
-                                                            large_block_num=block_num, 
-                                                            tol=tol, 
-                                                            small_block_num=small_block_num))
-                jiggle_file = os.path.join(checkpoints_dir,
-                                            jiggle_form.format(circ=circ_name,
-                                                                large_block_num=block_num, 
-                                                                tol=tol, 
-                                                                small_block_num=small_block_num))
-            else:
-                jiggle_file = None
-                cache_file = None
 
-            avg_count = load_avg_ensemble_counts_full(
-                qasms_file, jiggle_file=jiggle_file, cache_file=cache_file,
-                target_error=(10 ** (-tol)),count_t =cliff_t,
-            )
-
+            avg_count = get_avg_count(checkpoints_dir, 
+                                      circ_name, 
+                                      block_num, 
+                                      tol, 
+                                      small_block_num, 
+                                      cliff_t=cliff_t)
             if small_block:
                 if cliff_t:
                     orig_count = orig_cx_counts[circ_name][block_num][small_block_num][tol]
@@ -102,12 +153,13 @@ def read_cx_data_from_folders(circuits, orig_cx_counts,
                     all_data[circ_name][block_num][small_block_num] = {}
                 all_data[circ_name][block_num][small_block_num][tol] = diff
             else:
-                if cliff_t:
-                    orig_count = orig_cx_counts[circ_name][block_num][tol]
-                else:
-                    orig_count = orig_cx_counts[circ_name][block_num]
-                diff = orig_count - avg_count
-                all_data[circ_name][block_num][tol] = diff
+                pass
+                # if cliff_t:
+                #     orig_count = orig_cx_counts[circ_name][block_num][tol]
+                # else:
+                #     orig_count = orig_cx_counts[circ_name][block_num]
+                # diff = orig_count - avg_count
+                # all_data[circ_name][block_num][tol] = diff
     return all_data
 
 
@@ -133,7 +185,11 @@ def read_data_from_folders(circuits, checkpoints_dir, small_block = False):
                 # value of 'Norm. Ratio' column
                 reader = csv.DictReader(file)
                 eps = tol
-                final_ratio =  float("inf")
+                small_block_num = os.path.basename(csv_file).split(".")[0].split("_")[1]
+                if small_block_num in all_data[circ][block_num]:
+                    final_ratio = all_data[circ][block_num][small_block_num].get(eps, float("inf"))
+                else:
+                    final_ratio =  float("inf")
                 for row in reader:
                     if "Ratio" in row:  # Check if the column value is not empty
                         # final_ratio = min(final_ratio, float(row["Norm. Ratio"]))
@@ -142,11 +198,6 @@ def read_data_from_folders(circuits, checkpoints_dir, small_block = False):
                             if actual_eps > 100 * (10 ** (-tol)):
                                 continue
                             final_ratio = min(final_ratio, float(row["Ratio"]))
-                # if final_ratio < 1:
-                #     # For visual fidelity, we set this to 1. We can arbitrarily
-                #     # increase the final ratio by adding noise to the final
-                #     # circuits
-                #     final_ratio = 1
 
                 if final_ratio > 10000:
                     # Just set it to 10000 and we will plot it as 10000+
@@ -268,7 +319,6 @@ def output_csv(data: dict, file_name: str, cliff_t: bool = False):
         writer.writerows(rows)
     print(f"Data saved to {file_name}")
 
-
 def get_orig_counts(circuits: list[str], cliff_t: bool = False, 
                     compiler: Compiler = None) -> dict:
     orig_cx_counts = {}
@@ -288,7 +338,6 @@ def get_orig_counts(circuits: list[str], cliff_t: bool = False,
             return orig_cx_counts
         print(f"Missing circuits: {missing_circuits}, compiling those only")
         circuits = missing_circuits
-        # return orig_cx_counts
 
     workflow = [
         ScanPartitioner(4),
@@ -321,7 +370,8 @@ def get_orig_counts(circuits: list[str], cliff_t: bool = False,
                     orig_cx_counts[circ_name][block_num][small_block_num] = {}
                     t_counter = GateCounter(est = False)
                     for err in [1.0, 2.0, 3.0, 4.0, 5.0, 6.0]:
-                        orig_cx_counts[circ_name][block_num][small_block_num][err] = t_counter.count_t(op.gate._circuit, 10 ** (-err))
+                        print(f"{circ_name}:{block_num}:{small_block_num}:{err}:", flush=True)
+                        orig_cx_counts[circ_name][block_num][small_block_num][err] = t_counter.count_t(op.gate._circuit, 10 ** (-err * 2))
                 else:
                     # print(f"Counting CNOTs for {circ_name}, block {block_num}, small block {small_block_num}", op.gate._circuit.count(CNOTGate()))
                     orig_cx_counts[circ_name][block_num][small_block_num] = op.gate._circuit.count(CNOTGate())
@@ -334,7 +384,7 @@ if __name__ == '__main__':
     # Collect data from all folders
     use_small_block = True
     output_cx = True
-    cliff_t = False
+    cliff_t = True
 
     if not cliff_t:
         small_block_checkpoints_dir_1 = f"small_block_checkpoints_final_paper_4_more_cx_tket"
