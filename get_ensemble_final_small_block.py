@@ -32,7 +32,7 @@ from util import get_block_names, load_block
 
 class CountPredicate(PassPredicate):
     def get_truth_value(self, circuit, data):
-        return circuit.count(CNOTGate()) < 20
+        return circuit.count(CNOTGate()) < 25
 
 good_instantiation_options = {
     'multistarts': 8,
@@ -70,27 +70,16 @@ def get_ensemble_workflow(circ_name: str, tol: float, extra: str = "") -> Workfl
     
     synthesis_pass = LEAPSynthesisPass2(
         store_partial_solutions=True,
-        success_threshold = extra_err_thresh,
-        partial_success_threshold=err_thresh,
+        success_threshold = extra_err_thresh / 5,
+        partial_success_threshold=err_thresh / 5,
         max_layer_factor=1.01,
         instantiate_options=instantiation_options,
         max_layer=14,
         max_psols=20
     )
-    
-    full_success_threshold = err_thresh * 0.001
-    success_threshold = err_thresh
-    # second_synthesis_pass = SecondLEAPSynthesisPass(
-    #     success_threshold = full_success_threshold,
-    #     partial_success_threshold=success_threshold,
-    #     max_layer_factor=1.01,
-    #     instantiate_options=instantiation_options,
-    #     max_layer=14,
-    #     max_psols=10
-    # )
 
     deletion_pass = EnsScanningGateRemovalPass(
-        success_threshold=err_thresh,
+        success_threshold=err_thresh / 5,
         tree_depth=3,
         max_psols=20
     )
@@ -159,30 +148,6 @@ def check_if_finished(circ_name: str, tol: float, extra: str = "") -> tuple[bool
     extra_str = extra_str.split(".npy")[0]
     return False, True, extra_str
 
-def get_final_workflow(circ_name: str, tol: float, extra: str = "") -> WorkflowLike | None:
-    # Check if already finished
-    # checkpoint_dir = f"{base_checkpoint_dir}/{circ_name}_{tol}/"
-    ckpt_extra = extra
-    base_checkpoint_dir = base_checkpoint_dir_form.format(block_size=SMALL_BLOCK_SIZE, 
-                                                          extra=ckpt_extra)
-    checkpoint_dir = os.path.join(base_checkpoint_dir, f"{circ_name}_{tol}")
-    print(f"Checkpoint Dir: {checkpoint_dir}", flush=True)
-    finished, jiggle_finished, _ = check_if_finished(circ_name, tol, extra=extra)
-    if finished:
-        print(f"Already finished {circ_name} {tol}", flush=True)
-        return None
-    if not jiggle_finished:
-        print(f"Jiggle not finished {circ_name} {tol}", flush=True)
-        return get_ensemble_workflow(circ_name, tol, extra=extra)
-    print("Finding Final Ensemble for ", circ_name, flush=True)
-    workflow = [
-        CheckpointRestartPass(checkpoint_dir, 
-                                default_passes=[]),
-        CheckEnsembleQualityPass(False),
-        # GenerateProbabilityPass()
-    ]
-    return workflow
-
 def get_shortest_circuits(circ_data: list[tuple[str, str, float]], extra: str = "") -> list[Circuit]:
     '''
     Gets the corresponding workflow for the input
@@ -191,7 +156,7 @@ def get_shortest_circuits(circ_data: list[tuple[str, str, float]], extra: str = 
         circ_data: list of tuples of the form (circ_name, circ_file, tol)
     '''
     workflows = [
-        get_final_workflow(circ_name, tol, extra)
+        get_ensemble_workflow(circ_name, tol, extra)
         for circ_name, _, tol in circ_data
     ]
 

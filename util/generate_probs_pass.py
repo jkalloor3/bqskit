@@ -147,10 +147,10 @@ class GenerateProbabilityPass(BasePass):
         orig_uns = []
         all_caches = [c for _, _, _, c in circ_params]
         for i , c in enumerate(orig_circs):
-            w_cache = get_runtime().get_cache()
-            w_cache.clear()
-            w_cache.update(all_caches[i])
-            print(all_caches[i].keys())
+            if all_caches[i] is not None:
+                w_cache = get_runtime().get_cache()
+                w_cache.clear()
+                w_cache.update(all_caches[i])
             orig_uns.append(get_corrected_un(c.get_unitary(), target))
 
         ensemble = await get_runtime().map(create_jiggled_unitaries, circ_params, 
