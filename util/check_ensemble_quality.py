@@ -90,10 +90,21 @@ class CheckEnsembleQualityPass(BasePass):
         print("Checkpoint Dir: ", checkpoint_dir, flush=True)
         print("Starting Check Ensemble Quality Pass", flush=True)
         
+        old_ratio = -1.4
         if os.path.exists(csv_file):
             # Load the ensemble from the checkpoint
-            print("Already Checked!", flush=True)
-            return
+            # print("Already Checked!", flush=True)
+            # Read in CSV and get ratio
+            with open(csv_file, mode='r') as f:
+                reader = csv.DictReader(f)
+                for row in reader:
+                    if "Ratio" not in row:
+                        continue
+                    print("Old Ratio: ", row["Ratio"], flush=True)
+                    old_ratio = float(row["Ratio"])
+
+
+            csv_file = checkpoint_data_file.replace(".data", f"{self.csv_name}{self.checkpoint_extra_str}_newest.csv")
         
         # Otherwise, reload from saved files - Would have done in 
         ensemble_file_name = os.path.join(checkpoint_dir, "ensemble_{ind}_{extra}.qasms")
@@ -116,6 +127,13 @@ class CheckEnsembleQualityPass(BasePass):
         best_count = float("inf")
 
         ensemble_files = []
+
+        if not os.path.exists(probs_file):
+            # If the probs file does not exist, we will not use it
+            print("Probs file does not exist, skipping", flush=True)
+            return
+
+
         if os.path.exists(jiggle_file):
             while os.path.exists(jiggle_file):
                 ensemble_files.append((ens_file, jiggle_file, cache_file, probs_file))
@@ -124,13 +142,15 @@ class CheckEnsembleQualityPass(BasePass):
                 jiggle_file = jiggle_file_name.format(ind=start_ens_ind, extra=self.checkpoint_extra_str)
                 cache_file = cache_file_name.format(ind=start_ens_ind, extra=self.checkpoint_extra_str)
 
-        ensemble = data.get("ensemble", ensemble_files)
+        ensemble = ensemble_files
 
         start_ens_ind = 0
 
         if len(ensemble) == 0:
             print("No ensembles found, skipping pass", flush=True)
             return
+        
+        print("Ensemble Files: ", ensemble, flush=True)
 
         for ens in ensemble:
             if len(ens) > 0 and isinstance(ens[0], str):
@@ -147,7 +167,6 @@ class CheckEnsembleQualityPass(BasePass):
                 new_circ_params = []
                 for circ, params, probs, cache in circ_params:
                     param_chunks = np.array_split(params, 10)
-                    print("Probs: ", probs.shape, flush=True)
                     probs_chunks = np.array_split(probs, 10)
                     for i in range(10):
                         if param_chunks[i].shape[0] > 5000:
@@ -166,20 +185,18 @@ class CheckEnsembleQualityPass(BasePass):
             utries = [avg_utry for avg_utry, _, _ in avg_utries_dists]
             dists = [dist for _, dist, _ in avg_utries_dists]
             hs_dists = [hs for _, _, hs in avg_utries_dists]
-            avg_utry_dists = [normalized_frob_cost(avg_utry, target) for avg_utry in utries]
-            print("Avg Utry Dists: ", avg_utry_dists, flush=True)
-            all_probs = np.vstack([probs for _, _, probs, _ in circ_params], axis=0)
+            all_probs = np.concatenate([probs for _, _, probs, _ in circ_params])
             print("All Probs Shape: ", all_probs.shape, np.sum(all_probs), flush=True)
             avg_utry = np.sum(utries, axis=0)
-            avg_dist = np.mean(dists)
-            avg_hs = np.mean(hs_dists)
+            avg_dist = np.sum(dists)
+            avg_hs = np.sum(hs_dists)
             print("Avg Dist: ", avg_dist, flush=True)
             csv_dict[start_ens_ind] = self.get_ensemble_data(avg_utry, avg_dist, target, None, avg_hs=avg_hs)
             params = [params for _, params, _, _ in circ_params]
             csv_dict[start_ens_ind]["Num Circs"] = len(circ_params) * params[0].shape[0]
             csv_dict[start_ens_ind]["Ensemble Generation Method"] = self.ensemble_names[start_ens_ind]
             ratio = csv_dict[start_ens_ind]["Ratio"]
-            print("Ratio: ", ratio, flush=True)
+            print("New Ratio: ", ratio, "Old Ratio: ", old_ratio, flush=True)
             count = np.mean([count_params(c) for c, _, _,_ in circ_params])
             csv_dict[start_ens_ind]["Avg. Count"] = count
             ensemble_counts[start_ens_ind] = count
