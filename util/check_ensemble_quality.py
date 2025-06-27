@@ -168,7 +168,9 @@ class CheckEnsembleQualityPass(BasePass):
             hs_dists = [hs for _, _, hs in avg_utries_dists]
             avg_utry_dists = [normalized_frob_cost(avg_utry, target) for avg_utry in utries]
             print("Avg Utry Dists: ", avg_utry_dists, flush=True)
-            avg_utry = np.mean(utries, axis=0)
+            all_probs = np.vstack([probs for _, _, probs, _ in circ_params], axis=0)
+            print("All Probs Shape: ", all_probs.shape, np.sum(all_probs), flush=True)
+            avg_utry = np.sum(utries, axis=0)
             avg_dist = np.mean(dists)
             avg_hs = np.mean(hs_dists)
             print("Avg Dist: ", avg_dist, flush=True)

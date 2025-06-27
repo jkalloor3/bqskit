@@ -32,3 +32,4 @@ from .counter import *
 from .collect_angles import CollectAnglesPass
 from .convex_hull_finder import ConvexHullFinderPass
 from .treescan import *
+from .noise_model import *

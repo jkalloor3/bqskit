@@ -488,6 +488,8 @@ class Compiler:
             msg, payload = self.conn.recv()
 
             if msg == RuntimeMessage.LOG:
+                if type(payload) is bytes: # IDK WHY THIS IS HAPPENING
+                    payload = pickle.loads(payload)
                 logger = logging.getLogger(payload.name)
                 if logger.isEnabledFor(payload.levelno):
                     logger.handle(payload)

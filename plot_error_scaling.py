@@ -16,6 +16,8 @@ from bqskit.ir.gates import CircuitGate, CNOTGate, QFTGate
 # circs = ["shor_12", "qft_16", "draper_adder_12", "qae13", "qpe_14", "lgt_17"]  # Replace with your list of circuits
 # circs = ["lgt_17", "mult16", "add17", "LiH", "qpe_14"] 
 circs = ["add17", "shor_12_no_qft", "lgt_17", "qae13", "qpe_14", "QITE_8_0", "LiH", "mult16", "draper_adder_12", "qae11"]
+large_circs = ["qae33", "heisenberg64", "adder63"]
+# circs = large_circs
 
 from matplotlib.patches import Patch
 
@@ -146,8 +148,9 @@ def read_cx_data_from_folders(circuits, orig_cx_counts,
                         orig_count = orig_cx_counts[circ_name][block_num][small_block_num]
                     except KeyError:
                         print(f"KeyError: {circ_name}, {block_num}, {small_block_num}")
-                        print(list(orig_cx_counts[circ_name].keys()))
-                        exit(1)
+                        print(f"Available keys: {list(orig_cx_counts[circ_name][block_num].keys())}")
+                        # print(list(orig_cx_counts[circ_name].keys()))
+                        continue
                 diff = orig_count - avg_count
                 if small_block_num not in all_data[circ_name][block_num]:
                     all_data[circ_name][block_num][small_block_num] = {}
@@ -204,7 +207,7 @@ def read_data_from_folders(circuits, checkpoints_dir, small_block = False):
                     final_ratio = 10000
                 
                 if small_block:
-                    small_block_num = os.path.basename(csv_file).split(".")[0].split("_")[-1]
+                    small_block_num = os.path.basename(csv_file).split(".")[0].split("_")[1]
                     if small_block_num not in all_data[circ][block_num]:
                         all_data[circ][block_num][small_block_num] = {}
                     all_data[circ][block_num][small_block_num][eps] = final_ratio
@@ -329,8 +332,6 @@ def get_orig_counts(circuits: list[str], cliff_t: bool = False,
     if os.path.exists(save_file):
         with open(save_file, 'rb') as f:
             orig_cx_counts = pickle.load(f)
-            print(orig_cx_counts["add17"]["03"]["0"])
-        
         # If any circuits are missing, then compile only those
         missing_circuits = [circ for circ in circuits if circ not in orig_cx_counts]
         if len(missing_circuits) == 0:
@@ -345,7 +346,21 @@ def get_orig_counts(circuits: list[str], cliff_t: bool = False,
 
     for circ_name in circuits:
         orig_cx_counts[circ_name] = {}
+        if circ_name in large_circs:
+            # Just read the qasms in bad and good blocks
+            block_names = get_block_names(circ_name=circ_name, extra="_tket")
+            for block_num in block_names:
+                tket_file = load_block(circ_name=circ_name, block_num=block_num,
+                        extra="_tket")
+                small_circ = Circuit.from_file(tket_file)
+                if small_circ.num_qudits <= 4:
+                    orig_cx_counts[circ_name][block_num] = {}
+                    cx_count = open(tket_file, 'r').read().count("cx")
+                    orig_cx_counts[circ_name][block_num]["0"] = cx_count
         for block_num in get_block_names(circ_name=circ_name, extra="_tket"):
+            if block_num in orig_cx_counts[circ_name]:
+                # Already compiled this block
+                continue
             orig_cx_counts[circ_name][block_num] = {}
             tket_file = load_block(circ_name=circ_name, block_num=block_num,
                         extra="_tket")
@@ -403,7 +418,6 @@ if __name__ == '__main__':
         orig_counts = get_orig_counts(circs, cliff_t=cliff_t, compiler=compiler)
         compiler.close()
         print("Original counts loaded", flush=True)
-        print(orig_counts["add17"]["03"]["0"], flush=True)
         cx_data_more_cx= read_cx_data_from_folders(circs, orig_counts,
                                                     small_block_checkpoints_dir_1, 
                                                     small_block=use_small_block, 

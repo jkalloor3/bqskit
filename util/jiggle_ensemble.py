@@ -319,13 +319,15 @@ class  JiggleEnsemblePass(BasePass):
         # print("Init Dist: ", dist, flush=True)
         if (num_u3s + num_rzs) == 0:
             print("No U3s or RZs", circ.gate_counts, flush=True)
-            # Return a num x 1 array of zeros
-            empty_params = np.zeros((num * 2, circ.num_params))
+            # Repeat circ params num*2 times
+            empty_params = np.vstack([circ.params] * (num * 2))
             return empty_params
         if dist > success_threshold:
-            print("Dist is too high!", flush=True)
-            empty_params = np.zeros((num * 2, circ.num_params))
-            return empty_params
+            print("Dist is too high!", dist, success_threshold, flush=True)
+            # empty_params = np.zeros((num * 2, circ.num_params))
+            # empty_params = np.vstack([circ.params] * (num * 2))
+            # return 
+            dist = success_threshold / 2 # Still do perturbations
 
         # For each u3, come up with 16 param perturbations
         num_options = 16
