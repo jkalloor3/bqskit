@@ -12,6 +12,7 @@ import os
 import glob
 import csv
 from pathlib import Path
+from .counter import load_avg_ensemble_counts_full, GateCounter
 from .common import (create_avg_utry, load_jiggled_ensemble, 
                      get_block_names, create_jiggled_unitaries)
 from .distance import trace_distance, get_density_matrix, frobenius_cost
@@ -70,8 +71,9 @@ def get_sub_block_nums(base_dir: str) -> list[str]:
 
 def get_sub_block_count(large_block_dir: str,
                         small_block_num: str,
-                        tol: float) -> tuple[bool, int]:
-    qasm_file, _, _, _, csv_file = get_file_names(large_block_dir,
+                        tol: float,
+                        cliff_t: bool = False) -> tuple[bool, int]:
+    qasm_file, jiggle_file, _, cache_file, csv_file = get_file_names(large_block_dir,
                                                    small_block_num)
     # Read CSV file, if the ratio is < 20 then we can read counts
     # print(qasm_file, csv_file, flush=True)
@@ -92,10 +94,16 @@ def get_sub_block_count(large_block_dir: str,
         print(f"Skipping {small_block_num} as ratio is too high: {min_ratio}", flush=True)
         return False, 0
     # Now we need to get the avg. number of CNOTs
-    qasm_str = open(qasm_file, 'r').read()
-    count = qasm_str.count("cx ")
-    num_circs = qasm_str.count("BREAK") + 1
-    count = count / num_circs
+    if not cliff_t:
+        qasm_str = open(qasm_file, 'r').read()
+        count = qasm_str.count("cx ")
+        num_circs = qasm_str.count("BREAK") + 1
+        count = count / num_circs
+    else:
+        count = load_avg_ensemble_counts_full(qasm_file, jiggle_file, 
+                                              cache_file, target_error=(10 ** (-tol)),
+                                              count_t=True)
+
     return True, count
 
 
@@ -126,7 +134,8 @@ class UnitaryDMEvaluator(BasePass):
                  ham: np.ndarray | None = None,
                  checkpoint_form: str = "",
                  partitioned_circ_file: str = "",
-                 save_dir = "") -> None:
+                 save_dir = "",
+                 cliff_t: bool = False) -> None:
         self.max_tol = max_tol
         self.circ_name = circ_name
         self.partitioned_data = partitioned_data
@@ -134,6 +143,7 @@ class UnitaryDMEvaluator(BasePass):
         self.partitioned_circ_file = partitioned_circ_file
         self.save_dir = save_dir
         self.checkpoint_form = checkpoint_form
+        self.cliff_t = cliff_t
         self.calculate_good_blocks()
 
     @staticmethod
@@ -287,6 +297,8 @@ class UnitaryDMEvaluator(BasePass):
 
     def calculate_good_blocks(self) -> None:
         self.good_block_nums = {}
+        counter = GateCounter(est=False, cache_file=None)
+        max_ratio = min(20, (10 ** (self.max_tol) / 2))
         large_block_nums = get_block_names(self.circ_name, extra="_tket")
         # print("Large Block Names: ", large_block_nums, flush=True)
         for large_block_num in large_block_nums:
@@ -296,8 +308,13 @@ class UnitaryDMEvaluator(BasePass):
             # print(f"Large Block Dir: {large_block_dir}", flush=True)
             for small_block_num, small_circ in small_block_circs.items():
                 good, count = get_sub_block_count(large_block_dir, 
-                                                  small_block_num, self.max_tol)
-                original_count = small_circ.count(CNOTGate())
+                                                  small_block_num, self.max_tol,
+                                                  self.cliff_t)
+                if self.cliff_t:
+                    original_count = counter.count_t(small_circ, target_error=(10 ** (- 2 * self.max_tol) * max_ratio))
+                else:
+                    # Count CNOTs in the circuit
+                    original_count = counter.count_cx(small_circ)
                 if not good:
                     continue
                 elif count > original_count:
