@@ -8,7 +8,7 @@ from bqskit.compiler.passdata import PassData
 from bqskit.compiler.compiler import Compiler, WorkflowLike
 from bqskit.ir.gates import CNOTGate
 # Generate a super ensemble for some error bounds
-from bqskit.passes import CheckpointRestartPass
+from bqskit.passes import CheckpointRestartPass, ExtendBlockSizePass
 from bqskit.passes import ForEachBlockPass, ScanPartitioner, IfThenElsePass, PassPredicate
 from util import JiggleEnsemblePass, FixGlobalPhasePass
 from util import  LEAPSynthesisPass2, EnsScanningGateRemovalPass
@@ -110,6 +110,7 @@ def get_ensemble_workflow(circ_name: str, tol: float, extra: str = "") -> Workfl
 
     slow_partitioner_passes = [
         ScanPartitioner(block_size=small_block_size, ignore_qft=has_qft),
+        ExtendBlockSizePass(small_block_size),
     ]
     partitioner_passes = slow_partitioner_passes
     instantiation_options = good_instantiation_options

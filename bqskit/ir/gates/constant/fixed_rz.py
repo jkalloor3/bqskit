@@ -2,7 +2,7 @@ import numpy as np
 
 from bqskit.ir.gates.constantgate import ConstantGate
 from bqskit.ir.gates.qubitgate import QubitGate
-from bqskit.qis import UnitaryMatrix
+from bqskit.qis.unitary.unitarymatrix import UnitaryMatrix
 
 class FixedRZGate(ConstantGate, QubitGate):
     """

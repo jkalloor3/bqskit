@@ -457,6 +457,11 @@ class LEAPSynthesisPass2(BasePass):
         # print(f"Starting LEAP for block {data.get('super_block_num', -1)} : {data.get('block_num', -1)}", flush=True)
         orig_num_params = circuit.num_params
 
+        if circuit.num_qudits <= 1:
+            print("Skipping LEAP for circuit with qudits <= 1", flush=True)
+            data['scan_sols'] = [(circuit.copy(), 0)]
+            return
+
         if orig_num_params == 0:
             block_id = f"Block {data.get('super_block_num', -1)}_{data.get('block_num', -1)}:"
             print(f"No Params to optimize for {block_id}!", flush=True)

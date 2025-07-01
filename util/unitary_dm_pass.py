@@ -87,7 +87,7 @@ def get_sub_block_count(large_block_dir: str,
                 final_frob_cost = min(final_frob_cost, float(row["Norm. Bias"]))
         
     # Now we need to check if the ratio is less than 20
-    max_ratio = min(20, (10 ** (tol) / 2))
+    max_ratio = min(20, (10 ** (tol) / 10))
     if min_ratio > max_ratio:
         print(f"Skipping {small_block_num} as ratio is too high: {min_ratio}", flush=True)
         return False, 0
@@ -134,7 +134,7 @@ class UnitaryDMEvaluator(BasePass):
         self.partitioned_circ_file = partitioned_circ_file
         self.save_dir = save_dir
         self.checkpoint_form = checkpoint_form
-        self.calculate_good_blocks()
+        self.num_good_blocks = self.calculate_good_blocks()
 
     @staticmethod
     def generate_circ_unitary(large_block_gates: dict[str, ConstantUnitaryGate],
@@ -174,7 +174,6 @@ class UnitaryDMEvaluator(BasePass):
         
         '''
         block_gates = {}
-        block_utries = {}
 
         for block_name, files in block_files.items():
             circ_params = load_jiggled_ensemble(*files)
@@ -204,39 +203,39 @@ class UnitaryDMEvaluator(BasePass):
             print(f"Block: {block_name}, Avg. Dist: {avg_utry_dist}", flush=True)
             if avg_utry_dist < 1:
                 block_gates[block_name] = avg_gate
-                all_utries = await get_runtime().map(create_jiggled_unitaries,
-                                                     circ_params, target=target,
-                                                     add_cost=False)
-                all_utries = list(chain.from_iterable(all_utries))
-                # Randomly sample NUM_SAMPLES unitaries
-                use_duplicate_inds = len(all_utries) < NUM_SAMPLES
-                rand_inds = np.random.choice(len(all_utries), NUM_SAMPLES, 
-                                             replace=use_duplicate_inds)
-                all_utries = [all_utries[i] for i in rand_inds]
-                all_gates = [ConstantUnitaryGate(u) for u in all_utries]
-                avg_dist = np.mean(
-                    [frobenius_cost(u, target.numpy) for u in all_utries]
-                )
-                scaling_factor = avg_utry_dist / (avg_dist ** 2)
-                print(f"Block: {block_name}, Avg. Dist: {avg_utry_dist}, Scaling Factor: {scaling_factor}", flush=True)
-                block_utries[block_name] = all_gates
+                # all_utries = await get_runtime().map(create_jiggled_unitaries,
+                #                                      circ_params, target=target,
+                #                                      add_cost=False)
+                # all_utries = list(chain.from_iterable(all_utries))
+                # # Randomly sample NUM_SAMPLES unitaries
+                # use_duplicate_inds = len(all_utries) < NUM_SAMPLES
+                # rand_inds = np.random.choice(len(all_utries), NUM_SAMPLES, 
+                #                              replace=use_duplicate_inds)
+                # all_utries = [all_utries[i] for i in rand_inds]
+                # all_gates = [ConstantUnitaryGate(u) for u in all_utries]
+                # avg_dist = np.mean(
+                #     [frobenius_cost(u, target.numpy) for u in all_utries]
+                # )
+                # scaling_factor = avg_utry_dist / (avg_dist ** 2)
+                # print(f"Block: {block_name}, Avg. Dist: {avg_utry_dist}, Scaling Factor: {scaling_factor}", flush=True)
+                # block_utries[block_name] = all_gates
 
         full_circs = []
         # Get randomly sampled unitaries for each block
-        for i in range(NUM_SAMPLES):
-            ind = 0
-            circ = pcirc.copy()
-            for cycle, op in circ.operations_with_cycles():
-                pt = CircuitPoint(cycle, op.location[0])
-                block_name = block_names[ind]
-                ind += 1
-                assert isinstance(op.gate, CircuitGate)
-                assert isinstance(op.gate._circuit, Circuit)
-                if block_name in block_utries:
-                    un_gate = block_utries[block_name][i]
-                    circ.replace_gate(pt, un_gate, op.location)
+        # for i in range(NUM_SAMPLES):
+        #     ind = 0
+        #     circ = pcirc.copy()
+        #     for cycle, op in circ.operations_with_cycles():
+        #         pt = CircuitPoint(cycle, op.location[0])
+        #         block_name = block_names[ind]
+        #         ind += 1
+        #         assert isinstance(op.gate, CircuitGate)
+        #         assert isinstance(op.gate._circuit, Circuit)
+        #         if block_name in block_utries:
+        #             un_gate = block_utries[block_name][i]
+        #             circ.replace_gate(pt, un_gate, op.location)
 
-            full_circs.append(ConstantUnitaryGate(circ.get_unitary()))
+        #     full_circs.append(ConstantUnitaryGate(circ.get_unitary()))
 
         # Get average gate
         circ = pcirc.copy()
@@ -289,6 +288,7 @@ class UnitaryDMEvaluator(BasePass):
         self.good_block_nums = {}
         large_block_nums = get_block_names(self.circ_name, extra="_tket")
         # print("Large Block Names: ", large_block_nums, flush=True)
+        num_good_blocks = 0
         for large_block_num in large_block_nums:
             self.good_block_nums[large_block_num] = set()
             small_block_circs, _ = self.partitioned_data[large_block_num]
@@ -305,16 +305,17 @@ class UnitaryDMEvaluator(BasePass):
                     continue
                 else:
                     # Use block
+                    num_good_blocks += 1
                     print(f"Adding {small_block_num} to {large_block_num} with count: {count}", flush=True)
                     self.good_block_nums[large_block_num].add(small_block_num)
         # print(list(self.good_block_nums.keys()))
+        return num_good_blocks
 
     async def run_full_ensemble(self) -> None:
         ens_data_file = os.path.join(self.save_dir, f"{self.max_tol}.pkl")
         print("Ensemble Data File: ", ens_data_file, flush=True)
         if os.path.exists(ens_data_file):
             print("Already exists: ", ens_data_file, flush=True)
-            data["rpw"]
             return
         
         large_block_nums = get_block_names(self.circ_name, extra="_tket")
@@ -324,18 +325,18 @@ class UnitaryDMEvaluator(BasePass):
                                                   large_block_nums)
         
         block_unitaries = [b[0] for b in block_unitaries_samples]
-        block_samples = [b[1] for b in block_unitaries_samples]
+        # block_samples = [b[1] for b in block_unitaries_samples]
 
-        large_block_samples = dict(zip(large_block_nums, block_samples))
+        # large_block_samples = dict(zip(large_block_nums, block_samples))
         # Remove all empty block circs
-        large_block_samples = {k: v for k, v in large_block_samples.items() if len(v) > 0}
+        # large_block_samples = {k: v for k, v in large_block_samples.items() if len(v) > 0}
 
-        all_block_samples = []
-        for ind in range(NUM_SAMPLES):
-            sample_dict = {}
-            for large_block_num, block_samples in large_block_samples.items():
-                sample_dict[large_block_num] = block_samples[ind]
-            all_block_samples.append(sample_dict)
+        # all_block_samples = []
+        # for ind in range(NUM_SAMPLES):
+        #     sample_dict = {}
+        #     for large_block_num, block_samples in large_block_samples.items():
+        #         sample_dict[large_block_num] = block_samples[ind]
+        #     all_block_samples.append(sample_dict)
 
 
         large_block_uns = dict(zip(large_block_nums, block_unitaries))
@@ -349,49 +350,51 @@ class UnitaryDMEvaluator(BasePass):
             partitioned_circ=partitioned_circ
         )
         print(f"Generated full unitary for {self.circ_name} with shape {full_un.shape}", flush=True)
-        print(f"Generating example unitaries for {self.circ_name} with {len(all_block_samples)} samples", flush=True)
+        # print(f"Generating example unitaries for {self.circ_name} with {len(all_block_samples)} samples", flush=True)
         # example_uns = await get_runtime().map(
         #     UnitaryDMEvaluator.generate_circ_unitary,
         #     all_block_samples,
         #     partitioned_circ=partitioned_circ
         # )
-        example_uns = [
-            UnitaryDMEvaluator.generate_circ_unitary(
-                large_block_gates=sample,
-                partitioned_circ=partitioned_circ
-            ) for sample in all_block_samples
-        ]
+        # example_uns = [
+        #     UnitaryDMEvaluator.generate_circ_unitary(
+        #         large_block_gates=sample,
+        #         partitioned_circ=partitioned_circ
+        #     ) for sample in all_block_samples
+        # ]
 
-        print(f"Generated {len(example_uns)} example unitaries for {self.circ_name}", flush=True)
+        # print(f"Generated {len(example_uns)} example unitaries for {self.circ_name}", flush=True)
 
         # example_dms = await get_runtime().map(
         #     get_final_dm, example_uns
         # )
         if self.ham is None:
             full_dms = get_final_dms(full_un)
-            example_dms = [get_final_dms(un) for un in example_uns]
+            # example_dms = [get_final_dms(un) for un in example_uns]
             ensemble_mag = np.max(trace_distances(full_dms, self.target_dms))
             # example_mags = []
             # for i, dms in enumerate(example_dms):
             #     example_mags.append(np.max(trace_distances(dms, self.target_dms)))
-            example_mags = await get_runtime().map(
-                trace_distances, example_dms,
-                target_dms=self.target_dms
-            )
-            example_mags = [np.max(mags) for mags in example_mags]
+            # example_mags = await get_runtime().map(
+            #     trace_distances, example_dms,
+            #     target_dms=self.target_dms
+            # )
+            # example_mags = [np.max(mags) for mags in example_mags]
+            # example_mags = []
         else:
-            example_dms = [get_final_dm(un) for un in example_uns]
+            # example_dms = [get_final_dm(un) for un in example_uns]
             dm = get_final_dm(full_un)
             ensemble_mag = get_obs(dm, self.ham)
             # example_mags = await get_runtime().map(
             #     get_obs, example_dms, 
             #     ham=self.ham
             # )
-            example_mags = [get_obs(dm, self.ham) for dm in example_dms]
+            # example_mags = [get_obs(dm, self.ham) for dm in example_dms]
+            # example_mags = []
 
-        print(f"Ensemble Values for full circ: {ensemble_mag, np.mean(example_mags)}", flush=True)
+        print(f"Ensemble Values for full circ: {ensemble_mag, 10 ** (-1 * self.max_tol)}", flush=True)
         Path(ens_data_file).parent.mkdir(parents=True, exist_ok=True)
-        pickle.dump((ensemble_mag, example_mags), open(ens_data_file, "wb"))
+        pickle.dump((ensemble_mag, 10 ** (-1 * self.max_tol), self.num_good_blocks), open(ens_data_file, "wb"))
 
 
     async def run(self, circ: Circuit, data: PassData) -> None:
