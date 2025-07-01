@@ -25,7 +25,7 @@ class ConstantUnitaryGate(ConstantGate):
             radixes (Sequence[int]): The number of orthogonal states
                 for each qudit this gate will act on. Defaults to qubits.
         """
-        self._utry = UnitaryMatrix(utry, radixes)
+        self._utry = UnitaryMatrix(utry, radixes, check_arguments=False)
         self._num_qudits = self._utry.num_qudits
         self._radixes = self._utry.radixes
 

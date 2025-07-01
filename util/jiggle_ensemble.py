@@ -589,6 +589,9 @@ class  JiggleEnsemblePass(BasePass):
             scan_sols = data["scan_sols"]
 
         circuits = [c for c, _ in scan_sols]
+        if len(circuits) == 0:
+            print("No circuits to jiggle, skipping Jiggle Ensemble Pass", flush=True)
+            return
         # Jiggle the rest of the ensembles
         if self.use_calculated_error:
             success_threshold = self.success_threshold * data.get("error_percentage_allocated", 1)

@@ -33,3 +33,4 @@ from .collect_angles import CollectAnglesPass
 from .convex_hull_finder import ConvexHullFinderPass
 from .treescan import *
 from .noise_model import *
+from .unitary_dm_pass import *
