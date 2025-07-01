@@ -111,11 +111,8 @@ def partition_circs(compiler: Compiler,
 
 
 if __name__ == "__main__":
-    # circ_names = ["qpe_11", "lgt_11", "qaoa10"]
-    # circ_names = ["qpe_11"]
-    # circ_names += [f"QITE_8_{i}" for i in range(7)]
-
     circ_names = ["lgt_11", "mult8"]
+    circ_names += [f"QITE_8_{i}" for i in range(7)]
 
     compiler = Compiler(num_workers=128, runtime_log_level=logging.ERROR)
 
@@ -166,6 +163,8 @@ if __name__ == "__main__":
             ham = generate_lgt_hamiltonian(full_circ.num_qudits, 2)
         elif circ_name.startswith("QITE_8_"):
             ham = generate_tfim_hamiltonian(full_circ.num_qudits)
+        elif "_bk" in circ_name:
+            ham = pickle.load(open(f"out_hamiltonians/{circ_name}.pkl", "rb"))
         for tol in [1.0, 2.0, 3.0, 4.0, 5.0]:
             checkpoint_folder_form = f"small_block_checkpoints_final_paper_4_clifft_tket/{circ_name}" + "_{large_block_num}_" + f"{tol}/"
             workflow = [
