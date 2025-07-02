@@ -44,7 +44,7 @@ def get_final_dms(un: UnitaryMatrix) -> list[np.ndarray]:
     '''
     np.random.seed(42)
     final_dms = []
-    for _ in range(10):
+    for _ in range(20):
         sv = StateVector.random(un.num_qudits)
         sv.apply(un, list(range(un.num_qudits)))
         dm =  get_density_matrix(sv.numpy)
@@ -87,7 +87,7 @@ def get_sub_block_count(large_block_dir: str,
                 final_frob_cost = min(final_frob_cost, float(row["Norm. Bias"]))
         
     # Now we need to check if the ratio is less than 20
-    max_ratio = min(20, (10 ** (tol) / 10))
+    max_ratio = min(20, (10 ** (tol) / 4))
     if min_ratio > max_ratio:
         print(f"Skipping {small_block_num} as ratio is too high: {min_ratio}", flush=True)
         return False, 0
@@ -107,7 +107,7 @@ def get_file_names(large_checkpoint_dir,
     cache_file_name = os.path.join(checkpoint_dir, "ensemble_{ind}_cache_{extra}.pkl")
     extra_str = "_fw"
     csv_file = os.path.join(large_checkpoint_dir, 
-                                 f"block_{small_block_num}{extra_str}_fw.csv")
+                                 f"block_{small_block_num}{extra_str}.csv")
     if not os.path.exists(csv_file):
         csv_file = os.path.join(large_checkpoint_dir, 
                                  f"block_{small_block_num}.csv")
@@ -289,26 +289,30 @@ class UnitaryDMEvaluator(BasePass):
         large_block_nums = get_block_names(self.circ_name, extra="_tket")
         # print("Large Block Names: ", large_block_nums, flush=True)
         num_good_blocks = 0
+        good_blocks = []
         for large_block_num in large_block_nums:
             self.good_block_nums[large_block_num] = set()
             small_block_circs, _ = self.partitioned_data[large_block_num]
             large_block_dir = self.checkpoint_form.format(large_block_num=large_block_num)
             # print(f"Large Block Dir: {large_block_dir}", flush=True)
             for small_block_num, small_circ in small_block_circs.items():
+                # print(f"Small Block: {small_block_num} in {large_block_num}", flush=True)
                 good, count = get_sub_block_count(large_block_dir, 
                                                   small_block_num, self.max_tol)
                 original_count = small_circ.count(CNOTGate())
                 if not good:
                     continue
-                elif count > original_count:
-                    print(f"Skipping {small_block_num} as count is too high: {count} >= {original_count}", flush=True)
-                    continue
+                # elif count > original_count:
+                #     print(f"Skipping {small_block_num} as count is too high: {count} >= {original_count}", flush=True)
+                #     continue
                 else:
                     # Use block
                     num_good_blocks += 1
-                    print(f"Adding {small_block_num} to {large_block_num} with count: {count}", flush=True)
+                    good_blocks.append((large_block_num, small_block_num, count))
+                    # print(f"Adding {small_block_num} to {large_block_num} with count: {count}", flush=True)
                     self.good_block_nums[large_block_num].add(small_block_num)
         # print(list(self.good_block_nums.keys()))
+        print(f"Good Blocks for {self.circ_name}-{self.max_tol}: {good_blocks}", flush=True)
         return num_good_blocks
 
     async def run_full_ensemble(self) -> None:
@@ -321,8 +325,10 @@ class UnitaryDMEvaluator(BasePass):
         large_block_nums = get_block_names(self.circ_name, extra="_tket")
         # print("Large Block Names: ", large_block_nums, flush=True)
         print("Calculating Block Ensembles", self.circ_name, flush=True)
-        block_unitaries_samples = await get_runtime().map(self.get_block_ensemble, 
-                                                  large_block_nums)
+        # block_unitaries_samples = await get_runtime().map(self.get_block_ensemble, 
+        #                                           large_block_nums)
+        block_unitaries_samples = [await self.get_block_ensemble(large_block_num)
+                                   for large_block_num in large_block_nums]
         
         block_unitaries = [b[0] for b in block_unitaries_samples]
         # block_samples = [b[1] for b in block_unitaries_samples]

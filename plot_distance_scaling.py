@@ -102,12 +102,15 @@ if __name__ == '__main__':
     if TRACE_DISTANCE:
         circ_names = [
             "qaoa10",
-            "qpe_11"
+            "qpe_11",
+            "mult8",
+            "draper_adder_12"
         ]
     else:
         circ_names = [
             "lgt_11",
-            "QITE_8_0"
+            "QITE_8_0",
+            "FermiHubbard2x2_fh",
         ]
         
 
@@ -130,43 +133,46 @@ if __name__ == '__main__':
         pickle_files = glob.glob(os.path.join(folder, '*.pkl'))
         x_vals = []
         y_vals = []
+        ham = None
+        full_circ = load_circuit(circ_name)
+        full_circ.remove_all_measurements()
         if circ_name.startswith('lgt'):
-            full_circ = load_circuit(circ_name)
-            state = np.zeros(2 ** full_circ.num_qudits)
-            state[0] = 1.0
-            sv_out = full_circ.get_statevector(state)
-            dm = get_density_matrix(sv_out.numpy)
             ham = generate_lgt_hamiltonian(full_circ.num_qudits, 2)
-            true_val = get_obs(dm, ham)
-            print(f"True value for {circ_name}: {true_val}")
         elif circ_name.startswith('QITE'):
-            full_circ = load_circuit(circ_name)
-            full_circ.remove_all_measurements()
+            ham = generate_tfim_hamiltonian(full_circ.num_qudits)
+        elif ("Fermi" in circ_name or "H_" in circ_name):
+            ham = pickle.load(open(f"out_hamiltonians/{circ_name}.pkl", "rb"))
+
+        if ham is not None:
             state = np.zeros(2 ** full_circ.num_qudits)
             state[0] = 1.0
             sv_out = full_circ.get_statevector(state)
             dm = get_density_matrix(sv_out.numpy)
-            ham = generate_tfim_hamiltonian(full_circ.num_qudits)
             true_val = get_obs(dm, ham)
             print(f"True value for {circ_name}: {true_val}")
         for pf in pickle_files:
             with open(pf, 'rb') as f:
                 item = pickle.load(f)
                 y = item[0]
-                x = np.mean(item[1])
+                # x = np.mean(item[1])
+                # Get tol from filename
+                filename = os.path.basename(pf)
+                parts = filename.split('.')
+                tol = float(parts[0])  # Assuming the second part is the tolerance
+                x = (10 ** (-tol))
+                x_vals.append(x)
+                print(y)
                 if TRACE_DISTANCE:
-                    x_vals.append(x)
                     y_vals.append(y)
                 else:
-                    x_vals.append(np.abs(true_val - x))
                     y_vals.append(np.abs(true_val - y))
         axs.scatter(x_vals, y_vals, label=circ_name)
 
+
+    axs.set_xlabel('Epsilon')
     if TRACE_DISTANCE:
-        axs.set_xlabel('Average Trace Distance')
-        axs.set_ylabel('Trace Distance of Ensemble')
+        axs.set_ylabel('Trace Distance of Channel')
     else:
-        axs.set_xlabel('Average Hamiltonian Observable Error')
         axs.set_ylabel('Hamiltonian Observable Error of Channel')
     axs.set_yscale('log')
     axs.set_xscale('log')

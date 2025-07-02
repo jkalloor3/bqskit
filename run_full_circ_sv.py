@@ -111,9 +111,10 @@ def partition_circs(compiler: Compiler,
 
 
 if __name__ == "__main__":
-    circ_names = ["draper_adder_12", "lgt_11"]
-    # circ_names = ["qpe_11"]
-    circ_names += [f"QITE_8_{i}" for i in range(7)]
+    # circ_names = ["qae11"]
+    # circ_names = ["FermiHubbard2x2_fh"]
+    circ_names = ["qpe_11"]
+    # circ_names += [f"QITE_8_{i}" for i in range(7)]
 
     # circ_names = ["lgt_11"]
 
@@ -129,6 +130,7 @@ if __name__ == "__main__":
         print("Loaded partitioned data from file.")
         # Only run on circs that are not in data
         missing_circ_names = [name for name in circ_names if name not in all_partitioned_data]
+        print(f"Missing circ names: {missing_circ_names}")
 
     for circ_name in missing_circ_names:
         all_partitioned_ids[circ_name] = {}
@@ -157,6 +159,8 @@ if __name__ == "__main__":
     cliff_t = False
 
     compiler_ids = []
+
+    print("Circ names to process:", circ_names, flush=True)
     for circ_name in circ_names:
         full_circ = load_circuit(circ_name)
         full_circ.remove_all_measurements()
@@ -165,7 +169,7 @@ if __name__ == "__main__":
             ham = generate_lgt_hamiltonian(full_circ.num_qudits, 2)
         elif circ_name.startswith("QITE_8_"):
             ham = generate_tfim_hamiltonian(full_circ.num_qudits)
-        elif "_bk" in circ_name:
+        elif ("Fermi" in circ_name or "H_" in circ_name):
             ham = pickle.load(open(f"out_hamiltonians/{circ_name}.pkl", "rb"))
         for tol in [1.0, 2.0, 3.0, 4.0, 5.0]:
             checkpoint_folder_form = f"/pscratch/sd/j/jkalloor/bqskit/small_block_checkpoints_final_paper_4_more_cx_tket/{circ_name}" + "_{large_block_num}_" + f"{tol}/"
@@ -180,9 +184,9 @@ if __name__ == "__main__":
                     save_dir=f"/pscratch/sd/j/jkalloor/bqskit/ensemble_dms_{circ_name}/"
                 )
             ]
-            compiler.compile(full_circ, workflow=workflow)
-            # id = compiler.submit(full_circ, workflow=workflow)
-            # compiler_ids.append(id)
+            # compiler.compile(full_circ, workflow=workflow)
+            id = compiler.submit(full_circ, workflow=workflow)
+            compiler_ids.append(id)
 
-    # for id in compiler_ids:
-    #     compiler.result(id)
+    for id in compiler_ids:
+        compiler.result(id)

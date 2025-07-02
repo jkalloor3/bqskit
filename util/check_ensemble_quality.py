@@ -101,6 +101,10 @@ class CheckEnsembleQualityPass(BasePass):
                     print("Old Ratio: ", row["Ratio"], flush=True)
                     old_ratio = float(row["Ratio"])
 
+            if old_ratio < 10 and old_ratio > 0:
+                print("Old Ratio is less than 10, skipping pass", flush=True)
+                return
+
             csv_file = checkpoint_data_file.replace(".data", f"{self.csv_name}{self.checkpoint_extra_str}_newest.csv")
             if os.path.exists(csv_file):
                 print("Newest CSV already exists, skipping", flush=True)
