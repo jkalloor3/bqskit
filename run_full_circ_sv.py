@@ -113,7 +113,8 @@ def partition_circs(compiler: Compiler,
 if __name__ == "__main__":
     # circ_names = ["qae11"]
     # circ_names = ["FermiHubbard2x2_fh"]
-    circ_names = ["qpe_11"]
+    # circ_names = ["lgt_11"]
+    circ_names = ["LiH"]
     # circ_names += [f"QITE_8_{i}" for i in range(7)]
 
     compiler = Compiler(num_workers=128, runtime_log_level=logging.ERROR)
@@ -121,7 +122,16 @@ if __name__ == "__main__":
     all_partitioned_ids = {}
     all_partitioned_data = {}
 
-    partitioned_data_file = "partitioned_data_all_circs.pickle"
+    cliff_t = False
+    if cliff_t:
+        print("Using cliff-t circuits", flush=True)
+        base_checkpoint_dir = "small_block_checkpoints_final_paper_4_clifft_tket"
+        partitioned_data_file = "partitioned_data_all_clifft_circs.pickle"
+    else:
+        print("Using non-cliff-t circuits", flush=True)
+        base_checkpoint_dir = "small_block_checkpoints_final_paper_4_more_cx_tket"
+        partitioned_data_file = "partitioned_data_all_circs.pickle"
+
     missing_circ_names = circ_names.copy()
     if os.path.exists(partitioned_data_file):
         with open(partitioned_data_file, "rb") as f:
@@ -131,6 +141,8 @@ if __name__ == "__main__":
         missing_circ_names = [name for name in circ_names if name not in all_partitioned_data]
         print(f"Missing circ names: {missing_circ_names}")
 
+
+
     for circ_name in missing_circ_names:
         all_partitioned_ids[circ_name] = {}
         for large_block_num in get_block_names(circ_name, extra="_tket"):
@@ -139,7 +151,7 @@ if __name__ == "__main__":
             all_partitioned_ids[circ_name][large_block_num] = id
         
         all_partitioned_data[circ_name] = {}
-        checkpoint_folder_form = f"small_block_checkpoints_final_paper_4_clifft_tket/{circ_name}" + "_{large_block_num}_" + f"*/"
+        checkpoint_folder_form = f"{base_checkpoint_dir}/{circ_name}" + "_{large_block_num}_" + f"*/"
         for large_block_num in get_block_names(circ_name, extra="_tket"):
             out_circ = compiler.result(all_partitioned_ids[circ_name][large_block_num])
             base_dir = checkpoint_folder_form.format(large_block_num=large_block_num)
@@ -155,8 +167,6 @@ if __name__ == "__main__":
     with open(partitioned_data_file, "wb") as f:
         pickle.dump(all_partitioned_data, f)
 
-    cliff_t = True
-
     compiler_ids = []
 
     print("Circ names to process:", circ_names, flush=True)
@@ -171,7 +181,7 @@ if __name__ == "__main__":
         elif ("Fermi" in circ_name or "H_" in circ_name):
             ham = pickle.load(open(f"out_hamiltonians/{circ_name}.pkl", "rb"))
         for tol in [1.0, 2.0, 3.0, 4.0, 5.0]:
-            checkpoint_folder_form = f"small_block_checkpoints_final_paper_4_clifft_tket/{circ_name}" + "_{large_block_num}_" + f"{tol}/"
+            checkpoint_folder_form = f"{base_checkpoint_dir}/{circ_name}" + "_{large_block_num}_" + f"{tol}/"
             workflow = [
                 UnitaryDMEvaluator(
                     circ_name=circ_name,

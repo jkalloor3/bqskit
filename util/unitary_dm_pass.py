@@ -214,39 +214,8 @@ class UnitaryDMEvaluator(BasePass):
             print(f"Block: {block_name}, Avg. Dist: {avg_utry_dist}", flush=True)
             if avg_utry_dist < 1:
                 block_gates[block_name] = avg_gate
-                # all_utries = await get_runtime().map(create_jiggled_unitaries,
-                #                                      circ_params, target=target,
-                #                                      add_cost=False)
-                # all_utries = list(chain.from_iterable(all_utries))
-                # # Randomly sample NUM_SAMPLES unitaries
-                # use_duplicate_inds = len(all_utries) < NUM_SAMPLES
-                # rand_inds = np.random.choice(len(all_utries), NUM_SAMPLES, 
-                #                              replace=use_duplicate_inds)
-                # all_utries = [all_utries[i] for i in rand_inds]
-                # all_gates = [ConstantUnitaryGate(u) for u in all_utries]
-                # avg_dist = np.mean(
-                #     [frobenius_cost(u, target.numpy) for u in all_utries]
-                # )
-                # scaling_factor = avg_utry_dist / (avg_dist ** 2)
-                # print(f"Block: {block_name}, Avg. Dist: {avg_utry_dist}, Scaling Factor: {scaling_factor}", flush=True)
-                # block_utries[block_name] = all_gates
 
         full_circs = []
-        # Get randomly sampled unitaries for each block
-        # for i in range(NUM_SAMPLES):
-        #     ind = 0
-        #     circ = pcirc.copy()
-        #     for cycle, op in circ.operations_with_cycles():
-        #         pt = CircuitPoint(cycle, op.location[0])
-        #         block_name = block_names[ind]
-        #         ind += 1
-        #         assert isinstance(op.gate, CircuitGate)
-        #         assert isinstance(op.gate._circuit, Circuit)
-        #         if block_name in block_utries:
-        #             un_gate = block_utries[block_name][i]
-        #             circ.replace_gate(pt, un_gate, op.location)
-
-        #     full_circs.append(ConstantUnitaryGate(circ.get_unitary()))
 
         # Get average gate
         circ = pcirc.copy()
@@ -343,10 +312,10 @@ class UnitaryDMEvaluator(BasePass):
         large_block_nums = get_block_names(self.circ_name, extra="_tket")
         # print("Large Block Names: ", large_block_nums, flush=True)
         print("Calculating Block Ensembles", self.circ_name, flush=True)
-        # block_unitaries_samples = await get_runtime().map(self.get_block_ensemble, 
-        #                                           large_block_nums)
-        block_unitaries_samples = [await self.get_block_ensemble(large_block_num)
-                                   for large_block_num in large_block_nums]
+        block_unitaries_samples = await get_runtime().map(self.get_block_ensemble, 
+                                                  large_block_nums)
+        # block_unitaries_samples = [await self.get_block_ensemble(large_block_num)
+        #                            for large_block_num in large_block_nums]
         
         block_unitaries = [b[0] for b in block_unitaries_samples]
         # block_samples = [b[1] for b in block_unitaries_samples]

@@ -2,6 +2,7 @@ import os
 import glob
 import pickle
 import numpy as np
+from sys import argv
 
 from util import load_circuit, get_density_matrix
 
@@ -97,20 +98,23 @@ def get_obs(dm: np.ndarray, ham: np.ndarray) -> float:
     '''
     return np.real(np.trace(ham @ dm))
 
-TRACE_DISTANCE = False
 if __name__ == '__main__':
+    TRACE_DISTANCE = bool(int(argv[1])) if len(argv) > 1 else False
+
     if TRACE_DISTANCE:
         circ_names = [
             "qaoa10",
             "qpe_11",
             "mult8",
-            "draper_adder_12"
+            "draper_adder_12",
+            "qae11",
         ]
     else:
         circ_names = [
             "lgt_11",
             "QITE_8_0",
             "FermiHubbard2x2_fh",
+            "LiH",
         ]
         
 
