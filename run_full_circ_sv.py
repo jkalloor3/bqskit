@@ -179,9 +179,9 @@ if __name__ == "__main__":
                     cliff_t=cliff_t
                 )
             ]
-            compiler.compile(full_circ, workflow=workflow)
-            # id = compiler.submit(full_circ, workflow=workflow)
-            # compiler_ids.append(id)
+            # compiler.compile(full_circ, workflow=workflow)
+            id = compiler.submit(full_circ, workflow=workflow)
+            compiler_ids.append(id)
 
-    # for id in compiler_ids:
-    #     compiler.result(id)
+    for id in compiler_ids:
+        compiler.result(id)

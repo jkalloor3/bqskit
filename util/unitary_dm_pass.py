@@ -89,9 +89,9 @@ def get_sub_block_count(large_block_dir: str,
                 final_frob_cost = min(final_frob_cost, float(row["Norm. Bias"]))
         
     # Now we need to check if the ratio is less than 20
-    max_ratio = min(20, (10 ** (tol) / 10))
+    max_ratio = min(20, (10 ** (tol) / 5))
     if min_ratio > max_ratio:
-        print(f"Skipping {small_block_num} as ratio is too high: {min_ratio}", flush=True)
+        # print(f"Skipping {small_block_num} as ratio is too high: {min_ratio}", flush=True)
         return False, 0
     # Now we need to get the avg. number of CNOTs
     if not cliff_t:
@@ -124,6 +124,7 @@ def get_file_names(large_checkpoint_dir,
     jiggle_file = jiggle_file_name.format(ind=ind, extra=extra_str)
     probs_file = f"{checkpoint_dir}/ensemble_final_probs_{extra_str}.npy"
     cache_file = cache_file_name.format(ind=ind, extra=extra_str)
+    print(f"Cache File: {cache_file}", flush=True)
     return ensemble_file, jiggle_file, probs_file, cache_file, csv_file
 
 
@@ -283,7 +284,7 @@ class UnitaryDMEvaluator(BasePass):
         for small_block_num  in self.good_block_nums[large_block_num]:
             # print("Loading Circuits: ", small_block_num)
             qasms_file, params_file, probs_file, cache_file, _ = get_file_names(large_block_dir, small_block_num)
-            block_files[small_block_num] = [qasms_file, params_file, probs_file, cache_file]
+            block_files[small_block_num] = [qasms_file, params_file, cache_file, probs_file]
 
         small_block_nums = get_sub_block_nums(large_block_dir)
 
@@ -297,7 +298,7 @@ class UnitaryDMEvaluator(BasePass):
     def calculate_good_blocks(self) -> None:
         self.good_block_nums = {}
         counter = GateCounter(est=False, cache_file=None)
-        max_ratio = min(20, (10 ** (self.max_tol) / 2))
+        max_ratio = min(20, (10 ** (self.max_tol) / 5))
         large_block_nums = get_block_names(self.circ_name, extra="_tket")
         # print("Large Block Names: ", large_block_nums, flush=True)
         num_good_blocks = 0
@@ -318,14 +319,14 @@ class UnitaryDMEvaluator(BasePass):
                 if not good:
                     continue
                 elif count > original_count:
-                    print(f"Skipping {small_block_num} as count is too high: {count} >= {original_count}", flush=True)
+                    # print(f"Skipping {small_block_num} as count is too high: {count} >= {original_count}", flush=True)
                     continue
                 else:
                     # Use block
                     num_good_blocks += 1
-                    print(f"Adding {small_block_num} to {large_block_num} with count: {count}", flush=True)
+                    # print(f"Adding {small_block_num} to {large_block_num} with count: {count}", flush=True)
                     self.good_block_nums[large_block_num].add(small_block_num)
-        # print(list(self.good_block_nums.keys()))
+        print(f"Total Good Blocks for {self.circ_name}, {self.max_tol}: {num_good_blocks}", flush=True)
         return num_good_blocks
 
     async def run_full_ensemble(self) -> None:
