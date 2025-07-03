@@ -103,6 +103,8 @@ class  JiggleEnsemblePass(BasePass):
         self.jiggle_skew = jiggle_skew
         self.do_u3_perturbation = do_u3_perturbation
         self.do_flood_circ = flood_circ
+        assert not (self.use_ensemble and self.use_scan_sols), \
+            "Cannot use both ensemble and scan solutions at the same time."
 
     @staticmethod
     def get_perturbations(epsilon: float, ens_size: int) -> list[UnitaryMatrix]:
@@ -573,12 +575,12 @@ class  JiggleEnsemblePass(BasePass):
         probs_file = probs_file_name.format(ind=0, extra=self.checkpoint_extra_str)
         cache_file = cache_file_name.format(ind=0, extra=self.checkpoint_extra_str)
 
-        if os.path.exists(probs_file):
+        if os.path.exists(cache_file):
             num_circs = calc_num_circs(jiggle_file)
-            if num_circs > 1000:
-                print(f"Already have {num_circs} circuits in ensemble, " \
-                "skipping Jiggle Ensemble Pass", flush=True)
-                return
+            # if num_circs > 1000:
+            print(f"Already have {num_circs} circuits in ensemble, " \
+            "skipping Jiggle Ensemble Pass", flush=True)
+            return
                 
         Path(ens_file).parent.mkdir(parents=True, exist_ok=True)
         Path(jiggle_file).parent.mkdir(parents=True, exist_ok=True)
@@ -626,6 +628,7 @@ class  JiggleEnsemblePass(BasePass):
             )
             all_params = [p[0] for p in final_param_probs]
             all_probs = [p[1] for p in final_param_probs]
+            print("Storing Cache", cache_file, flush=True)
             pickle.dump(all_caches, open(cache_file, "wb"))
         else:
             all_params = await get_runtime().map(JiggleEnsemblePass.single_jiggle_ham, 

@@ -30,6 +30,7 @@ class CheckEnsembleQualityPass(BasePass):
                  checkpoint_extra_str: str = "",
                  calculate_hs: bool = False,
                  sample_blocks: bool = False,
+                 zero_threshold: float = 1e-10
                  ) -> None:
         self.count_t = count_t
         self.csv_name = csv_name
@@ -42,6 +43,7 @@ class CheckEnsembleQualityPass(BasePass):
         self.gate_func = lambda x: x.count(TGate()) + x.count(TdgGate()) + x.num_params * 60 if count_t else x.count(CNOTGate())
         self.checkpoint_extra_str = checkpoint_extra_str
         self.calculate_hs = calculate_hs
+        self.zero_threshold = zero_threshold
 
     def get_ensemble_data(self, avg_utry: np.ndarray, 
                           avg_dist: float, 
@@ -65,8 +67,6 @@ class CheckEnsembleQualityPass(BasePass):
         # final_counts = [self.gate_func(circ) for circ in ens]
         ensemble_data["Ensemble Generation Method"] = ""
         ensemble_data["Num Circs"] = 20000
-        ensemble_data[f"Orig. {self.gate_title}"] = orig_count
-        # ensemble_data[f"Avg. {self.gate_title}"] = np.mean(final_counts)
         ensemble_data["Norm. Epsilon"] = norm_e1
         ensemble_data["Epsilon"] = frob_e1
         ensemble_data["Norm. Bias"] = norm_bias
@@ -84,68 +84,53 @@ class CheckEnsembleQualityPass(BasePass):
         checkpoint_dir: str = data["checkpoint_dir"]
         checkpoint_data_file: str = data["checkpoint_data_file"]
         csv_file = checkpoint_data_file.replace(".data", f"{self.csv_name}{self.checkpoint_extra_str}.csv")
-        final_ens_file = f"{checkpoint_dir}/ensemble_final{self.checkpoint_extra_str}.qasms"
-        final_ens_jiggle_file = f"{checkpoint_dir}/ensemble_final_jiggle{self.checkpoint_extra_str}.npy"
+        final_qasms_file = f"{checkpoint_dir}/ensemble_final{self.checkpoint_extra_str}.qasms"
+        final_jiggle_file = f"{checkpoint_dir}/ensemble_final_jiggle{self.checkpoint_extra_str}.npy"
+        final_probs_file = f"{checkpoint_dir}/ensemble_final_probs{self.checkpoint_extra_str}.npy"
+        final_cache_file = f"{checkpoint_dir}/ensemble_final_cache{self.checkpoint_extra_str}.pkl"
 
         print("Checkpoint Dir: ", checkpoint_dir, flush=True)
         print("Starting Check Ensemble Quality Pass", flush=True)
         
-        old_ratio = -1.4
-        if os.path.exists(csv_file):
-            # Read in CSV and get ratio
-            with open(csv_file, mode='r') as f:
-                reader = csv.DictReader(f)
-                for row in reader:
-                    if "Ratio" not in row:
-                        continue
-                    print("Old Ratio: ", row["Ratio"], flush=True)
-                    old_ratio = float(row["Ratio"])
+        if os.path.exists(final_probs_file):
+            print("Final Probs File already exists, skipping pass", flush=True)
+            return
 
-            if old_ratio < 10 and old_ratio > 0:
-                print("Old Ratio is less than 10, skipping pass", flush=True)
-                return
-
-            csv_file = checkpoint_data_file.replace(".data", f"{self.csv_name}{self.checkpoint_extra_str}_newest.csv")
-            if os.path.exists(csv_file):
-                print("Newest CSV already exists, skipping", flush=True)
-                return
         
         # Otherwise, reload from saved files - Would have done in 
         ensemble_file_name = os.path.join(checkpoint_dir, "ensemble_{ind}_{extra}.qasms")
         jiggle_file_name = os.path.join(checkpoint_dir, "ensemble_{ind}_jiggles_{extra}.npy")
+        jiggle_file_name_sub = os.path.join(checkpoint_dir, "ensemble_{ind}_jiggles_{extra}_sub.npy")
         cache_file_name = os.path.join(checkpoint_dir, "ensemble_{ind}_cache_{extra}.pkl")
-        final_ens_file = os.path.join(checkpoint_dir, "ensemble_final.qasms")
-        start_ens_ind = 0
-        ens_file = ensemble_file_name.format(ind=start_ens_ind, extra=self.checkpoint_extra_str)
-        jiggle_file = jiggle_file_name.format(ind=start_ens_ind, extra=self.checkpoint_extra_str)
-        cache_file = cache_file_name.format(ind=start_ens_ind, extra=self.checkpoint_extra_str)
-        probs_file = os.path.join(checkpoint_dir, f"ensemble_final_probs_{self.checkpoint_extra_str}.npy")
+        ens_file = ensemble_file_name.format(ind=0, extra=self.checkpoint_extra_str)
+        jiggle_file = jiggle_file_name.format(ind=0, extra=self.checkpoint_extra_str)
+        jiggle_file_sub = jiggle_file_name_sub.format(ind=0, extra=self.checkpoint_extra_str)
+        cache_file = cache_file_name.format(ind=0, extra=self.checkpoint_extra_str)
+
+        # Compare 3 different probability files
+        ensemble = []
+        for i in range (1, 4):
+            probs_file = f"{checkpoint_dir}/ensemble_all_probs_{i}_{self.checkpoint_extra_str}.npy"
+            if i == 3:
+                # Last ensemble may be shorter, so find the smaller jiggle file
+                if os.path.exists(jiggle_file_sub):
+                    print("Using Smaller Jiggle File: ", jiggle_file_sub, flush=True)
+                    jiggle_file = jiggle_file_sub
+            ensemble.append((ens_file, jiggle_file, cache_file, probs_file))
 
         target = data.target
-        csv_dict = {}
+        csv_data = []
         
         # Create new shared memory
         best_ind = 0
         best_ratio = float("inf")
-        best_count = float("inf")
 
-        ensemble = [(ens_file, jiggle_file, cache_file, probs_file)]
+        probs_titles = ["Uniform", "FW Outer", "FW Seeded"]
 
-        if not os.path.exists(probs_file):
-            # If the probs file does not exist, we will not use it
-            print("Probs file does not exist, skipping", flush=True)
-            return
 
-        start_ens_ind = 0
-
-        if len(ensemble) == 0:
-            print("No ensembles found, skipping pass", flush=True)
-            return
-
-        for ens in ensemble:
-            if len(ens) > 0 and isinstance(ens[0], str):
-                ens_file, jiggle_file, cache_file, probs_file = ens
-                circ_params = load_jiggled_ensemble(ens_file, jiggle_file, cache_file, probs_file)
+        for ens_ind, ens in enumerate(ensemble):
+            ens_file, jiggle_file, cache_file, probs_file = ens
+            circ_params = load_jiggled_ensemble(ens_file, jiggle_file, cache_file, probs_file)
             if len(circ_params[0][1]) == 0:
                 print("No params found in ensemble, skipping ensemble", 
                       flush=True)
@@ -157,14 +142,16 @@ class CheckEnsembleQualityPass(BasePass):
                     param_chunks = np.array_split(params, 10)
                     probs_chunks = np.array_split(probs, 10)
                     for i in range(10):
-                        if param_chunks[i].shape[0] > 5000:
-                            # pick a random subset of 5000
-                            rand_inds = np.random.choice(param_chunks[i].shape[0], 5000, replace=False)
-                            param_chunks[i] = param_chunks[i][rand_inds]
-                            probs_chunks[i] = probs_chunks[i][rand_inds]
-                        new_circ_params.append((circ, param_chunks[i], probs_chunks[i], cache))
+                        new_circ_params.append((circ, 
+                                                param_chunks[i], 
+                                                probs_chunks[i], 
+                                                cache))
 
                 circ_params = new_circ_params
+            all_probs = np.concatenate([probs for _, _, probs, _ in circ_params])
+            # Calculate number of non-zero (below a threshold) probs in all_probs
+            non_zero_probs = np.sum(all_probs > self.zero_threshold)
+            print("All Probs Shape: ", all_probs.shape, np.sum(all_probs), flush=True)
             avg_utries_dists = await get_runtime().map(create_avg_utry, 
                                                         circ_params,
                                                         target=data.target, 
@@ -173,47 +160,49 @@ class CheckEnsembleQualityPass(BasePass):
             utries = [avg_utry for avg_utry, _, _ in avg_utries_dists]
             dists = [dist for _, dist, _ in avg_utries_dists]
             hs_dists = [hs for _, _, hs in avg_utries_dists]
-            all_probs = np.concatenate([probs for _, _, probs, _ in circ_params])
-            print("All Probs Shape: ", all_probs.shape, np.sum(all_probs), flush=True)
             avg_utry = np.sum(utries, axis=0)
             avg_dist = np.sum(dists)
             avg_hs = np.sum(hs_dists)
             print("Avg Dist: ", avg_dist, flush=True)
-            csv_dict[start_ens_ind] = self.get_ensemble_data(avg_utry, avg_dist, target, None, avg_hs=avg_hs)
+            ensemble_data = self.get_ensemble_data(avg_utry, avg_dist, target, None, avg_hs=avg_hs)
+            ensemble_data["Num Non-Zero Probs"] = non_zero_probs
             params = [params for _, params, _, _ in circ_params]
-            csv_dict[start_ens_ind]["Num Circs"] = len(circ_params) * params[0].shape[0]
-            csv_dict[start_ens_ind]["Ensemble Generation Method"] = self.ensemble_names[start_ens_ind]
-            ratio = csv_dict[start_ens_ind]["Ratio"]
-            print("New Ratio: ", ratio, "Old Ratio: ", old_ratio, flush=True)
-            count = np.mean([count_params(c) for c, _, _,_ in circ_params])
-            csv_dict[start_ens_ind]["Avg. Count"] = count
-            print("Avg Count Post Jiggle Load: ", count, flush=True)
-            if ratio < 1:
-                best_ind = start_ens_ind
+            ensemble_data["Num Circs"] = len(circ_params) * params[0].shape[0]
+            ensemble_data["Ensemble Generation Method"] = self.ensemble_names[ens_ind]
+            ratio = ensemble_data["Ratio"]
+            print("New Ratio: ", ratio, flush=True)
+            ensemble_data["Probability Method"] = probs_titles[ens_ind]
+            csv_data.append(ensemble_data)
+            if ratio <= 2.5:
+                best_ind = ens_ind
                 best_ratio = ratio
-                best_count = count
                 print("FOUND GOOD ENSEMBLE", flush=True)
                 break
             else:
-                if ratio < best_ratio and count < best_count:
-                    best_ind = start_ens_ind
+                if ratio < best_ratio:
+                    best_ind = ens_ind
                     best_ratio = ratio
-                    best_count = count
                     print("FOUND BETTER ENSEMBLE", flush=True)
         
-        if len(csv_dict) == 0:
+        if len(csv_data) == 0:
             print("No ensembles found, skipping pass", flush=True)
             return
 
         if "checkpoint_dir" in data:
             writer = csv.DictWriter(open(csv_file, "w", newline=""), 
-                                    fieldnames=csv_dict[0].keys())
+                                    fieldnames=csv_data[0].keys())
             writer.writeheader()
-            for row in csv_dict.values():
+            for row in csv_data:
                 writer.writerow(row)
             # Copy best jiggled ensemble file to new file name
-            best_ensemble_file_name = f"{checkpoint_dir}/ensemble_{best_ind}_{self.checkpoint_extra_str}.qasms"
-            best_file_name = f"{checkpoint_dir}/ensemble_{best_ind}_jiggles_{self.checkpoint_extra_str}.npy"
+            best_ensemble_file_name = ensemble[best_ind][0]
+            best_jiggle_file_name = ensemble[best_ind][1]
+            best_cache_file_name = ensemble[best_ind][2]
+            best_probs_file = ensemble[best_ind][3]
             if os.path.exists(best_ensemble_file_name):
-                shutil.copyfile(best_ensemble_file_name, final_ens_file)
-                shutil.copyfile(best_file_name, final_ens_jiggle_file)
+                shutil.copyfile(best_ensemble_file_name, final_qasms_file)
+                shutil.copyfile(best_jiggle_file_name, final_jiggle_file)
+                shutil.copyfile(best_probs_file, final_probs_file)
+                if os.path.exists(best_cache_file_name):
+                    shutil.copyfile(best_cache_file_name, final_cache_file)
+                print("Copied best ensemble files to final files", flush=True)

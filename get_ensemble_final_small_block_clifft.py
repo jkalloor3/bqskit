@@ -167,7 +167,8 @@ def get_ensemble_workflow(circ_name: str, tol: float, extra: str = "") -> Workfl
                 GenerateProbabilityPass(run_on_ensemble_0=True,
                                         checkpoint_extra_str=extra_str),
                 CheckEnsembleQualityPass(count_t=True,
-                                         checkpoint_extra_str=extra_str),
+                                         checkpoint_extra_str=extra_str,
+                                         zero_threshold=((err_thresh ** 2) / 10)),
             ]
         ),
     ]
