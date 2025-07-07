@@ -193,7 +193,7 @@ def run_cudaq_nisq_circs(circs: list[Circuit],
                          add_coherent_error: float = 0,
                          num_shots: int = 1024,
                          use_noise: bool = True,
-                         average: bool = False) -> list[float]:
+                         average: bool = False) -> list[dict]:
     '''
     Run a single circuit and get the observable for the output density matrix.
     '''

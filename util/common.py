@@ -1,4 +1,4 @@
-from bqskit.ir.circuit import Circuit
+from bqskit.ir.circuit import Circuit, CircuitPoint
 from .fix_global_phase import fix_phase
 from bqskit.qis import UnitaryMatrix
 from pathlib import Path
@@ -10,6 +10,7 @@ import glob
 import numpy as np
 from bqskit.ir.lang.qasm2 import OPENQASM2Language
 from .distance import frobenius_cost, normalized_frob_cost, hs_cost, get_corrected_un
+from .gg import gridsynth_gates_to_cir
 import multiprocessing as mp
 from bqskit.runtime import get_runtime
 from bqskit.utils.math import unitary_log_no_i
@@ -59,26 +60,6 @@ def store_jiggled_ensemble(ensemble: list[tuple[Circuit, np.ndarray]], file_name
     circs = [circ for circ, _ in ensemble ]
     store_ensemble(circs, file_name)
     store_params([params for _, params in ensemble], jiggle_file_name)
-
-def create_single_jiggled_ensemble(circ_params: tuple[Circuit, np.ndarray], 
-                                   target: UnitaryMatrix = None, phase_fix: bool = False,
-                                   add_cost: bool = False) -> list[Circuit] | list[tuple[Circuit, UnitaryMatrix, float]]:
-    circ, params = circ_params
-    ens = []
-    # print("Target: ", type(target), flush=True)
-    # print("Params Shape: ", params.shape, "Circuit Params: ", circ.num_params, flush=True)
-    for param in params.tolist():
-        new_circ = circ.copy()
-        new_circ.set_params(param)
-        if phase_fix:
-            fix_phase(new_circ, target)
-        if add_cost:
-            un = new_circ.get_unitary()
-            cost_1 = normalized_frob_cost(un, target)
-            ens.append((new_circ, un, cost_1))
-        else:
-            ens.append(new_circ)
-    return ens
 
 
 def get_ham_shift(circ: Circuit, target: UnitaryMatrix) -> float:
@@ -152,11 +133,12 @@ def create_avg_utry(circ_params: tuple[Circuit, np.ndarray, dict],
         w_cache = get_runtime().get_cache()
         w_cache.clear()
         w_cache.update(cache)
-        # print("Cache Keys: ", w_cache.keys(), flush=True)
 
     avg_utry = np.zeros_like(circ.get_unitary())
     avg_dist = 0
     avg_hs = 0
+    assert params.shape[0] == probs.shape[0], \
+        f"Params shape {params.shape} does not match probs shape {probs.shape}"
     if np.sum(probs) == 0:
         probs = np.ones(probs.shape)
         probs = probs / np.sum(probs)
@@ -188,6 +170,48 @@ def get_unitary(circ: Circuit, target: UnitaryMatrix) -> tuple[UnitaryMatrix, fl
     return (utry, cost_1)
 
 
+class EnsembleSampler:
+    def __init__(self, all_circ_params: list[tuple[Circuit, np.ndarray, np.ndarray, dict]],
+                 cliff_t: bool = False):
+        self.all_probs = [probs.flatten() for _, _, probs, _ in all_circ_params]
+        self.circ_probs = np.array([np.sum(p) for p in self.all_probs])
+        self.circ_probs /= np.sum(self.circ_probs)
+        self.params = [params for _, params, _, _ in all_circ_params]
+        self.circs = [circ for circ, _, _, _ in all_circ_params]
+        self.caches = [cache for _, _, _, cache in all_circ_params]
+        self.cliff_t = cliff_t
+
+    def __call__(self) -> np.ndarray[np.complex128] | list[tuple[UnitaryMatrix, float]]:
+        return create_jiggled_unitaries(self.circ_params, self.target, self.add_cost)
+    
+    def __iter__(self):
+        return self
+    
+    def __next__(self):
+        # Create a random circuit based on the probabilities
+        rand_circ_idx = np.random.choice(len(self.circ_probs), p=self.circ_probs)
+        circ = self.circs[rand_circ_idx]
+        param_options = self.params[rand_circ_idx]
+        param_probs = self.all_probs[rand_circ_idx]
+        rand_param_idx = np.random.choice(len(param_options), p=param_probs)
+        rand_param = param_options[rand_param_idx]
+        cache = self.caches[rand_circ_idx]
+        out_circ = circ.copy()
+        out_circ.set_params(rand_param)
+        if self.cliff_t:
+            # Lower all GridSynthGates to corresponding Cliff T circs
+            for cycle, op in out_circ.operations_with_cycles():
+                if isinstance(op.gate, GridSynthGate):
+                    pt = CircuitPoint(cycle, op.location)
+                    cache_ind = (op.params[0], int(op.params[1]))
+                    t_str = cache[cache_ind]
+                    if op.params[2] == 1:
+                        t_str = "Z" + t_str + "Z"
+                    clifft_circ = gridsynth_gates_to_cir(t_str)
+                    out_circ.replace_with_circuit(pt, clifft_circ, as_circuit_gate=True)
+            out_circ.unfold_all()
+        return out_circ
+
 def create_jiggled_unitaries(circ_params: tuple[Circuit, np.ndarray, np.ndarray, dict], 
                                    target: UnitaryMatrix = None,
                                    add_cost: bool = True) -> np.ndarray[np.complex128] | list[tuple[UnitaryMatrix, float]]:
@@ -216,16 +240,6 @@ def create_jiggled_unitaries(circ_params: tuple[Circuit, np.ndarray, np.ndarray,
         ens = np.array(ens, dtype=np.complex128)
         return ens
     return ens
-
-def create_jiggled_ensemble(circ_params: list[tuple[Circuit, np.ndarray]]) -> list[Circuit]:
-    ensemble = [create_single_jiggled_ensemble(c) for c in circ_params]
-    return list(chain.from_iterable(ensemble))
-
-def create_jiggled_ensemble_mp(circ_params: list[tuple[Circuit, np.ndarray]]) -> list[Circuit]:
-    # ensemble = [create_single_jiggled_ensemble(c) for c in circ_params]
-    with mp.Pool(processes=5) as pool:
-        ensemble = pool.map(create_single_jiggled_ensemble, circ_params)
-    return list(chain.from_iterable(ensemble))
 
 def load_jiggled_ensemble_separate(file_name: str, jiggle_file_name: str) -> tuple[list[Circuit], np.ndarray]:
     circs = load_ensemble(file_name)
@@ -359,45 +373,6 @@ def load_compiled_circs_params_separate(circ_name: str, block_num: int, tol: flo
     params: np.ndarray = np.load(full_path)
     circs = load_ensemble(full_ens_path)
     return circs, params
-
-def load_compiled_block_circuits(circ_name: int, 
-                                 block_num: int,  
-                                 tol: int,
-                                 target: UnitaryMatrix = None) -> list[Circuit] | list[tuple[Circuit, 
-                                                                             UnitaryMatrix, 
-                                                                             float]]:
-    
-    circ_dir = get_circ_dir(circ_name, block_num, tol)
-    full_path = f"{circ_dir}/ensemble_final_jiggle.npy"
-    full_ens_path = f"{circ_dir}/ensemble_final.qasms"
-    circ_params = load_jiggled_ensemble(full_ens_path, full_path)
-
-    if target is None:
-        print("Returning just Circuits", flush=True)
-        with mp.Pool(processes=os.cpu_count()) as pool:
-            ens: list[list[Circuit]] = pool.map(create_single_jiggled_ensemble, circ_params)
-    else:
-        with mp.Pool(processes=os.cpu_count()) as pool:
-            params = list(zip(circ_params, [target] * len(circ_params), [True] * len(circ_params), [True] * len(circ_params)))
-            ens: list[list[tuple[Circuit, UnitaryMatrix, float]]] = pool.starmap(create_single_jiggled_ensemble, 
-                                                                                params)
-    ens = list(chain.from_iterable(ens))
-    return ens
-
-def load_compiled_block_circuits_qp_inds(circ_name: int, 
-                                         block_num: int,  
-                                         tol: float,
-                                         extra: str="") -> tuple[np.ndarray, np.ndarray]:
-    circ_dir = get_circ_dir(circ_name, block_num, tol, extra=extra)
-    inds_file = f"{circ_dir}/ensemble_final_rand_inds.npy"
-    if os.path.exists(inds_file):
-        circ_inds = np.load(inds_file)
-        probs_file = f"{circ_dir}/ensemble_final_probs.npy"
-        circ_probs = np.load(probs_file)
-        return circ_inds, circ_probs
-    else:
-        print("No Indices found for circ", circ_name, block_num, tol, extra, flush=True)
-        return None, None
 
 def get_unitary(circ: Circuit):
     return circ.get_unitary()

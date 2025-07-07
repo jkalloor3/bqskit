@@ -34,3 +34,5 @@ from .convex_hull_finder import ConvexHullFinderPass
 from .treescan import *
 from .noise_model import *
 from .unitary_dm_pass import *
+from .plot_lib import *
+from .hamiltonian import *

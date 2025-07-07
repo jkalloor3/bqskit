@@ -124,7 +124,6 @@ def get_file_names(large_checkpoint_dir,
     jiggle_file = jiggle_file_name.format(ind=ind, extra=extra_str)
     probs_file = f"{checkpoint_dir}/ensemble_final_probs_{extra_str}.npy"
     cache_file = cache_file_name.format(ind=ind, extra=extra_str)
-    print(f"Cache File: {cache_file}", flush=True)
     return ensemble_file, jiggle_file, probs_file, cache_file, csv_file
 
 

@@ -111,11 +111,7 @@ def partition_circs(compiler: Compiler,
 
 
 if __name__ == "__main__":
-    # circ_names = ["qae11"]
-    # circ_names = ["FermiHubbard2x2_fh"]
-    # circ_names = ["lgt_11"]
-    circ_names = ["LiH"]
-    # circ_names += [f"QITE_8_{i}" for i in range(7)]
+    circ_names = ["LiH_hatt"]
 
     compiler = Compiler(num_workers=128, runtime_log_level=logging.ERROR)
 
