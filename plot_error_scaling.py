@@ -1,6 +1,7 @@
 import os
 import csv
 import pickle
+import time
 import matplotlib.pyplot as plt
 import glob
 from util import load_block, GateCounter, load_avg_ensemble_counts_full, get_block_names
@@ -8,13 +9,16 @@ from bqskit.compiler import Compiler
 from bqskit.passes import ScanPartitioner
 from bqskit.ir import Circuit
 from bqskit.ir.gates import CircuitGate, CNOTGate
-from util.plot_lib import plot_all_circ_violins
+from util.plot_lib import plot_all_circ_violins, benchmark_labels
 
 # List of circuits
 # circs = ["shor_12", "qft_16", "draper_adder_12", "qae13", "qpe_14", "lgt_17"]  # Replace with your list of circuits
-# circs = ["lgt_17", "mult16", "add17", "LiH", "qpe_14"] 
+plot_circs = ["lgt_17", "mult16", "add17", "qpe_14", "shor_12_no_qft", "qae11"] 
 circs = ["add17", "shor_12_no_qft", "lgt_17", "qae13", "qpe_14", "QITE_8_0", "mult16", "draper_adder_12", "qae11"]
 large_circs = ["qae33", "heisenberg64", "adder63"]
+
+all_circs = plot_circs + large_circs + circs
+all_circs = set(all_circs)
 
 # Directory containing block checkpoints
 block_checkpoints_dir = f'block_checkpoints_final_paper_tket_4*'
@@ -27,6 +31,27 @@ cache_form = "{circ}_{large_block_num}_{tol}/block_{small_block_num}/*cache*.pkl
 jiggle_form = "{circ}_{large_block_num}_{tol}/block_{small_block_num}/ensemble_final_jiggle.npy"
 
 cx_counter = GateCounter(est=True)
+
+def find_tket_qasm(circ_name: str) -> str:
+    """
+    Find the tket qasm file for the given circuit name.
+    """
+    # Check if the file exists in the current directory
+    dir_1 = "ensemble_benchmarks_tket"
+    dir_2 = "qce23_qfactor_benchmarks_tket"
+    dir_3 = "ensemble_benchmarks"
+    dir_4 = "qce23_qfactor_benchmarks"
+
+    if os.path.exists(os.path.join(dir_1, f"{circ_name}.qasm")):
+        return os.path.join(dir_1, f"{circ_name}.qasm")
+    if os.path.exists(os.path.join(dir_2, f"{circ_name}.qasm")):
+        return os.path.join(dir_2, f"{circ_name}.qasm")
+    if os.path.exists(os.path.join(dir_3, f"{circ_name}.qasm")):
+        return os.path.join(dir_3, f"{circ_name}.qasm")
+    if os.path.exists(os.path.join(dir_4, f"{circ_name}.qasm")):
+        return os.path.join(dir_4, f"{circ_name}.qasm") 
+
+    return None
 
 
 def get_avg_count(checkpoints_dir: str,
@@ -127,13 +152,11 @@ def read_cx_data_from_folders(circuits, orig_cx_counts,
                 try:
                     orig_count = orig_cx_counts[circ_name][block_ind]
                 except KeyError:
-                    print(f"KeyError: {circ_name}, {block_num}, {small_block_num}")
-                    print(f"Available keys: {list(orig_cx_counts[circ_name].keys())}")
-                    continue
-            diff = orig_count - avg_count
+                    print(f"KeyError: {circ_name}, {block_ind}, {tol}")
+                    orig_count = 0
             if block_ind not in all_data[circ_name]:
                 all_data[circ_name][block_ind] = {}
-            all_data[circ_name][block_ind][tol] = diff
+            all_data[circ_name][block_ind][tol] = (orig_count, avg_count)
     return all_data
 
 
@@ -189,24 +212,55 @@ def output_csv(data: dict, file_name: str, cliff_t: bool = False):
 
     sorted_eps = sorted(all_eps, key=float)
 
+    # Step 2: Get the original counts from ensemble_benchmarks_tket and qce_qfactor_benchmarks_tket
+    full_orig_counts = {}
+    for circ in data.keys():
+        orig_qasm_file = find_tket_qasm(circ)
+        if orig_qasm_file is None:
+            print(f"Warning: No original QASM file found for {circ}. Skipping.")
+            continue
+        if not cliff_t:
+            orig_circ = Circuit.from_file(orig_qasm_file)
+            orig_counts = orig_circ.count(CNOTGate())
+            full_orig_counts[circ] = orig_counts
+
     # Step 2: Build rows
     rows = []
     for circ, block_data in data.items():
-        total_diffs = {eps: 0 for eps in sorted_eps}  # Pre-fill with zeros
+        total_counts = {eps: 0 for eps in sorted_eps}  # Pre-fill with zeros
+        total_orig_counts = {eps: 0 for eps in sorted_eps}  # Pre-fill with zeros
 
         for eps_data in block_data.values():
             for eps, value in eps_data.items():
-                if value > 0:
-                    total_diffs[eps] += value
+                if isinstance(value, int):
+                    print(f"{circ} {eps}: {value}", flush=True)
+                    continue
+                orig_count, avg_count = value
+                total_counts[eps] += min(orig_count, avg_count)
+                total_orig_counts[eps] += orig_count
 
-        row = [circ] + [total_diffs[eps] for eps in sorted_eps]
+        if not cliff_t:
+            # See if full_orig_counts is smaller than total_orig_counts
+            if circ in full_orig_counts:
+                orig_count = full_orig_counts[circ]
+                for eps in sorted_eps:
+                    if total_orig_counts[eps] > orig_count:
+                        total_orig_counts[eps] = orig_count
+
+        # Interleave the original counts with the total counts
+        row = [benchmark_labels.get(circ, circ)]
+        for eps in sorted_eps:
+            row += [total_orig_counts[eps], total_counts[eps]]
         rows.append(row)
 
-    eps_labels = [f"10e-{int(eps * 2)}" for eps in sorted_eps]
+    # Step 3: Create labels for the columns
+    labels = ['Circuit']
+    for eps in sorted_eps:
+        labels += [f"Tket: 10e-{int(eps * 2)}", f"Ens: 10e-{int(eps * 2)}"]
     # Step 3: Write to CSV
     with open(file_name, 'w', newline='') as f:
         writer = csv.writer(f)
-        writer.writerow(['Circuit'] + eps_labels)  # Header
+        writer.writerow(labels)  # Header
         writer.writerows(rows)
     print(f"Data saved to {file_name}")
 
@@ -238,6 +292,7 @@ def get_orig_counts(circuits: list[str], cliff_t: bool = False,
         id_data[circ_name] = {}
         if circ_name in large_circs:
             # Just read the qasms in bad and good blocks
+            print(f"Already Partitioned, reading direclty from files for {circ_name}", flush=True)
             block_names = get_block_names(circ_name=circ_name, extra="_tket")
             for block_num in block_names:
                 tket_file = load_block(circ_name=circ_name, block_num=block_num,
@@ -246,6 +301,15 @@ def get_orig_counts(circuits: list[str], cliff_t: bool = False,
                 if small_circ.num_qudits <= 4:
                     cx_count = open(tket_file, 'r').read().count("cx")
                     orig_cx_counts[circ_name][(block_num, "0")] = cx_count
+                else:
+                    print("Partitioning small block for", circ_name, block_num, flush=True)
+                    # We have to partition this small block FML
+                    if small_circ.num_operations == 0:
+                        orig_cx_counts[circ_name][(block_num, "0")] = 0
+                        continue
+                    id = compiler.submit(small_circ.copy(), workflow)
+                    id_data[circ_name][block_num] = id
+
         else:
             # Have to partition the circuit into blocks to get block counts
             for block_num in get_block_names(circ_name=circ_name, extra="_tket"):
@@ -286,7 +350,12 @@ def get_orig_counts(circuits: list[str], cliff_t: bool = False,
 if __name__ == '__main__':
     # Collect data from all folders
     use_small_block = True
-    output_cx = True
+    plot = False
+    if plot:
+        circs = plot_circs
+    else:
+        circs = all_circs
+        output_cx = True
     cliff_t = False
 
     if not cliff_t:
@@ -336,45 +405,53 @@ if __name__ == '__main__':
             for block_ind in ratio_data[circ].keys():
                 for eps in ratio_data[circ][block_ind].keys():
                     final_ratio = ratio_data[circ][block_ind][eps]
-                    if final_ratio > RATIO_LIMIT:
+                    min_ratio = RATIO_LIMIT
+                    if eps == 1.0:
+                        min_ratio = 2.5
+                    if final_ratio > min_ratio:
                         # Check if good_data is better
                         if circ in good_ratio_data and block_ind in good_ratio_data[circ]:
                             good_ratio = good_ratio_data[circ][block_ind].get(eps, float("inf"))
-                            if good_ratio < RATIO_LIMIT:
+                            if good_ratio < min_ratio:
                                 ratio_data[circ][block_ind][eps] = good_ratio_data[circ][block_ind][eps]
                                 if output_cx:
                                     cx_data[circ][block_ind][eps] = good_cx_data[circ][block_ind][eps]
                             else:
                                 if output_cx:
-                                    cx_data[circ][block_ind][eps] = 0 # Don't count reduction
+                                    new_val = (cx_data[circ][block_ind][eps][0], float("inf"))
+                                    cx_data[circ][block_ind][eps] = new_val  # Don't count reduction
                         else:
                             if output_cx:
                                 try:
-                                    cx_data[circ][block_ind][eps] = 0 # Don't count reduction
+                                    new_val = (cx_data[circ][block_ind][eps][0], float("inf"))
+                                    cx_data[circ][block_ind][eps] = new_val  # Don't count reduction
                                 except KeyError:
                                     print(f"KeyError: {circ}, {block_ind}, {eps}")
-                                    exit(1)
+                                    continue
 
-    # Plot ratio data
-    fig, axes = plt.subplots(1, 1, figsize=(12, 6))
-
-    if cliff_t:
-        title = "Error Scaling (FT)"
-    else:
-        title = "Error Scaling (NISQ)"
-
-    plot_all_circ_violins(ratio_data, axes, plot_title=title)
-
-    # Save the figure
-    fig.tight_layout()
     if cliff_t:
         extra = "_cliff"
     else:
         extra = "_nisq"
-    fig.savefig(f"error_scaling_final{extra}.png", dpi=300)
+
+    if plot:
+        # Plot ratio data
+        fig, axes = plt.subplots(1, 1, figsize=(12, 6))
+
+        if cliff_t:
+            title = "Error Scaling (FT)"
+        else:
+            title = "Error Scaling (NISQ)"
+        
+            plot_all_circ_violins(ratio_data, axes, plot_title=title)
+
+        # Save the figure
+        fig.tight_layout()
+        fig.savefig(f"error_scaling_final{extra}.png", dpi=300)
 
 
     # Output CX data to a csv file
     if output_cx:
+        print("Outputting CX data to CSV", flush=True)
         csv_file_name = f"count_data_final{extra}.csv"
         output_csv(cx_data, csv_file_name)
