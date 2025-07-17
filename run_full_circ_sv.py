@@ -31,20 +31,21 @@ def partition_circs(compiler: Compiler,
 if __name__ == "__main__":
     circ_names = ["FermiHubbard2x2_jw_long", "LiH_jw_long", "neutrino_NX_3_NF_2_jw_long", "heisenberg7"]
 
-    compiler = Compiler(num_workers=128, runtime_log_level=logging.ERROR)
+    compiler = Compiler()
 
     all_partitioned_ids = {}
     all_partitioned_data = {}
 
-    cliff_t = False
+    cliff_t = True
+    cliff_t_string = "_clifft" if cliff_t else ""
     if cliff_t:
         print("Using cliff-t circuits", flush=True)
         base_checkpoint_dir = "small_block_checkpoints_final_paper_4_clifft_tket"
-        partitioned_data_file = "partitioned_data_all_clifft_circs.pickle"
     else:
         print("Using non-cliff-t circuits", flush=True)
         base_checkpoint_dir = "small_block_checkpoints_final_paper_4_more_cx_tket"
-        partitioned_data_file = "partitioned_data_all_circs.pickle"
+
+    partitioned_data_file = f"partitioned_data_all_circs.pickle"
 
     missing_circ_names = circ_names.copy()
     if os.path.exists(partitioned_data_file):
@@ -106,8 +107,8 @@ if __name__ == "__main__":
                 )
             ]
             # compiler.compile(full_circ, workflow=workflow)
-            id = compiler.submit(full_circ, workflow=workflow)
-            compiler_ids.append(id)
+            # id = compiler.submit(full_circ, workflow=workflow)
+            # compiler_ids.append(id)
 
     for id in compiler_ids:
         compiler.result(id)

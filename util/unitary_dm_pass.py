@@ -295,16 +295,16 @@ class UnitaryDMEvaluator(BasePass):
                 good, count = get_sub_block_count(large_block_dir, 
                                                   small_block_num, self.max_tol,
                                                   self.cliff_t)
-                if self.cliff_t:
-                    original_count = counter.count_t(small_circ, target_error=(10 ** (- 2 * self.max_tol) * max_ratio))
-                else:
-                    # Count CNOTs in the circuit
-                    original_count = counter.count_cx(small_circ)
+                # if self.cliff_t:
+                #     original_count = counter.count_t(small_circ, target_error=(10 ** (- 2 * self.max_tol) * max_ratio), verbose=True)
+                # else:
+                #     # Count CNOTs in the circuit
+                #     original_count = counter.count_cx(small_circ)
                 if not good:
                     continue
-                elif count > original_count:
-                    print(f"Skipping {small_block_num} as count is too high: {count} >= {original_count}", flush=True)
-                    continue
+                # elif count > original_count:
+                #     print(f"Skipping {small_block_num} as count is too high: {count} >= {original_count}", flush=True)
+                #     continue
                 else:
                     # Use block
                     num_good_blocks += 1
@@ -323,6 +323,9 @@ class UnitaryDMEvaluator(BasePass):
             return
         
         large_block_nums = get_block_names(self.circ_name, extra="_tket")
+        if len(large_block_nums) == 0:
+            print(f"No large blocks found for {self.circ_name}, skipping.", flush=True)
+            return
         # print("Large Block Names: ", large_block_nums, flush=True)
         print("Calculating Block Ensembles", self.circ_name, flush=True)
         block_unitaries_samples = await get_runtime().map(self.get_block_ensemble, 
