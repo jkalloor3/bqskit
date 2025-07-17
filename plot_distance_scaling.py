@@ -17,15 +17,16 @@ if __name__ == '__main__':
         ]
     else:
         circ_names = [
-            "lgt_11",
-            "QITE_8_0",
-            "FermiHubbard2x2_fh",
-            "LiH",
-            "LiH_hatt",
+            # "lgt_11",
+            # "QITE_8_0",
+            "FermiHubbard2x2_jw_long",
+            "heisenberg7",
+            "LiH_jw_long",
+            "neutrino_NX_3_NF_2_jw_long"
         ]
         
 
-    folder_form = "ensemble_dms_{circ_name}/"
+    folder_form = "ensemble_dms_{circ_name}_init/"
 
     fig, axs = plt.subplots(1, 1, figsize=(10, 6))
 
@@ -34,7 +35,7 @@ if __name__ == '__main__':
     else:
         y_label = "Hamiltonian Observable Error of Channel"
 
-    plot_dm_data(circ_names, axs, folder_form=folder_form, y_label=y_label)
+    plot_dm_data(circ_names, axs, folder_form=folder_form, y_label=y_label, diff=False)
 
     if TRACE_DISTANCE:
         plt.savefig('trace_distance_scaling.png', dpi=300)

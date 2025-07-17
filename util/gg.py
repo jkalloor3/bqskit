@@ -182,7 +182,7 @@ def get_rz_perturbations(starting_angle,
     scaling_factor = avg_U_dist / (avg_dist ** 2)
     
     if scaling_factor > 10:
-        print("Scaling factor too high, returning empty lists.")
+        print(f"Scaling factor {scaling_factor} too high, {starting_angle}.")
         return None, None, None
 
     return final_params, final_strs, probs

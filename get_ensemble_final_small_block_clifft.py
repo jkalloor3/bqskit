@@ -22,7 +22,7 @@ from util import LEAPSynthesisPass2, GenerateProbabilityPass, FixAnglesPass, UnF
 from util import CheckEnsembleQualityPass, FixGlobalPhasePass, ConvertToZXZXZSimple
 
 from util.distance import normalized_gp_frob_cost
-from util import load_jiggled_ensemble, create_jiggled_unitaries
+from util import load_jiggled_ensemble, create_jiggled_unitaries, get_block_names
 
 from bqskit.runtime import get_runtime
 import itertools
@@ -127,7 +127,7 @@ def get_ensemble_workflow(circ_name: str, tol: float, extra: str = "") -> Workfl
 
     ntro = NumericalTReductionPass(
         full_loops=3,
-        success_threshold=err_thresh / 30,
+        success_threshold=err_thresh / 10,
         use_calculated_error=True
     )
 
@@ -159,7 +159,7 @@ def get_ensemble_workflow(circ_name: str, tol: float, extra: str = "") -> Workfl
                 FixAnglesPass(int(tol) * 2 + 2, run_scan_sols=True),
                 ConvertToZXZXZSimple(group=False),
                 ntro,
-                FixAnglesPass(int(tol) * 2 + 2, run_scan_sols=True),
+                FixAnglesPass(int(tol) * 2 + 1, run_scan_sols=True),
                 FixGlobalPhasePass(),
                 FilterDistancesPass(threshold=(err_thresh * 5)),
                 # PrintDistancesPass(),
@@ -296,26 +296,27 @@ def get_circ_data(circ_name: str, block_num: str | int,
         return circ_data
     
     else:
-        if block_num == "all_blocks":
-            # Get all blocks
-            good_circ_files = glob.glob(f"good_blocks{extra}/{circ_name}_*.qasm")
-            # Ignore bad blocks for now
-            bad_circ_files = glob.glob(f"bad_blocks{extra}/{circ_name}_*.qasm")
-            # bad_circ_files = []
-            all_circ_files = good_circ_files + bad_circ_files
-            block_nums = [file.split('_')[-1].split('.')[0] for file in all_circ_files]
+        if "blocks" in block_num:
+            # all_blocks, first_half_blocks, second_half_blocks
+            block_nums = get_block_names(circ_name, extra=extra)
+            print("Number of blocks: ", len(block_nums), flush=True)
+            if block_num.startswith("first_half"):
+                block_nums = block_nums[:len(block_nums) // 2]
+            elif block_num.startswith("second_half"):
+                block_nums = block_nums[len(block_nums) // 2:]
+
+            print("Running on blocks: ", len(block_nums), flush=True)
             circ_data = []
             for i, block_num in enumerate(block_nums):
                 name, circ_file = find_file(circ_name, block_num, extra=extra)
-                circ_file = all_circ_files[i]
                 for tol in tols:
                     circ_data.append((name, circ_file, tol))
 
-            # Only do 20 blocks
-            if len(circ_data) > 100:
-                rand_inds = np.random.choice(len(circ_data), 100, replace=False)
+            # Only do 250 blocks
+            if len(circ_data) > 250:
+                rand_inds = np.random.choice(len(circ_data), 250, replace=False)
                 circ_data = [circ_data[i] for i in rand_inds]
-                print("Limiting to 100 blocks", flush=True)
+                print("Limiting to 250 blocks", flush=True)
             return circ_data
         else:
             circ_name, circ_file = find_file(circ_name, block_num, extra=extra)
