@@ -116,7 +116,12 @@ class CheckEnsembleQualityPass(BasePass):
                 if os.path.exists(jiggle_file_sub):
                     print("Using Smaller Jiggle File: ", jiggle_file_sub, flush=True)
                     jiggle_file = jiggle_file_sub
-            ensemble.append((ens_file, jiggle_file, cache_file, probs_file))
+            if os.path.exists(probs_file):
+                ensemble.append((ens_file, jiggle_file, cache_file, probs_file))
+
+        if len(ensemble) == 0:
+            print("No ensembles found, skipping pass", flush=True)
+            return
 
         target = data.target
         csv_data = []
@@ -142,10 +147,13 @@ class CheckEnsembleQualityPass(BasePass):
                     param_chunks = np.array_split(params, 10)
                     probs_chunks = np.array_split(probs, 10)
                     for i in range(10):
-                        new_circ_params.append((circ, 
-                                                param_chunks[i], 
-                                                probs_chunks[i], 
-                                                cache))
+                        if len(param_chunks[i]) == 0:
+                            break
+                        else:
+                            new_circ_params.append((circ, 
+                                                    param_chunks[i], 
+                                                    probs_chunks[i], 
+                                                    cache))
 
                 circ_params = new_circ_params
             all_probs = np.concatenate([probs for _, _, probs, _ in circ_params])

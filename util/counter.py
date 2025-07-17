@@ -103,7 +103,8 @@ class GateCounter:
         return final_count
 
     def count_t(self, circ: Circuit, target_error: float = None, 
-                skip_fix: bool = False) -> int:
+                skip_fix: bool = False,
+                verbose: bool = False) -> int:
         if target_error is None:
             precision = 18
         else:
@@ -119,7 +120,9 @@ class GateCounter:
             fix_angle_workflow(out_circ, precision=precision)
         else:
             out_circ = circ
-
+        
+        if verbose:
+            print(out_circ.gate_counts, precision, flush=True)
 
         # Count the number of T gates
         num_t = out_circ.count(TGate()) + out_circ.count(TdgGate())

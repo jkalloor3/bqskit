@@ -10,9 +10,6 @@ from math import ceil
 from .common import (load_jiggled_ensemble, create_jiggled_unitaries, 
                      load_ensemble, store_params, store_probs)
 from .distance import get_corrected_un
-# from .distance import frobenius_cost, normalized_frob_cost
-# from qpsolvers import solve_qp
-# import pickle
 import os
 import cvxpy as cp
 import cvxopt
@@ -84,7 +81,11 @@ class GenerateProbabilityPass(BasePass):
             lp_obj = cp.Minimize(DelJxk @ y_var)
             lp_constraints = [Aeq @ y_var == beq, y_var >= lbound, y_var <= ubound]
             lp_prob = cp.Problem(lp_obj, lp_constraints)
-            lp_prob.solve(solver=cp.CVXOPT) 
+            try:
+                lp_prob.solve(solver=cp.CVXOPT)
+            except:
+                print("CVXOPT solver failed, returning probabilities early")
+                return probabilities
 
             y = y_var.value
             step = y - probabilities
@@ -145,7 +146,6 @@ class GenerateProbabilityPass(BasePass):
         final_probs_file_3 = f"{checkpoint_dir}/ensemble_all_probs_3_{self.checkpoint_extra_str}.npy"
 
         if os.path.exists(final_probs_file_3):
-            print("Already calculated probabilities, skipping", flush=True)
             return
 
         try:
@@ -155,9 +155,7 @@ class GenerateProbabilityPass(BasePass):
             N = circ_params[0][1].shape[0] # Params is of shape (N, num_params)
 
             print("Loaded ensemble with M = ", M, " and N = ", N, flush=True)
-            # print(circ_params[0][1].shape, flush=True)
         except:
-            print("Corrupted ensemble files, skipping", checkpoint_dir, flush=True)
             return
 
         target = data.target
@@ -174,8 +172,8 @@ class GenerateProbabilityPass(BasePass):
             orig_uns.append(get_corrected_un(c.get_unitary(), target))
 
         ensemble = await get_runtime().map(create_jiggled_unitaries, circ_params, 
-                                            target=target, add_cost=False)
-        
+                                            target=target, add_cost=False,
+                                            drop_zeros=False)
         
         try:
             all_probs = np.load(probs_file)
@@ -236,9 +234,13 @@ class GenerateProbabilityPass(BasePass):
                 new_circ_params.append((orig_circs[i], new_params[i], 
                                         new_probs[i], all_caches[i]))
                 
+            print("Init Probabilities shape: ", init_probs.shape, flush=True)
+            print("New Parameters shape: ", new_params.shape, flush=True)
+                
             # Calculate the new ensemble
             ensemble = await get_runtime().map(create_jiggled_unitaries, 
-                                            new_circ_params, target=target, 
+                                            new_circ_params, target=target,
+                                            drop_zeros=False, 
                                             add_cost=False)
             
             # Now save the new params file to use in next pass
@@ -250,6 +252,9 @@ class GenerateProbabilityPass(BasePass):
 
 
         print("Running Probability on ensemble of size: ", full_ensemble.shape[0], flush=True)
+        
+        assert full_ensemble.shape[0] == len(init_probs), \
+            f"Full ensemble size does not match initial probabilities size {checkpoint_dir}"
             
         final_probs_3 = GenerateProbabilityPass.calculate_probs(full_ensemble, 
                                                             target=target,
