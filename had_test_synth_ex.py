@@ -46,12 +46,17 @@ if __name__ == '__main__':
     circ.append_gate(var_gate, var_loc, var_params)
 
     workflow = [
+        # Important: To get some better performance (fewer gates), you can set
+        # `perform_extract = True` but it will take a lot longer!
+        # If you set `perform_extract = True`, 
+        # you should also set `min_qudit_size` to 3. You can also
+        # set `min_qudit_size` to 4 to boost performance even more.
         FullBlockZXZPass(min_qudit_size=2)
     ]
 
     # Compile this workflow
     print("Starting compilation...", flush=True)
-    compiler = Compiler(num_workers=4)
+    compiler = Compiler()
     controlled_u_circ = compiler.compile(circ, workflow)
     # with Compiler(num_workers=2) as compiler:
     #     controlled_u_circ = compiler.compile(circ, workflow)
@@ -69,6 +74,8 @@ if __name__ == '__main__':
 
     # Pass to full bqskit compiler
     print("Starting full hadamard test compilation...", flush=True)
+    # max_synthesis_size = 4  will be better but take longer
+    # optimization_level = 4 will be better but take longer
     had_test_compiled = compile(had_test_circ, max_synthesis_size=3, optimization_level=3, compiler=compiler)
 
     print(had_test_compiled.gate_counts)
