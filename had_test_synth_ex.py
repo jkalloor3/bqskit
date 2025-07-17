@@ -45,6 +45,8 @@ if __name__ == '__main__':
 
     circ.append_gate(var_gate, var_loc, var_params)
 
+
+    # Initial Workflow just to decompose the unitary
     workflow = [
         # Important: To get some better performance (fewer gates), you can set
         # `perform_extract = True` but it will take a lot longer!
@@ -65,7 +67,8 @@ if __name__ == '__main__':
     zxz_time = time.time() - start
 
 
-    # Now, once this is compiled, we can compile the full hadamard test
+    # Now, once this is compiled, we can handle the circuit with the normal
+    # bqskit compilation workflow
     had_test_circ = Circuit(time_evol_qubits + 1)
 
     had_test_circ.append_gate(HGate(), [0])  # Hadamard on the first qubit
@@ -76,6 +79,9 @@ if __name__ == '__main__':
     print("Starting full hadamard test compilation...", flush=True)
     # max_synthesis_size = 4  will be better but take longer
     # optimization_level = 4 will be better but take longer
+    # synthesis_epsilon is the approximation accuracy. By default, it is 
+    # set to 1e-8, but increasing it to 1e-7,1e-6,1e-5 may improve 
+    # on noisy machines
     had_test_compiled = compile(had_test_circ, max_synthesis_size=3, optimization_level=3, compiler=compiler)
 
     print(had_test_compiled.gate_counts)
