@@ -109,21 +109,26 @@ def get_sub_block_count(large_block_dir: str,
 
 def get_file_names(large_checkpoint_dir, 
                    small_block_num: str) -> tuple[str, str, str, str, str]:
-    checkpoint_dir = os.path.join(large_checkpoint_dir, f"block_{small_block_num}")
-    ensemble_file_name = os.path.join(checkpoint_dir, "ensemble_{ind}_{extra}.qasms")
-    jiggle_file_name = os.path.join(checkpoint_dir, "ensemble_{ind}_jiggles_{extra}.npy")
-    cache_file_name = os.path.join(checkpoint_dir, "ensemble_{ind}_cache_{extra}.pkl")
-    extra_str = "_fw"
-    csv_file = os.path.join(large_checkpoint_dir, 
-                                 f"block_{small_block_num}{extra_str}.csv")
+    small_checkpoint_dir = os.path.join(large_checkpoint_dir, f"block_{small_block_num}")
+    # Try outputs of newest passes
+    final_probs_file = os.path.join(small_checkpoint_dir, "ensemble_final_probs_fw.npy")
+    if os.path.exists(final_probs_file):
+        ensemble_file = os.path.join(small_checkpoint_dir, "ensemble_final_fw.qasms")
+        jiggle_file = os.path.join(small_checkpoint_dir, "ensemble_final_jiggle_fw.npy")
+        cache_file = os.path.join(small_checkpoint_dir, "ensemble_final_cache_fw.pkl")
+        csv_file = os.path.join(large_checkpoint_dir, f"block_{small_block_num}_fw.csv")
+        return ensemble_file, jiggle_file, final_probs_file, cache_file, csv_file
+    
+    # Otherwise, we do not have the newest set of files, so return the old ones
+    csv_file = os.path.join(large_checkpoint_dir,
+                             f"block_{small_block_num}_fw.csv")
     if not os.path.exists(csv_file):
         csv_file = os.path.join(large_checkpoint_dir, 
                                  f"block_{small_block_num}.csv")
-    ind = 0
-    ensemble_file = ensemble_file_name.format(ind=ind, extra=extra_str)
-    jiggle_file = jiggle_file_name.format(ind=ind, extra=extra_str)
-    probs_file = f"{checkpoint_dir}/ensemble_final_probs_{extra_str}.npy"
-    cache_file = cache_file_name.format(ind=ind, extra=extra_str)
+    ensemble_file = os.path.join(small_checkpoint_dir, "ensemble_0__fw.qasms")
+    jiggle_file = os.path.join(small_checkpoint_dir, "ensemble_0_jiggles__fw.npy")
+    probs_file = os.path.join(small_checkpoint_dir, "ensemble_0_probs__fw.npy")
+    cache_file = os.path.join(small_checkpoint_dir, "ensemble_0_cache__fw.pkl")
     return ensemble_file, jiggle_file, probs_file, cache_file, csv_file
 
 
@@ -281,16 +286,16 @@ class UnitaryDMEvaluator(BasePass):
                 good, count = get_sub_block_count(large_block_dir, 
                                                   small_block_num, self.max_tol,
                                                   self.cliff_t)
-                if self.cliff_t:
-                    original_count = counter.count_t(small_circ, target_error=(10 ** (- 2 * self.max_tol) * max_ratio))
-                else:
-                    # Count CNOTs in the circuit
-                    original_count = counter.count_cx(small_circ)
+                # if self.cliff_t:
+                #     original_count = counter.count_t(small_circ, target_error=(10 ** (- 2 * self.max_tol) * max_ratio), verbose=True)
+                # else:
+                #     # Count CNOTs in the circuit
+                #     original_count = counter.count_cx(small_circ)
                 if not good:
                     continue
-                elif count > original_count:
-                    print(f"Skipping {small_block_num} as count is too high: {count} >= {original_count}", flush=True)
-                    continue
+                # elif count > original_count:
+                #     print(f"Skipping {small_block_num} as count is too high: {count} >= {original_count}", flush=True)
+                #     continue
                 else:
                     # Use block
                     num_good_blocks += 1
@@ -309,6 +314,9 @@ class UnitaryDMEvaluator(BasePass):
             return
         
         large_block_nums = get_block_names(self.circ_name, extra="_tket")
+        if len(large_block_nums) == 0:
+            print(f"No large blocks found for {self.circ_name}, skipping.", flush=True)
+            return
         # print("Large Block Names: ", large_block_nums, flush=True)
         print("Calculating Block Ensembles", self.circ_name, flush=True)
         block_unitaries_samples = await get_runtime().map(self.get_block_ensemble, 

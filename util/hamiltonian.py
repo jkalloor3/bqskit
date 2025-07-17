@@ -100,6 +100,8 @@ def generate_hamiltonian(circ_name: str, num_qubits: int) -> np.ndarray:
     elif circ_name.startswith('QITE'):
         return generate_tfim_hamiltonian(num_qubits)
     elif ("Fermi" in circ_name or "H_" in circ_name):
+        # Remove _long from circ_name if it exists
+        circ_name = circ_name.replace("_long", "")
         return pickle.load(open(f"out_hamiltonians/{circ_name}.pkl", "rb"))
     else:
         return None
