@@ -127,8 +127,9 @@ def get_ensemble_workflow(circ_name: str, tol: float, extra: str = "") -> Workfl
 
     ntro = NumericalTReductionPass(
         full_loops=3,
-        success_threshold=err_thresh / 10,
-        use_calculated_error=True)
+        success_threshold=err_thresh / 30,
+        use_calculated_error=True
+    )
 
     extra_str = "_fw"
 
@@ -150,7 +151,6 @@ def get_ensemble_workflow(circ_name: str, tol: float, extra: str = "") -> Workfl
                                 default_passes=partitioner_passes),
         ForEachBlockPass(
             [
-                # TketPass(),
                 IfThenElsePass(
                     CountPredicate(),
                     synthesis_pass,

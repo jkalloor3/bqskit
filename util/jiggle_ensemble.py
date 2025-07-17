@@ -161,15 +161,13 @@ class  JiggleEnsemblePass(BasePass):
             num_u3s = circ.count(U3Gate())
             assert num_u3s == 0
             num_ggs = circ.count(GridSynthGate())
-            # print("Init Dist: ", dist, flush=True)
             if num_ggs == 0:
-                print("No RZs", circ.gate_counts, flush=True)
                 # Return a num x 1 array of zeros
                 all_data.append((None, None, {}))
                 continue
 
             if dist > success_threshold:
-                print("Dist greater than success threshold", flush=True)
+                # print("Dist greater than success threshold", flush=True)
                 all_data.append((None, None, {}))
                 continue
 
@@ -196,10 +194,18 @@ class  JiggleEnsemblePass(BasePass):
             total_cache = {}
             for op in circ.operations():
                 if isinstance(op.gate, GridSynthGate):
+                    # Fill up cache with orig params
+                    ind_orig = (op.params[0], int(op.params[1]))
+                    if ind_orig not in cache_to_save:
+                        cache_to_save[ind_orig] = get_approx_t_str(op.params[0], int(op.params[1]))
+
                     if len(gg_probs) < num_ggs:
                         angle = op.params[0]
                         gg_params, gg_strs, probs = total_cache.get(angle, get_rz_perturbations(angle, 
                                                                         int_perturb_dists[len(gg_param_options)]))
+                        
+                        if gg_params is None: # Bad Scaling Factor, don't use
+                            continue
                         
                         total_cache[angle] = (gg_params, gg_strs, probs)
                             
@@ -210,11 +216,6 @@ class  JiggleEnsemblePass(BasePass):
 
                         gg_param_options.append(gg_params)
                         gg_probs.append(probs)
-
-                    # Fill up cache with orig params as well
-                    ind_orig = (op.params[0], int(op.params[1]))
-                    if ind_orig not in cache_to_save:
-                        cache_to_save[ind_orig] = get_approx_t_str(op.params[0], int(op.params[1]))
 
             all_data.append((gg_param_options, gg_probs, cache_to_save))
 
@@ -325,7 +326,7 @@ class  JiggleEnsemblePass(BasePass):
             empty_params = np.vstack([circ.params] * (num * 2))
             return empty_params
         if dist > success_threshold:
-            print("Dist is too high!", dist, success_threshold, flush=True)
+            # print("Dist is too high!", dist, success_threshold, flush=True)
             # empty_params = np.zeros((num * 2, circ.num_params))
             # empty_params = np.vstack([circ.params] * (num * 2))
             # return 
@@ -445,6 +446,7 @@ class  JiggleEnsemblePass(BasePass):
                                       GridSynthGate(), op.location, gg_params)
                 elif isinstance(op.gate, U3Gate):
                     # if all the params are 0, then remove the gate
+                    # print("U3 Gate with params: ", op.params, flush=True)
                     if np.allclose(op.params, [0, 0, 0]):
                         pts_to_remove.append(CircuitPoint(cycle, op.location[0]))
                 elif isinstance(op.gate, IdentityGate):
@@ -494,7 +496,6 @@ class  JiggleEnsemblePass(BasePass):
                                                       extra=self.checkpoint_extra_str)
 
         if start_ens_ind >= NUM_ENSEMBLES:
-            print("Finished Jiggle Ensemble Pass", flush=True)
             return
         
         # Jiggle the rest of the ensembles
@@ -504,28 +505,19 @@ class  JiggleEnsemblePass(BasePass):
         else:
             success_threshold = self.success_threshold
 
-        futs = []
-        start = time.time()
         for ens_ind in range(start_ens_ind, NUM_ENSEMBLES):
             ens_file = ensemble_file_name.format(ind=ens_ind, 
                                                  extra=self.checkpoint_extra_str)
-            print("Loading Ensemble", ens_file, flush=True)
-            load_start = time.time()
             circuit_strs = load_ensemble_strs(ens_file)
-            load_time = time.time() - load_start
-            print("Number of Circuits", len(circuit_strs), load_time, flush=True)
 
             if len(circuit_strs) == 0:
                 continue
             
-            mod_start = time.time()
             circuit_strs = await get_runtime().map(JiggleEnsemblePass.get_final_circ, 
                                                circuit_strs,
                                                do_flood_circ=self.do_flood_circ,
                                                success_threshold=success_threshold,
                                                count_t=self.count_t)
-            mod_time = time.time() - mod_start
-            print("Modified Circuits", mod_time, flush=True)
 
             '''Get a list of params and caches for each circuit'''
             all_params_caches = await get_runtime().map(JiggleEnsemblePass.single_jiggle_ham, 
@@ -537,21 +529,13 @@ class  JiggleEnsemblePass(BasePass):
             all_caches = [p[1] for p in all_params_caches]
 
             ens_file = ensemble_file_name.format(ind=ens_ind, extra=self.checkpoint_extra_str)
-            store_start = time.time()
             store_ensemble_strs(circuit_strs, ens_file)
-            print("Finished Jiggling Ensemble", flush=True)
-            print("Total Bytes", sum(p.nbytes for p in all_params) / 1024 / 1024 / 1024, flush=True)
-            del circuit_strs
-            store_time = time.time() - store_start
             jiggle_file = jiggle_file_name.format(ind=ens_ind, extra=self.checkpoint_extra_str)
             store_params(all_params, jiggle_file)
             cache_file = os.path.join(checkpoint_dir, f"ensemble_{ens_ind}_cache_{self.checkpoint_extra_str}.pkl")
             # store_caches(all_caches, jiggle_file)
             pickle.dump(all_caches, open(cache_file, "wb"))
-            print("Stored Ensemble", store_time, flush=True)
 
-        total_time = time.time() - start
-        print("Total Time for Jiggling Params: ", total_time, flush=True)
 
 
     async def run_scan_sols(self, circuit: Circuit, data: PassData) -> None:
@@ -563,8 +547,6 @@ class  JiggleEnsemblePass(BasePass):
             return
 
         checkpoint_dir = data["checkpoint_dir"]
-        print("Checkpoint Dir: ", checkpoint_dir, flush=True)
-        print("Starting JIGGLE ENSEMBLE", flush=True)
         ensemble_file_name = os.path.join(checkpoint_dir, "ensemble_{ind}_{extra}.qasms")
         jiggle_file_name = os.path.join(checkpoint_dir, "ensemble_{ind}_jiggles_{extra}.npy")
         probs_file_name = os.path.join(checkpoint_dir, "ensemble_{ind}_probs_{extra}.npy")
@@ -576,10 +558,6 @@ class  JiggleEnsemblePass(BasePass):
         cache_file = cache_file_name.format(ind=0, extra=self.checkpoint_extra_str)
 
         if os.path.exists(cache_file):
-            num_circs = calc_num_circs(jiggle_file)
-            # if num_circs > 1000:
-            print(f"Already have {num_circs} circuits in ensemble, " \
-            "skipping Jiggle Ensemble Pass", flush=True)
             return
                 
         Path(ens_file).parent.mkdir(parents=True, exist_ok=True)
@@ -628,7 +606,6 @@ class  JiggleEnsemblePass(BasePass):
             )
             all_params = [p[0] for p in final_param_probs]
             all_probs = [p[1] for p in final_param_probs]
-            print("Storing Cache", cache_file, flush=True)
             pickle.dump(all_caches, open(cache_file, "wb"))
         else:
             all_params = await get_runtime().map(JiggleEnsemblePass.single_jiggle_ham, 
@@ -643,7 +620,6 @@ class  JiggleEnsemblePass(BasePass):
             store_params(all_params, jiggle_file)
         store_ensemble_strs(circuit_strs, ens_file)
         store_probs(all_probs, probs_file)
-        print("Finished Jiggling Ensemble", flush=True)
 
         if self.pass_ensemble:
             # Calculate ensemble
@@ -657,7 +633,6 @@ class  JiggleEnsemblePass(BasePass):
             await self.run_ensemble(circuit, data)
         elif self.use_scan_sols:
             # Run the jiggle pass on the circuit
-            print("Running Jiggle Ensemble Pass on Scan Sols", flush=True)
             await self.run_scan_sols(circuit, data)
         else:
             pass

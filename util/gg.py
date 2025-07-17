@@ -18,7 +18,7 @@ from bqskit.qis.pauli import PauliMatrices
 from pyLIQTR.gate_decomp.gate_approximation import approximate_rz_direct
 
 from .fix_global_phase import fix_phase
-from .distance import gp_frobenius_cost
+from .distance import gp_frobenius_cost, get_corrected_un
 from fractions import Fraction
 from bqskit.runtime import get_runtime
 
@@ -162,6 +162,29 @@ def get_rz_perturbations(starting_angle,
     probs = [p1, p2] * 2
     final_params.append([starting_angle, epsilon, 1])
     final_params.append([starting_angle + delta, epsilon, 1])
+
+    # Calculate scaling factor
+    U_3 = ZGate().get_unitary() @ U_1 @ ZGate().get_unitary()
+    U_4 = ZGate().get_unitary() @ U_2 @ ZGate().get_unitary()
+    # Now fix phase and add
+    U_1 = get_corrected_un(U_1, V)
+    U_2 = get_corrected_un(U_2, V)
+    U_3 = get_corrected_un(U_3, V)
+    U_4 = get_corrected_un(U_4, V)
+
+    avg_U = np.average([U_1, U_2, U_3, U_4], axis=0, weights=probs)
+    avg_U_dist = gp_frobenius_cost(avg_U, V)
+    dists = [gp_frobenius_cost(U_1, V),
+             gp_frobenius_cost(U_2, V),
+             gp_frobenius_cost(U_3, V),
+             gp_frobenius_cost(U_4, V)]
+    avg_dist = np.average(dists, weights=probs)
+    scaling_factor = avg_U_dist / (avg_dist ** 2)
+    
+    if scaling_factor > 10:
+        print("Scaling factor too high, returning empty lists.")
+        return None, None, None
+
     return final_params, final_strs, probs
 
 class GridSynthGate(QubitGate, CachedClass):

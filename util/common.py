@@ -17,7 +17,7 @@ from bqskit.utils.math import unitary_log_no_i
 
 from .gg import gg_gate_def, GridSynthGate
 
-base_bqskit_dir = "/pscratch/sd/j/jkalloor/bqskit"
+base_bqskit_dir = "/home/jkalloor/bqskit"
 good_block_dir = f"{base_bqskit_dir}/good_blocks"
 bad_block_dir = f"{base_bqskit_dir}/bad_blocks"
 base_checkpoint_dir = f"{base_bqskit_dir}/block_checkpoints_final_paper"
@@ -111,22 +111,15 @@ def create_uns(circ_data: tuple[str, np.ndarray, np.ndarray, dict],
     return all_uns
 
 
-def create_avg_utry(circ_params: tuple[Circuit, np.ndarray, dict], 
+def create_avg_utry(circ_params: tuple[Circuit, np.ndarray, np.ndarray, dict], 
                     target: UnitaryMatrix,  
                     add_cost: bool = False) -> UnitaryMatrix | tuple[UnitaryMatrix, 
                                                                      float]:
     circ, params, probs, cache = circ_params
 
     if len(params) == 0:
-        new_circ = circ.copy()
-        fix_phase(new_circ, target)
-        un = new_circ.get_unitary()
-        if add_cost:
-            avg_dist = normalized_frob_cost(un, target)
-            avg_hs = hs_cost(un, target)
-            return (un, avg_dist, avg_hs)
-        else:
-            return un
+        # Return empty unitary if no params
+        return np.zeros_like(circ.get_unitary())
 
     if cache is not None:
         # Get the worker cache
@@ -171,8 +164,9 @@ def get_unitary(circ: Circuit, target: UnitaryMatrix) -> tuple[UnitaryMatrix, fl
 
 def create_jiggled_unitaries(circ_params: tuple[Circuit, np.ndarray, np.ndarray, dict], 
                                    target: UnitaryMatrix = None,
+                                   drop_zeros: bool = True,
                                    add_cost: bool = True) -> np.ndarray[np.complex128] | list[tuple[UnitaryMatrix, float]]:
-    circ, params, _,  cache = circ_params
+    circ, params, probs,  cache = circ_params
     if cache is not None:
         # Get the worker cache if exists
         try:
@@ -183,7 +177,10 @@ def create_jiggled_unitaries(circ_params: tuple[Circuit, np.ndarray, np.ndarray,
             pass
     ens = []
     correct = target is not None
-    for param in params.tolist():
+    for i, param in enumerate(params.tolist()):
+        if np.allclose(probs[i], 0) and drop_zeros:
+            # Skip this parameter if the probability is 0
+            continue
         utry = circ.get_unitary(param)
         if correct:
             gp_correction = target.get_target_correction_factor(utry)
