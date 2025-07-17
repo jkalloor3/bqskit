@@ -32,7 +32,7 @@ from util import get_block_names, load_block
 
 class CountPredicate(PassPredicate):
     def get_truth_value(self, circuit, data):
-        return circuit.count(CNOTGate()) < 25
+        return circuit.count(CNOTGate()) < 30
 
 good_instantiation_options = {
     'multistarts': 8,

@@ -28,6 +28,15 @@ def get_obs(dm: np.ndarray, ham: np.ndarray) -> float:
     '''
     return np.real(np.trace(ham @ dm))
 
+def get_final_dm_input(un: UnitaryMatrix, sv_in: StateVector) -> np.ndarray:
+    '''
+    Get the final density matrix for a circuit.
+    '''
+    sv = StateVector(sv_in.numpy)
+    sv.apply(un, list(range(un.num_qudits)))
+    dm =  get_density_matrix(sv.numpy)
+    return dm
+
 
 def get_final_dm(un: UnitaryMatrix) -> np.ndarray:
     '''
@@ -39,14 +48,13 @@ def get_final_dm(un: UnitaryMatrix) -> np.ndarray:
     dm =  get_density_matrix(sv.numpy)
     return dm
 
-def get_final_dms(un: UnitaryMatrix) -> list[np.ndarray]:
+def get_final_dms(un: UnitaryMatrix, rand_svs: list[StateVector]) -> list[np.ndarray]:
     '''
     Get the final density matrix for a circuit.
     '''
-    np.random.seed(42)
     final_dms = []
-    for _ in range(20):
-        sv = StateVector.random(un.num_qudits)
+    for rand_sv in rand_svs:
+        sv = StateVector(rand_sv.numpy)
         sv.apply(un, list(range(un.num_qudits)))
         dm =  get_density_matrix(sv.numpy)
         final_dms.append(dm)
@@ -109,21 +117,26 @@ def get_sub_block_count(large_block_dir: str,
 
 def get_file_names(large_checkpoint_dir, 
                    small_block_num: str) -> tuple[str, str, str, str, str]:
-    checkpoint_dir = os.path.join(large_checkpoint_dir, f"block_{small_block_num}")
-    ensemble_file_name = os.path.join(checkpoint_dir, "ensemble_{ind}_{extra}.qasms")
-    jiggle_file_name = os.path.join(checkpoint_dir, "ensemble_{ind}_jiggles_{extra}.npy")
-    cache_file_name = os.path.join(checkpoint_dir, "ensemble_{ind}_cache_{extra}.pkl")
-    extra_str = "_fw"
-    csv_file = os.path.join(large_checkpoint_dir, 
-                                 f"block_{small_block_num}{extra_str}.csv")
+    small_checkpoint_dir = os.path.join(large_checkpoint_dir, f"block_{small_block_num}")
+    # Try outputs of newest passes
+    final_probs_file = os.path.join(small_checkpoint_dir, "ensemble_final_probs_fw.npy")
+    if os.path.exists(final_probs_file):
+        ensemble_file = os.path.join(small_checkpoint_dir, "ensemble_final_fw.qasms")
+        jiggle_file = os.path.join(small_checkpoint_dir, "ensemble_final_jiggle_fw.npy")
+        cache_file = os.path.join(small_checkpoint_dir, "ensemble_final_cache_fw.pkl")
+        csv_file = os.path.join(large_checkpoint_dir, f"block_{small_block_num}_fw.csv")
+        return ensemble_file, jiggle_file, final_probs_file, cache_file, csv_file
+    
+    # Otherwise, we do not have the newest set of files, so return the old ones
+    csv_file = os.path.join(large_checkpoint_dir,
+                             f"block_{small_block_num}_fw.csv")
     if not os.path.exists(csv_file):
         csv_file = os.path.join(large_checkpoint_dir, 
                                  f"block_{small_block_num}.csv")
-    ind = 0
-    ensemble_file = ensemble_file_name.format(ind=ind, extra=extra_str)
-    jiggle_file = jiggle_file_name.format(ind=ind, extra=extra_str)
-    probs_file = f"{checkpoint_dir}/ensemble_final_probs_{extra_str}.npy"
-    cache_file = cache_file_name.format(ind=ind, extra=extra_str)
+    ensemble_file = os.path.join(small_checkpoint_dir, "ensemble_0__fw.qasms")
+    jiggle_file = os.path.join(small_checkpoint_dir, "ensemble_0_jiggles__fw.npy")
+    probs_file = os.path.join(small_checkpoint_dir, "ensemble_0_probs__fw.npy")
+    cache_file = os.path.join(small_checkpoint_dir, "ensemble_0_cache__fw.pkl")
     return ensemble_file, jiggle_file, probs_file, cache_file, csv_file
 
 
@@ -135,7 +148,8 @@ class UnitaryDMEvaluator(BasePass):
                  checkpoint_form: str = "",
                  partitioned_circ_file: str = "",
                  save_dir = "",
-                 cliff_t: bool = False) -> None:
+                 cliff_t: bool = False,
+                 init_sv: StateVector = None) -> None:
         self.max_tol = max_tol
         self.circ_name = circ_name
         self.partitioned_data = partitioned_data
@@ -145,7 +159,7 @@ class UnitaryDMEvaluator(BasePass):
         self.checkpoint_form = checkpoint_form
         self.cliff_t = cliff_t
         self.num_good_blocks = self.calculate_good_blocks()
-
+        self.init_sv = init_sv
     @staticmethod
     def generate_circ_unitary(large_block_gates: dict[str, ConstantUnitaryGate],
                                 partitioned_circ: Circuit) -> UnitaryMatrix:
@@ -342,47 +356,12 @@ class UnitaryDMEvaluator(BasePass):
             partitioned_circ=partitioned_circ
         )
         print(f"Generated full unitary for {self.circ_name} with shape {full_un.shape}", flush=True)
-        # print(f"Generating example unitaries for {self.circ_name} with {len(all_block_samples)} samples", flush=True)
-        # example_uns = await get_runtime().map(
-        #     UnitaryDMEvaluator.generate_circ_unitary,
-        #     all_block_samples,
-        #     partitioned_circ=partitioned_circ
-        # )
-        # example_uns = [
-        #     UnitaryDMEvaluator.generate_circ_unitary(
-        #         large_block_gates=sample,
-        #         partitioned_circ=partitioned_circ
-        #     ) for sample in all_block_samples
-        # ]
-
-        # print(f"Generated {len(example_uns)} example unitaries for {self.circ_name}", flush=True)
-
-        # example_dms = await get_runtime().map(
-        #     get_final_dm, example_uns
-        # )
         if self.ham is None:
-            full_dms = get_final_dms(full_un)
-            # example_dms = [get_final_dms(un) for un in example_uns]
+            full_dms = get_final_dms(full_un, self.rand_svs)
             ensemble_mag = np.max(trace_distances(full_dms, self.target_dms))
-            # example_mags = []
-            # for i, dms in enumerate(example_dms):
-            #     example_mags.append(np.max(trace_distances(dms, self.target_dms)))
-            # example_mags = await get_runtime().map(
-            #     trace_distances, example_dms,
-            #     target_dms=self.target_dms
-            # )
-            # example_mags = [np.max(mags) for mags in example_mags]
-            # example_mags = []
         else:
-            # example_dms = [get_final_dm(un) for un in example_uns]
-            dm = get_final_dm(full_un)
-            ensemble_mag = get_obs(dm, self.ham)
-            # example_mags = await get_runtime().map(
-            #     get_obs, example_dms, 
-            #     ham=self.ham
-            # )
-            # example_mags = [get_obs(dm, self.ham) for dm in example_dms]
-            # example_mags = []
+            dm = get_final_dm_input(full_un, self.init_sv)
+            ensemble_mag = get_obs(dm, self.ham) - self.obs
 
         print(f"Ensemble Values for full circ: {ensemble_mag, 10 ** (-1 * self.max_tol)}", flush=True)
         Path(ens_data_file).parent.mkdir(parents=True, exist_ok=True)
@@ -391,7 +370,12 @@ class UnitaryDMEvaluator(BasePass):
 
     async def run(self, circ: Circuit, data: PassData) -> None:
         np.set_printoptions(precision=2, threshold=np.inf, linewidth=np.inf)
-        self.target_dm = get_final_dm(circ.get_unitary())
-        self.target_dms = get_final_dms(circ.get_unitary())
-        
+        self.rand_svs = [StateVector.random(circ.num_qudits) for _ in range(20)]
+        if self.init_sv is None:
+            self.init_sv = self.rand_svs[0]
+        self.target_dm = get_final_dm_input(circ.get_unitary(), self.init_sv)
+        self.target_dms = get_final_dms(circ.get_unitary(), self.rand_svs)
+        if self.ham is not None:
+            self.obs = get_obs(self.target_dm, self.ham)
+
         await self.run_full_ensemble()

@@ -36,3 +36,4 @@ from .noise_model import *
 from .unitary_dm_pass import *
 from .plot_lib import *
 from .hamiltonian import *
+from .samplers import EnsembleSampler

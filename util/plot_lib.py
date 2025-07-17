@@ -41,7 +41,7 @@ benchmark_labels = {
     "QITE_8_4": "QITE - 8q",
     "QITE_8_5": "QITE - 8q",
     "QITE_8_6": "QITE - 8q",
-    "FermiHubbard2x2_fh": "Fermi Hubbard - 2x2",
+    "FermiHubbard2x2_fh": "Fermi Hubbard - 2x2 - 8q",
 }
 
 benchmarks = list(benchmark_labels.keys())
@@ -174,8 +174,9 @@ def plot_error_violins(circ_data: dict, axs: plt.Axes, color: str,
 
 def plot_dm_data(circ_names: list[str],
                  axs: plt.Axes, 
-                 folder_form="ensemble_dms_{circ_name}",
-                 y_label: str = "Trace Distance of Channel"):
+                 folder_form="ensemble_dms_{circ_name}_rand",
+                 y_label: str = "Trace Distance of Channel",
+                 diff: bool = False):
     """
     Plot density matrix data for a list of circuits.
 
@@ -196,9 +197,11 @@ def plot_dm_data(circ_names: list[str],
         pickle_files = glob.glob(os.path.join(folder, '*.pkl'))
         x_vals = []
         y_vals = []
-        full_circ = load_circuit(circ_name)
+        full_circ = load_circuit(circ_name, opt=True)
         full_circ.remove_all_measurements()
-        ham = generate_hamiltonian(circ_name, full_circ.num_qudits)
+        ham = None
+        if diff:
+            ham = generate_hamiltonian(circ_name, full_circ.num_qudits)
 
         if ham is not None:
             state = np.zeros(2 ** full_circ.num_qudits)
@@ -218,7 +221,7 @@ def plot_dm_data(circ_names: list[str],
                 x = (10 ** (-tol))
                 x_vals.append(x)
                 if ham is None:
-                    y_vals.append(y)
+                    y_vals.append(np.abs(y))
                 else:
                     # Plot Difference from true value
                     y_vals.append(np.abs(true_val - y))
@@ -234,9 +237,8 @@ def plot_dm_data(circ_names: list[str],
     axs.grid(True, which='both', linestyle='--', linewidth=0.5)
 
 
-def plot_tvd_convergence(circ_name: str,
-                         axs: plt.Axes,
-                         noisy: bool = False):
+def plot_td_convergence(circ_name: str,
+                         axs: plt.Axes):
     """
     Plot trace distance convergence for a given circuit.
 
@@ -246,43 +248,43 @@ def plot_tvd_convergence(circ_name: str,
     y_label: Label for the y-axis.
     x_label: Label for the x-axis.
     """
-    base_dir = "ensemble_tvds"
-    ensemble_sizes = [1, 10, 100, 1000, 10000]
-    if noisy:
-        extra = "_noisy"
-        base_file = os.path.join(base_dir, f"{circ_name}_base_noisy.pkl")
-        base_val = pickle.load(open(base_file, 'rb')) if os.path.exists(base_file) else None
-    else:
-        extra = ""
-    files = [os.path.join(base_dir, f"{circ_name}_{size}{extra}.pkl") for size in ensemble_sizes]
+    base_dir = "ensemble_td_convergences_new"
+    full_form = os.path.join(base_dir, f"{circ_name}_*_*.pkl")
 
+    all_files = glob.glob(full_form)
 
-    all_data = [pickle.load(open(file, 'rb')) for file in files if os.path.exists(file)]
-    
-    y_vals = []
-    min_vals = []
-    max_vals = []
-    for tvd_data in all_data:
-        # Keep track of min, max and avg
-        min_tvd = min(tvd_data)
-        max_tvd = max(tvd_data)
-        avg_tvd = np.mean(tvd_data)
-        y_vals.append(avg_tvd)
-        min_vals.append(min_tvd)
-        max_vals.append(max_tvd)
+    # Now for each tol, keep track of the data
+    all_data = {}
+    for file in all_files:
+        base_file = os.path.basename(file)
+        parts = base_file.split('_')
+        tol = float(parts[-1].split('.')[0])  # Last part is tol
+        num_samples = int(parts[-2])  # Second last part is num_samples
+        if tol not in all_data:
+            all_data[tol] = {}
+        all_data[tol][num_samples] = pickle.load(open(file, 'rb'))
 
-    axs.plot(ensemble_sizes, y_vals, label=benchmark_labels.get(circ_name, circ_name),
-                color=benchmark_colors.get(circ_name, "black"))
-    axs.fill_between(ensemble_sizes, min_vals, max_vals, color=benchmark_colors.get(circ_name, "black"), alpha=0.2)
+    # Now plot each tol data in a separate line
+    colors = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd', '#8c564b']
+    for tol, data in all_data.items():
+        sample_sizes = sorted(data.keys())
+        y_vals = [np.mean(data[size]) for size in sample_sizes]
+        min_vals = [np.min(data[size]) for size in sample_sizes]
+        max_vals = [np.max(data[size]) for size in sample_sizes]
 
-    
-    if noisy:
-        # Plot base value as black dashed line
-        axs.axhline(base_val, color='black', linestyle='--', label='Full Circuit')
+        color =  colors[int(tol) % len(colors)]
+
+        exponent = -int(tol)
+        label = f"Eps: $10^{{{exponent}}}$"
+        axs.plot(sample_sizes, y_vals, label=label,color=color)
+        axs.fill_between(sample_sizes, min_vals, max_vals,
+                         color=color, alpha=0.2)
+        # Plot a horizontal dotted line at 10 ** (-2 * tol)
+        axs.axhline(y=10 ** (-2 * tol), color=color, linestyle='--', linewidth=2)
 
     axs.set_xlabel("Number of Samples")
-    axs.set_ylabel("Total Variational Distance")
+    axs.set_ylabel("Trace Distance")
     axs.set_yscale('log')
-    axs.set_xscale('log')
+    # axs.set_xscale('log')
     axs.legend()
     axs.grid(True, which='both', linestyle='--', linewidth=0.5)

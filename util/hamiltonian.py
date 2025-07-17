@@ -1,4 +1,5 @@
 from qiskit.quantum_info import SparsePauliOp
+from bqskit.qis import StateVector
 import numpy as np
 import pickle
 
@@ -91,6 +92,29 @@ def generate_tfim_hamiltonian(num_qubits: int) -> np.ndarray:
     op = SparsePauliOp.from_list(He + Hb)
     return op.to_matrix()
 
+def generate_heisenberg_hamiltonian(num_qubits: int) -> np.ndarray:
+    '''
+    Heisenberg Hamiltonian:
+    H = J * sum_{i=0}^{N-2} (X_i X_{i+1} + Y_i Y_{i+1} + Z_i Z_{i+1})
+    '''
+
+    J = 1.0
+    He = []
+    
+    for i in range(num_qubits - 1):
+        XX_term = ("I" * i + "XX" + "I" * (num_qubits - i - 2), J)
+        YY_term = ("I" * i + "YY" + "I" * (num_qubits - i - 2), J)
+        ZZ_term = ("I" * i + "ZZ" + "I" * (num_qubits - i - 2), J)
+        He.extend([XX_term, YY_term, ZZ_term])
+
+    # Add a Z term to all qubits
+    for i in range(num_qubits):
+        Z_term = ("I" * i + "Z" + "I" * (num_qubits - i - 1), J)
+        He.append(Z_term)
+
+    op = SparsePauliOp.from_list(He)
+    return op.to_matrix()
+
 def generate_hamiltonian(circ_name: str, num_qubits: int) -> np.ndarray:
     '''
     Generate the Hamiltonian for a given circuit name.
@@ -99,7 +123,36 @@ def generate_hamiltonian(circ_name: str, num_qubits: int) -> np.ndarray:
         return generate_lgt_hamiltonian(num_qubits, 2)
     elif circ_name.startswith('QITE'):
         return generate_tfim_hamiltonian(num_qubits)
+    elif circ_name.startswith('heisenberg'):
+        return generate_heisenberg_hamiltonian(num_qubits)
     elif ("Fermi" in circ_name or "H_" in circ_name):
+        circ_name = circ_name.replace("_long", "")
+        # return generate_tfim_hamiltonian(num_qubits)
         return pickle.load(open(f"out_hamiltonians/{circ_name}.pkl", "rb"))
+    else:
+        return None
+
+def get_lgt_init_state(num_qubits: int) -> StateVector:
+    '''
+    Generate the initial state vector for LGT circuits.
+    '''
+    # TODO: Fix this once Mohan provides the correct initial state
+    return StateVector.zero(num_qubits)
+
+def generate_init_state(circ_name: str, num_qubits: int) -> StateVector:
+    '''
+    Generate the initial state vector for a given circuit name.
+    '''
+    if circ_name.startswith('lgt'):
+        return get_lgt_init_state(num_qubits)
+    elif circ_name.startswith('QITE'):
+        return StateVector.zero(num_qubits)
+    elif circ_name.startswith('heisenberg'):
+        return StateVector.zero(num_qubits)
+    elif ("Fermi" in circ_name or "H_" in circ_name):
+        # LiH, H_2, H_2O etc.
+        circ_name = circ_name.replace("_long", "")
+        # return generate_tfim_hamiltonian(num_qubits)
+        return StateVector(pickle.load(open(f"initial_states/{circ_name}.pkl", "rb")))
     else:
         return None

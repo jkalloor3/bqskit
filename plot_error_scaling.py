@@ -356,14 +356,14 @@ if __name__ == '__main__':
     else:
         circs = all_circs
         output_cx = True
-    cliff_t = False
+    cliff_t = True
 
     if not cliff_t:
         small_block_checkpoints_dir_1 = f"small_block_checkpoints_final_paper_4_more_cx_tket"
         small_block_checkpoints_dir_2 = f"small_block_checkpoints_final_paper_4_tket"
     else:
-        small_block_checkpoints_dir_1 = None
-        small_block_checkpoints_dir_2 = f"small_block_checkpoints_final_paper_4_clifft_tket"
+        small_block_checkpoints_dir_1 = f"small_block_checkpoints_final_paper_4_clifft_tket"
+        small_block_checkpoints_dir_2 = f"small_block_checkpoints_final_paper_4_clifft_less_t_tket"
 
 
     good_ratio_data = read_data_from_folders(circs, small_block_checkpoints_dir_2, small_block=use_small_block)
