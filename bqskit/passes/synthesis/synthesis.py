@@ -49,4 +49,13 @@ class SynthesisPass(BasePass):
 
     async def run(self, circuit: Circuit, data: PassData) -> None:
         """Perform the pass's operation, see :class:`BasePass` for more."""
-        circuit.become(await self.synthesize(data.target, data))
+        if data.get("run_ensemble", False):
+            # If we are running in ensemble mode, we need to synthesize
+            # the circuit for each input circuit.
+            new_ensemble_circs = []
+            cur_ensemble_circs: list[Circuit] = data.get("ensemble_circuits", [circuit])
+            for circ in cur_ensemble_circs:
+                new_ensemble_circs.extend(await self.synthesize(circ.get_unitary(), data))
+            data["ensemble_circuits"] = new_ensemble_circs
+        else:
+            circuit.become(await self.synthesize(data.target, data))

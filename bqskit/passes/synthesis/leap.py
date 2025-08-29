@@ -48,7 +48,7 @@ class LEAPSynthesisPass(SynthesisPass):
         max_layer: int | None = None,
         no_progress_layers_allowed: int = 10,
         store_partial_solutions: bool = False,
-        partials_per_depth: int = 25,
+        max_solutions: int = 1,
         min_prefix_size: int = 3,
         instantiate_options: dict[str, Any] = {},
     ) -> None:
@@ -85,9 +85,9 @@ class LEAPSynthesisPass(SynthesisPass):
             store_partial_solutions (bool): Whether to store partial solutions
                 at different depths inside of the data dict. (Default: False)
 
-            partials_per_depth (int): The maximum number of partials
-                to store per search depth. No effect if
-                `store_partial_solutions` is False. (Default: 25)
+            max_solutions (int): The maximum number of solutions
+                to store. If using QUEst, this will be the maximum number of
+                partial solutions per depth. (Default: 1)
 
             min_prefix_size (int): The minimum number of layers needed
                 to prefix the circuit.
@@ -163,7 +163,7 @@ class LEAPSynthesisPass(SynthesisPass):
         }
         self.instantiate_options.update(instantiate_options)
         self.store_partial_solutions = store_partial_solutions
-        self.partials_per_depth = partials_per_depth
+        self.max_solutions = max_solutions
 
     async def synthesize(
         self,
@@ -182,7 +182,9 @@ class LEAPSynthesisPass(SynthesisPass):
         layer_gen = self._get_layer_gen(data)
 
         # Begin the search with an initial layer
-        frontier = Frontier(utry, self.heuristic_function)
+        frontier = Frontier(utry, self.heuristic_function,
+                            max_solutions=self.max_solutions,
+                            success_threshold=self.success_threshold)
         initial_layer = layer_gen.gen_initial_layer(utry, data)
         initial_layer.instantiate(utry, **instantiate_options)
         frontier.add(initial_layer, 0)
@@ -195,22 +197,19 @@ class LEAPSynthesisPass(SynthesisPass):
         best_layers = [0]
         last_prefix_layer = 0
 
-        # Track partial solutions
-        psols: dict[int, list[tuple[Circuit, float]]] = {}
-
         _logger.debug(f'Search started, initial layer has cost: {best_dist}.')
 
         # Evalute initial layer
         if best_dist < self.success_threshold:
             _logger.debug('Successful synthesis with 0 layers.')
-            return initial_layer
-
+            frontier.add_solution(initial_layer)
+            
         # Record layers that have been warned about
         # to avoid duplicate warnings
         warned_layers: list[int] = []
 
         # Main loop
-        while not frontier.empty():
+        while frontier.should_continue():
             top_circuit, layer = frontier.pop()
 
             # Generate successors
@@ -230,14 +229,7 @@ class LEAPSynthesisPass(SynthesisPass):
             # Evaluate successors
             for circuit in circuits:
                 dist = self.cost.calc_cost(circuit, utry)
-
-                if dist < self.success_threshold:
-                    _logger.debug(
-                        f'Successful synthesis with {layer + 1} layers.',
-                    )
-                    if self.store_partial_solutions:
-                        data['psols'] = psols
-                    return circuit
+                frontier.add_solution(circuit, dist)
 
                 if self.check_new_best(layer + 1, dist, best_layer, best_dist):
                     plural = '' if layer == 0 else 's'
@@ -263,14 +255,7 @@ class LEAPSynthesisPass(SynthesisPass):
                             frontier.add(circuit, layer + 1)
 
                 if self.store_partial_solutions:
-                    if layer not in psols:
-                        psols[layer] = []
-
-                    psols[layer].append((circuit.copy(), dist))
-
-                    if len(psols[layer]) > self.partials_per_depth:
-                        psols[layer].sort(key=lambda x: x[1])
-                        del psols[layer][-1]
+                    frontier.add_partial_solution(circuit, layer, dist)
 
                 if self.max_layer is None or layer + 1 < self.max_layer:
                     frontier.add(circuit, layer + 1)
@@ -293,9 +278,9 @@ class LEAPSynthesisPass(SynthesisPass):
             % (best_layer, '' if best_layer == 1 else 's', best_dist),
         )
         if self.store_partial_solutions:
-            data['psols'] = psols
+            data['psols'] = frontier.psols
 
-        return best_circ
+        return frontier.final_solution(default=circuit)
 
     def check_new_best(
         self,

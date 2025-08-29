@@ -28,6 +28,8 @@ class Frontier:
         self,
         target: UnitaryMatrix | StateVector | StateSystem,
         heuristic_function: HeuristicFunction,
+        max_solutions: int = 1,
+        success_threshold: float = 1e-8
     ) -> None:
         """
         Construct an empty frontier.
@@ -38,6 +40,12 @@ class Frontier:
 
             heuristic_function (HeuristicFunction): The heuristic used
                 to sort the Frontier.
+
+            max_solutions (int): The maximum number of solutions to store.
+
+            success_threshold (float): The threshold for considering a
+            solution successful.
+
         """
 
         if not isinstance(target, (UnitaryMatrix, StateVector, StateSystem)):
@@ -55,6 +63,10 @@ class Frontier:
         self.heuristic_function = heuristic_function
         self._frontier: list[FrontierElement] = []
         self._counter = itertools.count()
+        self.solutions: list[Circuit] = []
+        self.max_solutions = max_solutions
+        self.psols: dict[int, list[tuple[Circuit, float]]] = {}
+        self.success_threshold = success_threshold
 
     def add(self, circuit: Circuit, extra_data: Any = None) -> None:
         """Add `circuit` into the frontier."""
@@ -71,7 +83,38 @@ class Frontier:
     def empty(self) -> bool:
         """Return true if the frontier is empty."""
         return len(self._frontier) == 0
+    
+    def should_continue(self) -> bool:
+        """We should continue if the number of solutions < max solutions
+        and we are not empty"""
+        return len(self.solutions) < self.max_solutions and not self.empty()
+
+    def add_solution(self, circuit: Circuit, dist: float) -> None:
+        """Add a solution to the frontier."""
+        if dist < self.success_threshold:
+            self.solutions.append(circuit)
+
+    def add_partial_solution(self, circuit: Circuit, layer: int, dist: float) -> None:
+        """Add a partial solution to the frontier."""
+        if layer not in self.psols:
+            self.psols[layer] = []
+
+        self.psols[layer].append((circuit.copy(), dist))
+
+        if len(self.psols[layer]) > self.max_solutions:
+            self.psols[layer].sort(key=lambda x: x[1])
+            del self.psols[layer][-1]
+
+    def final_solution(self, default: Circuit) -> Circuit | list[Circuit]:
+        """Return the best solution found or default."""
+        if len(self.solutions) == 0:
+            return default
+        if self.max_solutions == 1:
+            return self.solutions[0]
+        return self.solutions
 
     def clear(self) -> None:
         """Remove all elements from the frontier."""
         self._frontier.clear()
+        self.solutions.clear()
+        self.psols.clear()

@@ -249,6 +249,30 @@ class UnitaryMatrix(Unitary, StateVectorMap, NDArrayOperatorsMixin):
         dist = np.power(1 - (frac ** degree), 1.0 / degree)
         return dist if dist > 0.0 else 0.0
 
+    def get_frobenius_distance_from(self, other: UnitaryLike) -> float:
+        """
+        Return the Frobenius distance between `self` and `other`.
+
+        The Frobenius distance is given as:
+
+        .. math::
+
+            \\|U_1 - U_2\\|_F =  TODO: fill in
+
+        Args:
+            other (UnitaryLike): The unitary to measure distance from.
+
+        Returns:
+            float: A value between 2^n and 0, where 0 means the two unitaries
+            are equal (not global phase invariant)
+        """
+        other = UnitaryMatrix(other, check_arguments=False)
+        diff = self - other
+        # This is Frob(u - v)
+        inner = np.real(np.einsum("ij,ij->", diff, diff.conj()))
+        cost = np.sqrt(inner)
+        return cost
+
     def isclose(self, other: UnitaryLike, tol: float = 1e-6) -> bool:
         """
         Check if `self` is approximately equal to `other` upto global phase.
