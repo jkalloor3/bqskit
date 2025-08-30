@@ -3,76 +3,54 @@ from bqskit.ir import Circuit
 from bqskit.ir.gates import U3Gate, CNOTGate
 
 
-from bqskit.passes import LEAPSynthesisPass, UpdateDataPass
+from bqskit.passes import LEAPSynthesisPass, UpdateDataPass, ScanPartitioner, ForEachBlockPass, DiversifyEnsemblePass, GenerateProbabilitiesPass, BiasFilterPass, GenerateCircuitSamplerPass
 from bqskit.compiler import Compiler
 
-def calc_circ_obs(circ: Circuit) -> float:
-    # Dummy observable calculation function
-    # Replace with actual observable calculation logic
-    return np.random.rand()
-
-def run_circ(circ: Circuit) -> dict[str, int]:
-    # Dummy circuit execution function
-    # Replace with actual circuit execution logic
-    return {"0": np.random.randint(0, 100), "1": np.random.randint(0, 100)}
-
-def random_circuit(num_qubits: int, num_cnots: int) -> Circuit:
-    circ = Circuit(num_qubits)
-
-    for i in range(num_qubits):
-        circ.append_gate(U3Gate(), [i], np.random.rand(3) * 2 * np.pi)
-
-    for i in range(num_cnots):
-        q0 = np.random.randint(0, num_qubits)
-        q1 = q0
-        while q1 == q0:
-            q1 = np.random.randint(0, num_qubits)
-        circ.append_gate(CNOTGate(), [q0, q1])
-        circ.append_gate(U3Gate(), [q0], np.random.rand(3) * 2 * np.pi)
-        circ.append_gate(U3Gate(), [q1], np.random.rand(3) * 2 * np.pi)
-    return circ
-
-
 if __name__ == '__main__':
-    # Build a random circuit
-    circuit = random_circuit(3, 2)
-    print(circuit)
+    qasm_name = "qae_7"
+    input_circ = Circuit.from_file(qasm_name + '.qasm')
+    compiler = Compiler(num_workers=255)
 
-    compiler = Compiler(num_workers=2)
+    # Create a partitioned circuit
+    # When using bqskit `compile`, we use UpdateData to tell the compiler we
+    # want to compile an ensemble of solutions 
 
-    leap_pass = LEAPSynthesisPass(
-        success_threshold=1e-4,
-        max_solutions=10
-    )
+    # We are using block size 4 for better results. This will lead to longer run
+    # times
+    partitioned_circ, data = compiler.compile(input_circ, 
+                                        [
+                                        ScanPartitioner(4),
+                                        ForEachBlockPass([
+                                            UpdateDataPass("run_ensemble", True),
+                                            UpdateDataPass("ensemble_name", qasm_name),
+                                            LEAPSynthesisPass(
+                                                success_threshold=1e-3,
+                                                max_solutions=10,
+                                                max_layer=-1
+                                            ),
+                                            DiversifyEnsemblePass(success_threshold=2e-3),
+                                            GenerateProbabilitiesPass(),
+                                            BiasFilterPass(),
+                                            # GenerateCircuitSamplerPass(combine_sub_blocks=False)
+                                        ]),
+                                        # GenerateCircuitSamplerPass(combine_sub_blocks=True)
+                                        ], 
+                                        request_data=True)
 
-    set_data_pass = UpdateDataPass("run_ensemble", True)
+    num_partitions = partitioned_circ.num_operations
+    print("Split into ", num_partitions, " partitions.")
 
-    target = circuit.get_unitary()
+    # Print Num CNOTs per block
 
-    _, data = compiler.compile(circuit, [set_data_pass, leap_pass], request_data=True)
-
-    from bqskit.compiler import Compiler
-    # Set up circuit and compiler ...
-
-    # Create circuit sampler
-    circuit_sampler = compiler.compile_ensemble(circuit)
-
-    # Calculate probability distribution over
-    # randomly sampled channel
-    all_counts = {}
-    NUM_SAMPLES = 1000
-    for _ in range(NUM_SAMPLES):
-        next_circ = circuit_sampler.random_sample()
-        # Run circuit on HW and get counts
-        circ_counts = run_circ(next_circ)
-        all_counts.update(circ_counts)
+    for op in partitioned_circ.operations():
+        b_circ: Circuit = op.gate._circuit
+        print(b_circ.gate_counts)
 
 
+    all_block_data = data[ForEachBlockPass.key][-1]
 
-    # # print(len(data["ensemble_circuits"]))
-
-    # for circ in data["ensemble_circuits"]:
-    #     # print(circ.gate_counts)
-    #     new_un = circ.get_unitary()
-    #     dist = target.get_distance_from(new_un)
-    #     print(f'Distance: {dist}')
+    for i, b_data in enumerate(all_block_data):
+        # If ensemble circuits is still in data, we have succesfully
+        # generated a convex ensemble
+        if not b_data["use_ensemble"]:
+            print(f"Block {i} was filtered out. Defaulting to the original circuit.")

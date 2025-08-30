@@ -8,12 +8,14 @@ from bqskit.compiler.passdata import PassData
 
 from bqskit.qis.unitary import UnitaryMatrix
 import numpy as np
+import os
+import pickle
 from math import ceil
 
 import cvxpy as cp
 import cvxopt
 
-class GenerateProbabilityPass(BasePass):
+class GenerateProbabilitiesPass(BasePass):
     
     def __init__(self, 
                  max_qp_circs: int = 6000) -> None:
@@ -55,7 +57,7 @@ class GenerateProbabilityPass(BasePass):
             trials += 1
 
         if not isposdef:
-            print('H not positive definite by a lot! Returning uniform dist')
+            # print('H not positive definite by a lot! Returning uniform dist')
             return [1 / len(ensemble) for _ in ensemble]
         
         # Constraints, probabilities should sum to 1 and be between 0 and 1
@@ -123,16 +125,32 @@ class GenerateProbabilityPass(BasePass):
     ) -> None:
         # This pass should only be called if we are in ensemble mode
         assert "run_ensemble" in data and data["run_ensemble"] == True
+        leap_file = str(data["ensemble_name"]) + "_leap_" + str(data["index"]) + ".pkl"
+        circuits = pickle.load(open(leap_file, "rb"))
+        probs_file = str(data["ensemble_name"]) + "_probs_" + str(data["index"]) + ".pkl"
+        param_file = str(data["ensemble_name"]) + "_params_" + str(data["index"]) + ".pkl"
+
+
+
+        if os.path.exists(probs_file):
+            probs = pickle.load(open(probs_file, "rb"))
+            # print(len(probs))
+            # print(probs[0].shape, flush=True)
+            data["ensemble_probabilities"] = probs
+            return
 
         # Get ensemble circuits, params, and probabilities
-        circuits: list[Circuit] = data.get("ensemble_circuits", [])
-        params: np.ndarray[float] = data.get("ensemble_params", [])
-        init_probs: np.ndarray[float] = data.get("ensemble_probabilities", [])
+        circuits: list[Circuit] = pickle.load(open(leap_file, "rb"))
+        params: np.ndarray[float] = pickle.load(open(param_file, "rb"))
+        init_probs: np.ndarray[float] = [np.ones((p.shape[0], )) / p.shape[0] for p in params]
+
+        final_probs_3 = init_probs.copy()
+        final_probs_3 /= np.sum(final_probs_3)
 
         # We have a list of M circuits, each with N unique parameters.
         # Our final probability distribution will be over all M*N circuits.
         M = len(circuits)
-        N = params.shape[1]
+        N = params[0].shape[0]
 
         # We are using an iterative quadratic solver (Frank-Wolf) which takes in
         # an initial probability. For each set of N parameters, we have an 
@@ -144,13 +162,16 @@ class GenerateProbabilityPass(BasePass):
         # will be the original M circuits with their corresponding parameters.
         orig_unitaries = np.array([c.get_unitary() for c in circuits])
         # Use QP to calculate outer probabilities
-        outer_probs = GenerateProbabilityPass.calculate_probs(orig_unitaries,
-                                                             data.target)
-        
+        outer_probs = self.calculate_probs(orig_unitaries, target=data.target)
+
         # Calculate joint distribution for seeding FW
-        init_probs = [[p * qp_p for p in probs] 
+        init_probs = np.array([[p * qp_p for p in probs] 
                               for probs, qp_p in zip(init_probs, 
-                                                     outer_probs)]
+                                                     outer_probs)])
+        
+        final_probs_2 = init_probs.copy()
+        
+        # print(init_probs.shape, flush=True)
 
         # If we have too many circuits,
         # we must clip the smallest probabilities to run FW on the rest
@@ -175,13 +196,12 @@ class GenerateProbabilityPass(BasePass):
                     new_inds[i] = sorted_indices
 
             # Now choose the new params and probabilities
-            params = np.array([params[i][new_inds[i]] for i in range(M)])
-            init_probs = np.array([init_probs[i][new_inds[i]] for i in range(M)])
+            params = [params[i][new_inds[i]] for i in range(M)]
+            new_probs = [init_probs[i][new_inds[i]] for i in range(M)]
             # Make sure to normalize the new_probs
-            init_probs /= np.sum(init_probs)
+            init_probs /= np.sum(new_probs)
 
-        
-        # Zip together each circuit with corresponding parameters 
+        # Zip together each circuit with corresponding parameters
         ensemble = list(zip(circuits, params))
         ensemble: list[list[UnitaryMatrix]] = await get_runtime().map(
             self.create_unitaries,
@@ -193,12 +213,23 @@ class GenerateProbabilityPass(BasePass):
         init_probs = np.hstack(init_probs)
         full_ensemble = np.concatenate(ensemble, axis=0)
 
+        # print(full_ensemble.shape, init_probs.shape, flush=True)
+
         assert len(full_ensemble) == len(init_probs)
         
-        final_probs = self.calculate_probs(full_ensemble, 
+        final_probs_1 = self.calculate_probs(full_ensemble, 
                                            target=data.target,
                                            initial_probs=init_probs)
+        
+        # Reshape probs to be of size (M, N)
+        final_probs_1 = np.array(final_probs_1).reshape(M, -1)
 
         # Store final params and probs
         data["ensemble_params"] = params
-        data["ensemble_probabilities"] = final_probs
+        data["ensemble_probabilities"] = final_probs_1
+        # print(np.sum(final_probs_1), np.sum(final_probs_2), np.sum(final_probs_3))
+        data["ensemble_probabilities_2"] = final_probs_2
+        data["ensemble_probabilities_3"] = final_probs_3
+
+        pickle.dump(data["ensemble_params"], open(param_file, "wb"))
+        pickle.dump([final_probs_1, final_probs_2, final_probs_3], open(probs_file, "wb"))

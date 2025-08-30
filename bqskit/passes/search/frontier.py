@@ -108,7 +108,7 @@ class Frontier:
     def final_solution(self, default: Circuit) -> Circuit | list[Circuit]:
         """Return the best solution found or default."""
         if len(self.solutions) == 0:
-            return default
+            self.solutions.append(default.copy())
         if self.max_solutions == 1:
             return self.solutions[0]
         return self.solutions

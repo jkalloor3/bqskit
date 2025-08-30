@@ -5,8 +5,7 @@ import logging
 
 from bqskit.compiler.basepass import BasePass
 from bqskit.compiler.passdata import PassData
-from bqskit.passes import ToU3Pass
-from bqskit.ir.circuit import Circuit, CircuitPoint
+from bqskit.ir.circuit import Circuit
 from bqskit.runtime import get_runtime
 from bqskit.ir.opt.cost.functions import HilbertSchmidtResidualsGenerator
 from bqskit.ir.opt.cost.generator import CostFunctionGenerator
@@ -14,6 +13,8 @@ from bqskit.ir.opt.cost.generator import CostFunctionGenerator
 from bqskit.ir.gates import *
 from bqskit.qis import UnitaryMatrix
 import numpy as np
+import pickle
+import os
 from math import ceil
 
 from bqskit.qis.pauli import PauliMatrices
@@ -62,7 +63,7 @@ class DiversifyEnsemblePass(BasePass):
                   pauli in pauli_strings]
         
         all_coeffs = []
-        for _ in range(ens_size // 2):
+        for _ in range(ens_size):
             all_coeffs.append(np.random.rand(len(paulis)))
             
         for coeff in all_coeffs:
@@ -93,7 +94,7 @@ class DiversifyEnsemblePass(BasePass):
     def single_jiggle_ham(
             self,
             circ: Circuit,
-            initial_dist: float,
+            target: UnitaryMatrix,
             num: int,
             success_threshold: float
     ) -> np.ndarray[float]:
@@ -121,6 +122,7 @@ class DiversifyEnsemblePass(BasePass):
         '''
         # For each U3 gate, calculate do a Hamiltonian perturbation
         num_u3s = circ.count(U3Gate())
+        initial_dist = self.cost.calc_cost(circ, target)
         if num_u3s == 0:
             empty_params = [[]]
             return empty_params
@@ -205,23 +207,33 @@ class DiversifyEnsemblePass(BasePass):
         assert "run_ensemble" in data and data["run_ensemble"] == True
 
         # Get ensemble circuits
-        circuits: list[Circuit] = data.get("ensemble_circuits", [])
+        # circuits: list[Circuit] = data["ensemble_circuits"]
 
-        # # Add extra U3s if we aren't optimizing the number of 1Q gates
-        # if self.ignore_oneq_cost:
-        #     circuits = [self.add_u3s(c) for c in circuits]
-        #     data["ensemble_circuits"] = circuits
+        param_file = str(data["ensemble_name"]) + "_params_" + str(data["index"]) + ".pkl"
+        leap_file = str(data["ensemble_name"]) + "_leap_" + str(data["index"]) + ".pkl"
+        circuits = pickle.load(open(leap_file, "rb"))
 
-        # For each circuit, generate a list of parameters
-        all_params = await get_runtime().map(self.single_jiggle_ham, 
-                                circuits, 
-                                target=data.target,
-                                num = ceil(6000 / len(circuits)),
-                                success_threshold=self.success_threshold)
-        
+        if os.path.exists(param_file):
+            all_params = pickle.load(open(param_file, "rb"))
+        else:
+
+            # # Add extra U3s if we aren't optimizing the number of 1Q gates
+            # if self.ignore_oneq_cost:
+            #     circuits = [self.add_u3s(c) for c in circuits]
+            #     data["ensemble_circuits"] = circuits
+
+            # For each circuit, generate a list of parameters
+            all_params = await get_runtime().map(self.single_jiggle_ham, 
+                                    circuits, 
+                                    target=data.target,
+                                    num = ceil(2000 / len(circuits)),
+                                    success_threshold=self.success_threshold)
+
+            pickle.dump(all_params, open(param_file, "wb"))
+
         # Store the parameters
         data["ensemble_params"] = all_params
 
         # Assume uniform probability (TODO: will update for FT compilation)
         all_probs = [np.ones((p.shape[0], )) / p.shape[0] for p in all_params]
-        data["ensemble_probs"] = all_probs
+        data["ensemble_probabilities"] = all_probs

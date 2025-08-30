@@ -211,6 +211,10 @@ algorithms extend circuit templates.
 from __future__ import annotations
 
 from bqskit.passes.alias import PassAlias
+from bqskit.passes.approximations.diversification import DiversifyEnsemblePass
+from bqskit.passes.approximations.generate_probs import GenerateProbabilitiesPass
+from bqskit.passes.approximations.bias_filter import BiasFilterPass
+from bqskit.passes.approximations.generate_circuit_sampler import GenerateCircuitSamplerPass
 from bqskit.passes.control.dothendecide import DoThenDecide
 from bqskit.passes.control.dowhileloop import DoWhileLoopPass
 from bqskit.passes.control.foreach import ClearAllBlockData
@@ -363,6 +367,10 @@ __all__ = [
     'SeedLayerGenerator',
     'BlockConversionPass',
     'StairLayerGenerator',
+    'DiversifyEnsemblePass',
+    'GenerateProbabilitiesPass',
+    'BiasFilterPass',
+    'GenerateCircuitSamplerPass',
     'DoThenDecide',
     'SubstitutePass',
     'ParallelDo',

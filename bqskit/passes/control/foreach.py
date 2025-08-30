@@ -219,6 +219,15 @@ class ForEachBlockPass(BasePass):
                     self.pass_down_block_specific_key_prefix,
                 ) and i in data[key]:
                     block_data[key] = data[key][i]
+
+            ### TEMPORARY HACK FOR JUPYTER NOTEBOOK ###
+            # prev_block_data = data[self.key][-1][i] if len(data[self.key]) > 0 else {}
+            block_data["index"] = i
+            # if "ensemble_circuits" in prev_block_data:
+            #     block_data["ensemble_circuits"] = prev_block_data.get("ensemble_circuits", [])
+            #     block_data["ensemble_params"] = prev_block_data.get("ensemble_params", [])
+            #     block_data["ensemble_probabilities"] = prev_block_data.get("ensemble_probabilities", [])
+
             block_data.seed = data.seed
 
             subcircuits.append(subcircuit)

@@ -128,11 +128,6 @@ class LEAPSynthesisPass(SynthesisPass):
                 'Expected max_layer to be an integer, got %s' % type(max_layer),
             )
 
-        if max_layer is not None and max_layer <= 0:
-            raise ValueError(
-                'Expected max_layer to be positive, got %d.' % int(max_layer),
-            )
-
         if min_prefix_size is not None and not is_integer(min_prefix_size):
             raise TypeError(
                 'Expected min_prefix_size to be an integer, got %s'
@@ -180,6 +175,9 @@ class LEAPSynthesisPass(SynthesisPass):
 
         # Get layer generator for search
         layer_gen = self._get_layer_gen(data)
+
+        if self.max_layer < 0:
+            self.max_layer = data["max_layer"]
 
         # Begin the search with an initial layer
         frontier = Frontier(utry, self.heuristic_function,
@@ -280,7 +278,10 @@ class LEAPSynthesisPass(SynthesisPass):
         if self.store_partial_solutions:
             data['psols'] = frontier.psols
 
-        return frontier.final_solution(default=circuit)
+        solution = frontier.final_solution(default=circuit)
+
+        # print("Leap Costs: ", [self.cost.calc_cost(c, target=data.target) for c in solution], flush=True)
+        return solution
 
     def check_new_best(
         self,

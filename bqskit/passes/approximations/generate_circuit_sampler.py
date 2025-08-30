@@ -1,5 +1,4 @@
 import abc
-from typing import override
 import numpy as np
 from bqskit.ir.circuit import Circuit, CircuitPoint 
 from bqskit.runtime import get_runtime
@@ -135,7 +134,7 @@ class FullCircuitSampler:
         out_circ.unfold_all()
         return out_circ, prob
 
-class GenerateCircuitSampler(BasePass):
+class GenerateCircuitSamplerPass(BasePass):
 
     def __init__(
             self,
