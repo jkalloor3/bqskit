@@ -1,0 +1,21 @@
+Perturbing a little to make pos def try #: 0
+(1, 4000) (1, 4000) (1, 4000)
+0.9999999999999996 1.0000000000000004 0.9999999999999993
+Perturbing a little to make pos def try #: 0
+(1, 4000) (1, 4000) (1, 4000)
+1.0 1.0000000000000004 0.9999999999999993
+Perturbing a little to make pos def try #: 0
+Perturbing a little to make pos def try #: 0
+(12, 334) (12, 334) (12, 334)
+1.0000000000000013 1.0000000000000004 0.9999999999999999
+Perturbing a little to make pos def try #: 0
+Perturbing a little to make pos def try #: 0
+(10, 400) (10, 400) (10, 400)
+0.9999999999999988 1.0000000000000002 1.0000000000000004
+Perturbing a little to make pos def try #: 0
+Perturbing a little to make pos def try #: 0
+(3, 1334) (3, 1334) (3, 1334)
+1.0000000000000004 1.0000000000000002 0.9999999999999998
+Perturbing a little to make pos def try #: 0
+(1, 4000) (1, 4000) (1, 4000)
+1.0000000000000009 1.0000000000000004 0.9999999999999993

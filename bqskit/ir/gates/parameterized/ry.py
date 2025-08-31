@@ -5,6 +5,11 @@ import numpy as np
 import numpy.typing as npt
 
 from bqskit.ir.gates.qubitgate import QubitGate
+from bqskit.ir.gates.constant.h import HGate
+from bqskit.ir.gates.constant.s import SGate
+from bqskit.ir.gates.constant.sdg import SdgGate
+from bqskit.ir.gates.parameterized.rz import RZGate
+
 from bqskit.qis.unitary.differentiable import DifferentiableUnitary
 from bqskit.qis.unitary.optimizable import LocallyOptimizableUnitary
 from bqskit.qis.unitary.unitary import RealVector
@@ -81,3 +86,16 @@ class RYGate(
         theta = 2 * np.arccos(a / np.sqrt(a ** 2 + b ** 2))
         theta *= -1 if b > 0 else 1
         return [theta]
+
+    @staticmethod
+    def calc_params(unitary: UnitaryMatrix) -> float:
+        hy_unitary = SGate().get_unitary() @ HGate().get_unitary()
+        rz_unitary = hy_unitary.conj().T @ unitary @ hy_unitary
+        return RZGate.calc_params(rz_unitary)
+
+    @staticmethod
+    def is_ry(unitary: UnitaryMatrix, verbose: bool = False) -> float:
+        # Apply rotation to RY and then check if it is an RZ 
+        hy_unitary = SGate().get_unitary() @ HGate().get_unitary()
+        rz_unitary = hy_unitary.conj().T @ unitary @ hy_unitary
+        return RZGate.is_rz(rz_unitary)

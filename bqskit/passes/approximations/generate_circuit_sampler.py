@@ -1,5 +1,6 @@
 import abc
 import numpy as np
+import pickle
 from bqskit.ir.circuit import Circuit, CircuitPoint 
 from bqskit.runtime import get_runtime
 from bqskit.compiler.basepass import BasePass
@@ -53,7 +54,9 @@ class BlockCircuitSampler(CircuitSampler):
         circ = self.circuits[rand_circ_idx]
         param_options = self.params[rand_circ_idx]
         param_probs = self.all_probs[rand_circ_idx]
-        rand_param_idx = np.random.choice(len(param_options), p=param_probs)
+        # print(param_options.shape, param_probs.shape, np.sum(param_probs))
+        norm_probs = param_probs / (np.sum(param_probs) + 1e-10)
+        rand_param_idx = np.random.choice(len(param_options), p=norm_probs)
         rand_param = param_options[rand_param_idx]
         out_circ = circ.copy()
         out_circ.set_params(rand_param)
@@ -153,14 +156,20 @@ class GenerateCircuitSamplerPass(BasePass):
 
         # If we are inside a single block, create a BlockCircuitSampler
         if not self.combine_sub_blocks:
-            circuits = data["ensemble_circuits"]
-            params = data["ensemble_params"]
-            probs = data["ensemble_probabilities"]
-            sampler = BlockCircuitSampler(
-                circuits=circuits,
-                params=params,
-                probs=probs
-            )
+            if data["use_ensemble"]:
+                circuits = data["ensemble_circuits"]
+                params = data["ensemble_params"]
+                probs_ind = data["probs_ind"]
+                # probs = data["ensemble_probabilities"][probs_ind]
+                probs_file = str(data["ensemble_name"]) + "_probs_" + str(data["index"]) + ".pkl"
+                probs = pickle.load(open(probs_file, "rb"))
+                sampler = BlockCircuitSampler(
+                    circuits=circuits,
+                    params=params,
+                    probs=probs[probs_ind]
+                )
+            else:
+                return
         else:
             # Get the circuit sampler for each block
             all_samplers = {}

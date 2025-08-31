@@ -66,6 +66,7 @@ class BiasFilterPass(BasePass):
                 data["use_ensemble"] = False
             else:
                 data["use_ensemble"] = True
+                data["probs_ind"] = np.argmin(scaling_factors)
             return
 
 
@@ -105,5 +106,6 @@ class BiasFilterPass(BasePass):
             data["use_ensemble"] = False
         else:
             data["use_ensemble"] = True
+            data["probs_ind"] = np.argmin(scaling_factors)
 
         pickle.dump(scaling_factors, open(bias_file, "wb"))

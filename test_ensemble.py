@@ -2,6 +2,10 @@ import numpy as np
 from bqskit.ir import Circuit
 from bqskit.ir.gates import U3Gate, CNOTGate
 
+from ntro import NumericalTReductionPass
+
+from utils import FixAnglesPass, ConvertToZXZXZSimple
+
 
 from bqskit.passes import LEAPSynthesisPass, UpdateDataPass, ScanPartitioner, ForEachBlockPass, DiversifyEnsemblePass, GenerateProbabilitiesPass, BiasFilterPass, GenerateCircuitSamplerPass
 from bqskit.compiler import Compiler
@@ -20,20 +24,26 @@ if __name__ == '__main__':
     partitioned_circ, data = compiler.compile(input_circ, 
                                         [
                                         ScanPartitioner(4),
+                                        UpdateDataPass("run_ensemble", True),
                                         ForEachBlockPass([
                                             UpdateDataPass("run_ensemble", True),
-                                            UpdateDataPass("ensemble_name", qasm_name),
+                                            UpdateDataPass("ensemble_name", qasm_name +"_ft"),
                                             LEAPSynthesisPass(
                                                 success_threshold=1e-3,
                                                 max_solutions=10,
                                                 max_layer=-1
                                             ),
+                                            FixAnglesPass(5, run_scan_sols=True),
+                                            ConvertToZXZXZSimple(group=False),
+                                            NumericalTReductionPass(
+                                                success_threshold=1e-3,
+                                            ),
                                             DiversifyEnsemblePass(success_threshold=2e-3),
                                             GenerateProbabilitiesPass(),
                                             BiasFilterPass(),
-                                            # GenerateCircuitSamplerPass(combine_sub_blocks=False)
+                                            GenerateCircuitSamplerPass(combine_sub_blocks=False)
                                         ]),
-                                        # GenerateCircuitSamplerPass(combine_sub_blocks=True)
+                                        GenerateCircuitSamplerPass(combine_sub_blocks=True)
                                         ], 
                                         request_data=True)
 
@@ -47,10 +57,17 @@ if __name__ == '__main__':
         print(b_circ.gate_counts)
 
 
-    all_block_data = data[ForEachBlockPass.key][-1]
+    # all_block_data = data[ForEachBlockPass.key][-1]
 
-    for i, b_data in enumerate(all_block_data):
-        # If ensemble circuits is still in data, we have succesfully
-        # generated a convex ensemble
-        if not b_data["use_ensemble"]:
-            print(f"Block {i} was filtered out. Defaulting to the original circuit.")
+    # for i, b_data in enumerate(all_block_data):
+    #     # If ensemble circuits is still in data, we have succesfully
+    #     # generated a convex ensemble
+    #     if not b_data["use_ensemble"]:
+    #         print(f"Block {i} was filtered out. Defaulting to the original circuit.")
+
+
+    circuit_sampler = data["circuit_sampler"]
+
+    for _ in range(10):
+        circ = circuit_sampler.random_sample()
+        print(circ.gate_counts)

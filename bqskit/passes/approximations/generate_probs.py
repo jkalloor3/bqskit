@@ -224,6 +224,9 @@ class GenerateProbabilitiesPass(BasePass):
         # Reshape probs to be of size (M, N)
         final_probs_1 = np.array(final_probs_1).reshape(M, -1)
 
+        print(final_probs_1.shape, final_probs_2.shape, final_probs_3.shape, flush=True)
+        print(np.sum(final_probs_1), np.sum(final_probs_2), np.sum(final_probs_3), flush=True)
+
         # Store final params and probs
         data["ensemble_params"] = params
         data["ensemble_probabilities"] = final_probs_1
