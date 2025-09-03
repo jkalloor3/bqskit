@@ -14,7 +14,7 @@ from bqskit.compiler import Compiler
 from bqskit.qis.unitary.unitarybuilder import UnitaryBuilder
 from util import  (get_file_names, load_jiggled_ensemble, EnsembleSampler, 
                    get_sub_block_count, GateCounter, load_circuit, trace_distance,
-                   get_density_matrix, get_block_names)
+                   get_density_matrix, get_block_names, frobenius_cost)
 
 from bqskit.runtime import get_runtime
 
@@ -88,7 +88,7 @@ def get_good_blocks(circ_name, tol, cliff_t,
         if len(good_blocks[large_block_num]) == 0:
             # print(f"No good blocks found for circuit {circ_name} in large block {large_block_num}", flush=True)
             good_blocks.pop(large_block_num)
-    # print(f"Found {num_good_blocks} good blocks for circuit {circ_name}", flush=True)
+    print(f"Found {num_good_blocks} good blocks for circuit {circ_name}", flush=True)
     return good_blocks
 
 def generate_large_block_circ(circ_name: str,
@@ -212,7 +212,8 @@ class FullCircTDPass(BasePass):
                  partitioned_circ: Circuit,
                  checkpoint_folder_form: str,
                  all_partitioned_data: dict[str, Circuit],
-                 cliff_t: bool = False,) -> None:
+                 cliff_t: bool = False,
+                 run_td: bool = True) -> None:
         super().__init__()
         self.circ_name = circ_name
         self.tol = tol
@@ -238,6 +239,7 @@ class FullCircTDPass(BasePass):
                                            partitioned_data=all_partitioned_data[circ_name])
         self.partitioned_data = all_partitioned_data[circ_name]
         self.num_trials = 6
+        self.run_td = run_td
 
 
     async def get_trial_un(self, ens_size: int) -> np.ndarray:
@@ -286,13 +288,17 @@ class FullCircTDPass(BasePass):
     async def run(self, circ: Circuit, data: PassData) -> None:
         # print("Running FullCircTDPass", flush=True)
         self.true_dms = [get_final_dm([circ], sv=rand_sv) for rand_sv in self.rand_svs]
+        self.full_un = circ.get_unitary()
 
         un_futs = {}
         for ens_size in self.ens_sizes:
-            output_file = f"ensemble_td_convergences_new/{self.circ_name}_{ens_size}_{self.tol}.pkl"
+            if self.run_td:
+                output_file = f"ensemble_td_convergences_new/{self.circ_name}_{ens_size}_{self.tol}.pkl"
+            else:
+                output_file = f"ensemble_bias_convergences_new/{self.circ_name}_{ens_size}_{self.tol}.pkl"
             if os.path.exists(output_file):
                 continue
-            print(f"Calculating trace distances for ensemble size {ens_size}", flush=True)
+            print(f"Calculating Data for ensemble size {ens_size}", flush=True)
             avg_uns_fut = get_runtime().map(self.get_trial_un_outer, [ens_size] * self.num_trials)
             un_futs[ens_size] = avg_uns_fut
 
@@ -301,28 +307,37 @@ class FullCircTDPass(BasePass):
             avg_uns = await un_futs[ens_size]
             sample_time = time.time() - sampler_start
             print(f"Sampled average unitaries for ensemble size {ens_size} in {sample_time:.2f} seconds", flush=True)
-            all_tds = []
-            for i, un in enumerate(avg_uns):
-                rand_tds = []
-                for j, rand_sv in enumerate(self.rand_svs):
-                    td = self.get_trial_td(rand_sv, self.true_dms[j], un)
-                    rand_tds.append(td)
-                print("Max TD:", np.max(rand_tds), flush=True)
-                all_tds.append(np.max(rand_tds))
+            if self.run_td:
+                all_data = []
+                for i, un in enumerate(avg_uns):
+                    rand_tds = []
+                    for j, rand_sv in enumerate(self.rand_svs):
+                        td = self.get_trial_td(rand_sv, self.true_dms[j], un)
+                        rand_tds.append(td)
+                    print("Max TD:", np.max(rand_tds), flush=True)
+                    all_data.append(np.max(rand_tds))
+            else:
+                # Calculate bias for each un
+                all_data = [frobenius_cost(un, self.full_un) for un in avg_uns]
 
-            print("All Tds:", all_tds, flush=True)
+            print("All Data:", all_data, flush=True)
+            
             td_time = time.time() - sampler_start
-            print(f"Calculated trace distances for ensemble size {ens_size} in {td_time:.2f} seconds", flush=True)
-            output_file = f"ensemble_td_convergences_new/{self.circ_name}_{ens_size}_{self.tol}.pkl"
+            print(f"Calculated data for ensemble size {ens_size} in {td_time:.2f} seconds", flush=True)
+            if self.run_td:
+                output_file = f"ensemble_td_convergences_new/{self.circ_name}_{ens_size}_{self.tol}.pkl"
+            else:
+                output_file = f"ensemble_bias_convergences_new/{self.circ_name}_{ens_size}_{self.tol}.pkl"
             Path(output_file).parent.mkdir(parents=True, exist_ok=True)
             with open(output_file, 'wb') as f:
-                pickle.dump(all_tds, f)
-            print(f"Saved trace distances to {output_file}", flush=True)
+                pickle.dump(all_data, f)
+            print(f"Saved data to {output_file}", flush=True)
 
 if __name__ == "__main__":
     circ_name = argv[1]
     tol = float(argv[2])
     small_ens = bool(int(argv[3])) if len(argv) > 3 else False
+    run_td = bool(int(argv[4])) if len(argv) > 4 else True
     compiler = Compiler(num_workers=128)
     cliff_t = False
 
@@ -352,7 +367,8 @@ if __name__ == "__main__":
         partitioned_circ=partitioned_circ,
         checkpoint_folder_form=checkpoint_folder_form,
         all_partitioned_data=all_partitioned_data,
-        cliff_t=cliff_t
+        cliff_t=cliff_t,
+        run_td=run_td
     )
     
     compiler.compile(full_circ, [ens_pass])

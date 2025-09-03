@@ -26,7 +26,7 @@ if __name__ == '__main__':
         ]
         
 
-    folder_form = "ensemble_dms_{circ_name}_init/"
+    folder_form = "ensemble_dms_{circ_name}/"
 
     fig, axs = plt.subplots(1, 1, figsize=(10, 6))
 

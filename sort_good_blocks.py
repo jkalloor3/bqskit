@@ -7,7 +7,6 @@ from bqskit.passes import (ScanPartitioner, ExtractMeasurements,
                            UnfoldPass, QuickPartitioner, NOOPPass)
 from util import WriteQasmPass
 from bqskit.compiler import Compiler
-from bqskit import enable_logging
 import time
 import glob
 from pathlib import Path
@@ -16,18 +15,19 @@ import shutil
 
 # enable_logging(True)
 # input_folder = f"/pscratch/sd/j/jkalloor/bqskit/QITE_8"
-input_folder = "ensemble_benchmarks"
+input_folder = "ensemble_benchmarks_new"
+# input_folder = "qce23_qfactor_benchmarks"
 good_output_folder = 'good_blocks'
 bad_output_folder = 'bad_blocks'
 block_save_dir = "block_qasms_{circ_name}/"
 partitioned_circ_save_file = "partitioned_circs/{circ_name}.pickle"
 
-LARGE_BLOCK_SIZE = 8
+LARGE_BLOCK_SIZE = 20
 SMALL_BLOCK_SIZE = 4
-QUICK_SMALL_BLOCK_SIZE = 6
+QUICK_SMALL_BLOCK_SIZE = 4
 
 def partition_workflow(circ_name: str, num_qudits: int = 8) -> list:
-    if num_qudits < 14:
+    if num_qudits < 35:
         partitioner_1 = ScanPartitioner(SMALL_BLOCK_SIZE, ignore_qft=True)
         partitioner_2 = ScanPartitioner(LARGE_BLOCK_SIZE)
     else:
@@ -41,9 +41,9 @@ def partition_workflow(circ_name: str, num_qudits: int = 8) -> list:
 
     return [
     ExtractMeasurements(),
-    partitioner_1,
-    ExtendBlockSizePass(SMALL_BLOCK_SIZE),
-    # partitioner_2,
+    # partitioner_1,
+    # ExtendBlockSizePass(SMALL_BLOCK_SIZE),
+    partitioner_2,
     # extend_pass,
     ForEachBlockPass([
         UnfoldPass(),
@@ -88,7 +88,7 @@ def sort_blocks(circ_name: str, good_output_folder, bad_output_folder):
 
 if __name__ == '__main__':
     compiler = Compiler(num_workers=1)
-    circ_types = ['shor_12_no_qft']
+    circ_types = ["*long"]
     job_ids = []
     for circ_type in circ_types:
         circ_files = glob.glob(os.path.join(input_folder, f"{circ_type}.qasm"))

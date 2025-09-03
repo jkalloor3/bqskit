@@ -762,7 +762,7 @@ def start_worker(
     port: int,
     cpu: int | None = None,
     logging_level: int = logging.WARNING,
-    num_blas_threads: int = 1,
+    num_blas_threads: int = 4,
     log_client: bool = False,
 ) -> None:
     """Start this process's worker."""

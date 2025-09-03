@@ -452,6 +452,12 @@ def _less_than_many(new: Circuit, old: Operation) -> bool:
 
     return True
 
+def _less_than_params(new: Circuit, old: Operation) -> bool:
+    """Return true if the new circuit has fewer parameters."""
+    if isinstance(old.gate, CircuitGate):
+        return new.num_params < old.gate._circuit.num_params
+
+    return True  # TODO: Re-evaluate always true when old is not a circuit
 
 def _is_respecting(
     circuit: Circuit,
@@ -610,6 +616,11 @@ def gen_less_than_rspt_fully_multi(model: MachineModel) -> ReplaceFilterFn:
         fn=_less_than_multi,
     )
 
+def gen_less_than_params(model: MachineModel) -> ReplaceFilterFn:
+    """Generate a replace filter that replaces if the new circuit has fewer
+    parameters."""
+    return _less_than_params
+
 
 def gen_less_than_rspt_fully_many(model: MachineModel) -> ReplaceFilterFn:
     """Generate a replace filter that replaces if the new circuit has fewer
@@ -645,6 +656,7 @@ def gen_replace_filter(method: str, model: MachineModel) -> ReplaceFilterFn:
         'less-than-respecting-fully': gen_less_than_rspt_fully,
         'less-than-respecting-fully-multi': gen_less_than_rspt_fully_multi,
         'less-than-respecting-fully-many': gen_less_than_rspt_fully_many,
+        'less-than-params': gen_less_than_params,
     }
 
     if method not in replace_filters:

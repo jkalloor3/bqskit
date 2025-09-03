@@ -162,7 +162,7 @@ class ServerBase:
         """Used to find the employee associated with a message."""
 
         # Servers do not need blas threads
-        set_blas_thread_counts(1)
+        set_blas_thread_counts(4)
 
         # Safely and immediately exit on interrupt signals
         handle = functools.partial(sigint_handler, node=self)
