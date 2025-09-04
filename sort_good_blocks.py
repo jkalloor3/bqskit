@@ -16,18 +16,18 @@ import shutil
 
 # enable_logging(True)
 # input_folder = f"/pscratch/sd/j/jkalloor/bqskit/QITE_8"
-input_folder = "ensemble_benchmarks"
+input_folder = "qce23_qfactor_benchmarks"
 good_output_folder = 'good_blocks'
 bad_output_folder = 'bad_blocks'
 block_save_dir = "block_qasms_{circ_name}/"
 partitioned_circ_save_file = "partitioned_circs/{circ_name}.pickle"
 
-LARGE_BLOCK_SIZE = 8
-SMALL_BLOCK_SIZE = 4
-QUICK_SMALL_BLOCK_SIZE = 6
+LARGE_BLOCK_SIZE = 11
+SMALL_BLOCK_SIZE = 11
+QUICK_SMALL_BLOCK_SIZE = 4
 
 def partition_workflow(circ_name: str, num_qudits: int = 8) -> list:
-    if num_qudits < 14:
+    if num_qudits < 30:
         partitioner_1 = ScanPartitioner(SMALL_BLOCK_SIZE, ignore_qft=True)
         partitioner_2 = ScanPartitioner(LARGE_BLOCK_SIZE)
     else:
@@ -42,7 +42,7 @@ def partition_workflow(circ_name: str, num_qudits: int = 8) -> list:
     return [
     ExtractMeasurements(),
     partitioner_1,
-    ExtendBlockSizePass(SMALL_BLOCK_SIZE),
+    # ExtendBlockSizePass(SMALL_BLOCK_SIZE),
     # partitioner_2,
     # extend_pass,
     ForEachBlockPass([
@@ -88,7 +88,7 @@ def sort_blocks(circ_name: str, good_output_folder, bad_output_folder):
 
 if __name__ == '__main__':
     compiler = Compiler(num_workers=1)
-    circ_types = ['shor_12_no_qft']
+    circ_types = ['qae11']
     job_ids = []
     for circ_type in circ_types:
         circ_files = glob.glob(os.path.join(input_folder, f"{circ_type}.qasm"))

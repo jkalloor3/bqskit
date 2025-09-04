@@ -51,7 +51,11 @@ class ExtendBlockSizePass(BasePass):
             return
 
         if circuit.num_qudits < minimum_size:
-            raise RuntimeError('Cannot extend block larger than circuit.')
+            # raise RuntimeError('Cannot extend block larger than circuit.')
+            print('Cannot extend block larger than circuit.')
+            print("Circuit has", circuit.num_qudits, "qudits, but minimum size is", minimum_size)
+            print(circuit.gate_counts)
+            return
 
         cg = data.connectivity
 

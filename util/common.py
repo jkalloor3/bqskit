@@ -186,7 +186,7 @@ def create_jiggled_unitaries(circ_params: tuple[Circuit, np.ndarray, np.ndarray,
             gp_correction = target.get_target_correction_factor(utry)
             utry = utry * gp_correction
         if add_cost:
-            cost_1 = normalized_frob_cost(utry, target)
+            cost_1 = frobenius_cost(utry, target)
             ens.append((utry, cost_1))
         else:
             ens.append(utry)

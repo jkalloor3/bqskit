@@ -118,7 +118,7 @@ def get_ensemble_workflow(circ_name: str, tol: float, extra: str = "") -> Workfl
     synthesis_pass = LEAPSynthesisPass2(
         store_partial_solutions=True,
         success_threshold = extra_err_thresh,
-        partial_success_threshold=err_thresh / 10,
+        partial_success_threshold=err_thresh / 20,
         max_layer_factor=1.01,
         instantiate_options=instantiation_options,
         max_layer=14,
@@ -127,13 +127,13 @@ def get_ensemble_workflow(circ_name: str, tol: float, extra: str = "") -> Workfl
 
     ntro = NumericalTReductionPass(
         full_loops=3,
-        success_threshold=err_thresh / 10,
+        success_threshold=err_thresh / 20,
         use_calculated_error=True
     )
 
     extra_str = "_fw"
 
-    jiggle_pass = JiggleEnsemblePass(success_threshold=err_thresh * 5, 
+    jiggle_pass = JiggleEnsemblePass(success_threshold=err_thresh * 2, 
                                   num_circs=4000, 
                                   use_scan_sols=True,
                                   use_ensemble=False,
@@ -164,9 +164,11 @@ def get_ensemble_workflow(circ_name: str, tol: float, extra: str = "") -> Workfl
                 FilterDistancesPass(threshold=(err_thresh * 5)),
                 # PrintDistancesPass(),
                 jiggle_pass,
-                GenerateProbabilityPass(run_on_ensemble_0=True,
+                GenerateProbabilityPass(eps=(err_thresh * 5),
+                                        run_on_ensemble_0=True,
                                         checkpoint_extra_str=extra_str),
-                CheckEnsembleQualityPass(count_t=True,
+                CheckEnsembleQualityPass(eps=(err_thresh * 5),
+                                         count_t=True,
                                          checkpoint_extra_str=extra_str,
                                          zero_threshold=((err_thresh ** 2) / 10)),
             ]
@@ -215,8 +217,9 @@ def get_shortest_circuits(circ_data: list[tuple[str, str, float]], extra: str = 
         for circ_name, _, tol in circ_data
     ]
 
-    num_workers = min(os.cpu_count(), 200)
-    compiler = Compiler(num_workers=num_workers)
+    # num_workers = min(os.cpu_count(), 200)
+    # compiler = Compiler(num_workers=128)
+    compiler = Compiler('localhost')
     
     workflow_ind = 0
     ids: list[int] = []

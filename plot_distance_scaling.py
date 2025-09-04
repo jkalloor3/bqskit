@@ -13,7 +13,7 @@ if __name__ == '__main__':
             "qpe_11",
             "mult8",
             "draper_adder_12",
-            "qae11",
+            # "qae11",
         ]
     else:
         circ_names = [
@@ -22,11 +22,11 @@ if __name__ == '__main__':
             "FermiHubbard2x2_jw_long",
             "heisenberg7",
             "LiH_jw_long",
-            "neutrino_NX_3_NF_2_jw_long"
+            # "neutrino_NX_3_NF_2_jw_long"
         ]
         
 
-    folder_form = "ensemble_dms_{circ_name}_init/"
+    folder_form = "ensemble_dms_{circ_name}_init_clifft/"
 
     fig, axs = plt.subplots(1, 1, figsize=(10, 6))
 

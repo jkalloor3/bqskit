@@ -87,17 +87,24 @@ def get_sub_block_count(large_block_dir: str,
     # print(qasm_file, csv_file, flush=True)
     if not os.path.exists(csv_file):        # print(f"CSV file {csv_file} does not exist.", flush=True)
         return False, 0
+
+    # Now we need to check if the ratio is less than 20
+    max_ratio = min(20, (10 ** (tol) / 4))
+
     with open(csv_file, 'r') as f:
         reader = csv.DictReader(f)
         min_ratio = float("inf")
         final_frob_cost = float("inf")
         for row in reader:
             if "Ratio" in row:  # Check if the column value is not empty
+                # Check if distance is less than 3* 10^(-tol)
+                max_dist = max_ratio * (10 ** (-tol))
+                dist = float(row["Epsilon"])
+                if dist > max_dist:
+                    continue
                 min_ratio = min(min_ratio, float(row["Ratio"]))
                 final_frob_cost = min(final_frob_cost, float(row["Norm. Bias"]))
-        
-    # Now we need to check if the ratio is less than 20
-    max_ratio = min(20, (10 ** (tol) / 4))
+
     if min_ratio > max_ratio:
         # print(f"Skipping {small_block_num} as ratio is too high: {min_ratio}", flush=True)
         return False, 0
@@ -182,11 +189,12 @@ class UnitaryDMEvaluator(BasePass):
         return circ.get_unitary()
 
     @staticmethod
-    async def generate_large_block_unitary(
+    async def generate_large_block_unitary(circ_name: str,
                            block_files: dict[str, list[str]],
                            block_names: list[str],
                            block_targets: dict[str, UnitaryMatrix],
-                           pcirc: Circuit) -> tuple[ConstantUnitaryGate, 
+                           pcirc: Circuit,
+                           tol: float = 1.0) -> tuple[ConstantUnitaryGate, 
                                                     list[ConstantUnitaryGate]]:
         
         '''
@@ -217,16 +225,17 @@ class UnitaryDMEvaluator(BasePass):
                         new_circ_params.append((circ, param_chunks[i], probs_chunks[i], cache))
                 circ_params = new_circ_params
             
-            print("Calculating average unitary for block: ", block_name, flush=True)
+            # print("Calculating average unitary for block: ", circ_name, block_name, flush=True)
             utries = await get_runtime().map(create_avg_utry, circ_params, target=target,
                                                             add_cost=False)
             avg_utry = np.sum(utries, axis=0)
             avg_gate = ConstantUnitaryGate(avg_utry)
-            print(f"Block: {block_name}, Avg. Utry: {avg_utry.shape}", flush=True)
             avg_utry_dist = frobenius_cost(avg_utry, target)
-            print(f"Block: {block_name}, Avg. Dist: {avg_utry_dist}", flush=True)
-            if avg_utry_dist < 1:
+            print(f"Block: {block_name}, Avg. Dist: {avg_utry_dist} Tol: {tol}", flush=True)
+            if avg_utry_dist < 1: # Deal with weird errors?
                 block_gates[block_name] = avg_gate
+            else:
+                print(f"Block: {block_name}, Avg. Dist: {avg_utry_dist} too high", flush=True)
 
         full_circs = []
 
@@ -271,16 +280,16 @@ class UnitaryDMEvaluator(BasePass):
         small_block_nums = get_sub_block_nums(large_block_dir)
 
         return await UnitaryDMEvaluator.generate_large_block_unitary(
+            circ_name=self.circ_name,
             block_files=block_files,
             block_names=small_block_nums,
             block_targets=block_targets,
-            pcirc=small_partitioned_circ
+            pcirc=small_partitioned_circ,
+            tol=self.max_tol
         )
 
     def calculate_good_blocks(self) -> None:
         self.good_block_nums = {}
-        counter = GateCounter(est=False, cache_file=None)
-        max_ratio = min(20, (10 ** (self.max_tol) / 5))
         large_block_nums = get_block_names(self.circ_name, extra="_tket")
         # print("Large Block Names: ", large_block_nums, flush=True)
         num_good_blocks = 0
@@ -295,16 +304,8 @@ class UnitaryDMEvaluator(BasePass):
                 good, count = get_sub_block_count(large_block_dir, 
                                                   small_block_num, self.max_tol,
                                                   self.cliff_t)
-                # if self.cliff_t:
-                #     original_count = counter.count_t(small_circ, target_error=(10 ** (- 2 * self.max_tol) * max_ratio), verbose=True)
-                # else:
-                #     # Count CNOTs in the circuit
-                #     original_count = counter.count_cx(small_circ)
                 if not good:
                     continue
-                # elif count > original_count:
-                #     print(f"Skipping {small_block_num} as count is too high: {count} >= {original_count}", flush=True)
-                #     continue
                 else:
                     # Use block
                     num_good_blocks += 1
@@ -312,12 +313,12 @@ class UnitaryDMEvaluator(BasePass):
                     # print(f"Adding {small_block_num} to {large_block_num} with count: {count}", flush=True)
                     self.good_block_nums[large_block_num].add(small_block_num)
         # print(list(self.good_block_nums.keys()))
-        print(f"Good Blocks for {self.circ_name}-{self.max_tol}: {good_blocks}", flush=True)
+        print(f"Good Blocks for {self.circ_name}-{self.max_tol}: {len(good_blocks)}", flush=True)
         return num_good_blocks
 
     async def run_full_ensemble(self) -> None:
         ens_data_file = os.path.join(self.save_dir, f"{self.max_tol}.pkl")
-        print("Ensemble Data File: ", ens_data_file, flush=True)
+        # print("Ensemble Data File: ", ens_data_file, flush=True)
         if os.path.exists(ens_data_file):
             print("Already exists: ", ens_data_file, flush=True)
             return
@@ -327,33 +328,17 @@ class UnitaryDMEvaluator(BasePass):
             print(f"No large blocks found for {self.circ_name}, skipping.", flush=True)
             return
         # print("Large Block Names: ", large_block_nums, flush=True)
-        print("Calculating Block Ensembles", self.circ_name, flush=True)
+        # print("Calculating Block Ensembles", self.circ_name, flush=True)
         block_unitaries_samples = await get_runtime().map(self.get_block_ensemble, 
                                                   large_block_nums)
-        # block_unitaries_samples = [await self.get_block_ensemble(large_block_num)
-        #                            for large_block_num in large_block_nums]
         
         block_unitaries = [b[0] for b in block_unitaries_samples]
-        # block_samples = [b[1] for b in block_unitaries_samples]
-
-        # large_block_samples = dict(zip(large_block_nums, block_samples))
-        # Remove all empty block circs
-        # large_block_samples = {k: v for k, v in large_block_samples.items() if len(v) > 0}
-
-        # all_block_samples = []
-        # for ind in range(NUM_SAMPLES):
-        #     sample_dict = {}
-        #     for large_block_num, block_samples in large_block_samples.items():
-        #         sample_dict[large_block_num] = block_samples[ind]
-        #     all_block_samples.append(sample_dict)
-
 
         large_block_uns = dict(zip(large_block_nums, block_unitaries))
         # Remove all empty block circs
         large_block_uns = {k: v for k, v in large_block_uns.items() if v is not None}
         partitioned_circ = pickle.load(open(self.partitioned_circ_file, "rb"))
 
-        print(f"Generating full ensemble for {self.circ_name} with {len(large_block_uns)} blocks", flush=True)
         full_un = UnitaryDMEvaluator.generate_circ_unitary(
             large_block_uns,
             partitioned_circ=partitioned_circ
@@ -361,7 +346,9 @@ class UnitaryDMEvaluator(BasePass):
         print(f"Generated full unitary for {self.circ_name} with shape {full_un.shape}", flush=True)
         if self.ham is None:
             full_dms = get_final_dms(full_un, self.rand_svs)
-            ensemble_mag = np.max(trace_distances(full_dms, self.target_dms))
+            tds = trace_distances(full_dms, self.target_dms)
+            print(f"Trace Distances for {self.circ_name}: {tds}", flush=True)
+            ensemble_mag = np.max(tds)
         else:
             dm = get_final_dm_input(full_un, self.init_sv)
             ensemble_mag = get_obs(dm, self.ham) - self.obs
@@ -375,10 +362,12 @@ class UnitaryDMEvaluator(BasePass):
         np.set_printoptions(precision=2, threshold=np.inf, linewidth=np.inf)
         self.rand_svs = [StateVector.random(circ.num_qudits) for _ in range(20)]
         if self.init_sv is None:
+            print("Generating random initial state for ensemble", flush=True)
             self.init_sv = self.rand_svs[0]
         self.target_dm = get_final_dm_input(circ.get_unitary(), self.init_sv)
         self.target_dms = get_final_dms(circ.get_unitary(), self.rand_svs)
         if self.ham is not None:
             self.obs = get_obs(self.target_dm, self.ham)
+            print(f"Target Observable: {self.obs}", flush=True)
 
         await self.run_full_ensemble()

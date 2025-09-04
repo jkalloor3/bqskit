@@ -24,7 +24,8 @@ norm_cost = GPNormalizedFrobeniusCostGenerator()
 frob_cost = GPNormalizedFrobeniusCostGenerator()
 
 class CheckEnsembleQualityPass(BasePass):
-    def __init__(self, 
+    def __init__(self,
+                 eps: float,
                  count_t: bool = False,
                  csv_name: str = "",
                  checkpoint_extra_str: str = "",
@@ -44,6 +45,14 @@ class CheckEnsembleQualityPass(BasePass):
         self.checkpoint_extra_str = checkpoint_extra_str
         self.calculate_hs = calculate_hs
         self.zero_threshold = zero_threshold
+
+        factor = 4
+        if eps < 10e-2:
+            factor = 10
+        else:
+            factor = 50
+
+        self.max_eps = eps * factor
 
     def get_ensemble_data(self, avg_utry: np.ndarray, 
                           avg_dist: float, 
@@ -91,8 +100,23 @@ class CheckEnsembleQualityPass(BasePass):
 
         print("Checkpoint Dir: ", checkpoint_dir, flush=True)
         print("Starting Check Ensemble Quality Pass", flush=True)
+
+        rerun = False
+
+        if os.path.exists(csv_file):
+            with open(csv_file, 'r') as file:
+                reader = csv.DictReader(file)
+                for row in reader:
+                    if "Epsilon" in row:  # Check if the column value is not empty
+                        dist = float(row["Epsilon"])
+                        if dist > self.max_eps:
+                            # Bad ensemble, just rerun
+                            rerun = True
+                            print("Bad Ensemble Found, rerunning pass", flush=True)
+                            break
+
         
-        if os.path.exists(final_probs_file):
+        if os.path.exists(final_probs_file) and not rerun:
             print("Final Probs File already exists, skipping pass", flush=True)
             return
 
