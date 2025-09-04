@@ -5,18 +5,21 @@ from bqskit.compiler.basepass import BasePass
 from bqskit.compiler.passdata import PassData
 from itertools import chain, product
 from util.generate_probs_pass import GenerateProbabilityPass
+from util.check_ensemble_quality import CheckEnsembleQualityPass
+from util import JiggleEnsemblePass
 import numpy as np
+import os
 # import time
 from bqskit.ir.gates import CNOTGate, U3Gate
 from bqskit.qis import UnitaryMatrix
 from math import ceil
 from util.gg import get_rz_perturbations, gg_gate_def, GridSynthGate, gridsynth_gates_to_cir
 from bqskit.ir.gates import RZGate
-from bqskit.passes import ScanPartitioner, SetTargetPass
+from bqskit.passes import CheckpointRestartPass, ForEachBlockPass
 from bqskit.compiler import Compiler
 from bqskit.ir.circuit import Circuit, CircuitGate, CircuitPoint
 from util.distance import frobenius_cost, normalized_gp_frob_cost, gp_frobenius_cost
-from util.common import load_block, load_ensemble
+from util.common import load_block, load_ensemble, load_jiggled_ensemble, create_jiggled_unitaries
 from util.distance import get_corrected_un, tvd
 import csv
 from bqskit.ir.lang.qasm2 import OPENQASM2Language
@@ -165,6 +168,167 @@ def random_gg_circ(num_qubits: int, num_ggs: int) -> Circuit:
             circ.append_gate(CNOTGate(), (rand_qubit, rand_qubit_2))
     return circ
 
+
+class GenerateAllProbabilitiesPass(BasePass):
+    """
+    A pass that generates all probabilities for a given circuit.
+    This pass is used to generate the probabilities for the ensemble.
+    """
+
+    def __init__(self, checkpoint_extra_str: str = ""):
+        self.checkpoint_extra_str = checkpoint_extra_str
+
+    async def run(self, circ: Circuit, data: PassData) -> None:
+        print("Running Generate All Probabilities Pass", flush=True)
+        checkpoint_dir = data["checkpoint_dir"]
+        ensemble_file_name = os.path.join(checkpoint_dir, "ensemble_{ind}_{extra}.qasms")
+        jiggle_file_name = os.path.join(checkpoint_dir, "ensemble_{ind}_jiggles_{extra}.npy")
+        probs_file_name = os.path.join(checkpoint_dir, "ensemble_{ind}_probs_{extra}.npy")
+        cache_file_name = os.path.join(checkpoint_dir, "ensemble_{ind}_cache_{extra}.pkl")
+        
+        ens_file = ensemble_file_name.format(ind=0, extra=self.checkpoint_extra_str)
+        jiggle_file = jiggle_file_name.format(ind=0, extra=self.checkpoint_extra_str)
+        probs_file = probs_file_name.format(ind=0, extra=self.checkpoint_extra_str)
+        cache_file = cache_file_name.format(ind=0, extra=self.checkpoint_extra_str)
+
+        if not os.path.exists(ens_file):
+            print(f"Ensemble file {ens_file} does not exist, skipping pass", flush=True)
+            data["row_data"] = {}
+            return
+        
+        circ_params = load_jiggled_ensemble(ens_file, jiggle_file,
+                                            cache_file, probs_file)
+        
+        target = data.target
+
+        print("Target shape: ", target.shape, flush=True)
+        print("Circuit Qudits: ", circ.num_qudits, flush=True)
+        
+        orig_circs = load_ensemble(ens_file)
+        
+        orig_uns = []
+        all_caches = [c for _, _, _, c in circ_params]
+        for i , c in enumerate(orig_circs):
+            if all_caches[i] is not None:
+                w_cache = get_runtime().get_cache()
+                w_cache.clear()
+                w_cache.update(all_caches[i])
+            orig_uns.append(get_corrected_un(c.get_unitary(), target))
+
+        ensemble: list[list[UnitaryMatrix]] = await get_runtime().map(create_jiggled_unitaries, circ_params, 
+                                            target=target, add_cost=False)
+        
+        # flat_ensemble = np.concatenate(ensemble)
+        flat_ensemble = list(chain.from_iterable(ensemble))
+        flat_ensemble = [UnitaryMatrix(u) for u in flat_ensemble]
+        all_dists = []
+        for i, sub_ens in enumerate(ensemble):
+            all_dists.append([frobenius_cost(u, target) for u in sub_ens])
+
+        flat_dists = np.concatenate(all_dists)
+
+        # Initial probs from Gridsynth 
+        all_probs = np.load(probs_file)
+
+        # GG probs (uniform across all circs)
+        outer_probs_vector = np.ones(len(orig_circs)) / len(orig_circs)
+        gg_probs = [[p * qp_p for p in probs] for probs, qp_p in zip(all_probs, 
+                                                                       outer_probs_vector)]
+        
+        # FW Seeded Algorithm
+        orig_circs = load_ensemble(ens_file)
+        
+        orig_uns = []
+        all_caches = [c for _, _, _, c in circ_params]
+        for i , c in enumerate(orig_circs):
+            if all_caches[i] is not None:
+                w_cache = get_runtime().get_cache()
+                w_cache.clear()
+                w_cache.update(all_caches[i])
+            orig_uns.append(get_corrected_un(c.get_unitary(), target))
+
+        orig_ensemble = np.array(orig_uns)
+        outer_probs_vector = GenerateProbabilityPass.calculate_probs(orig_ensemble,
+                                                             target)
+        fw_init_probs = [[p * qp_p for p in probs] for probs, qp_p in zip(all_probs, 
+                                                                       outer_probs_vector)]
+        
+        if len(fw_init_probs) > 6000:
+            # For each circ, pick most probable
+            num_params_per_circ = ceil(6000 / len(orig_circs))
+
+            new_inds = []
+            for probs in gg_probs:
+                # Sort indices by probs
+                sorted_inds = np.argsort(probs)[::-1]
+                new_inds.append(sorted_inds[:num_params_per_circ].tolist())
+
+            # Now pick from ensemble and fw_init_probs those inds
+            init_probs = []
+            sub_ensemble = []
+            sub_dists = []
+            for i, inds in enumerate(new_inds):
+                init_probs.append([fw_init_probs[i][j] for j in inds])
+                sub_ensemble.append([ensemble[i][j] for j in inds])
+                sub_dists.append([all_dists[i][j] for j in inds])
+
+        else:
+            sub_ensemble = ensemble
+            init_probs = fw_init_probs
+            sub_dists = all_dists
+
+
+        # Pass probs to FW again
+        init_probs = np.concatenate(init_probs)
+        # sub_ensemble = np.concatenate(sub_ensemble)
+        sub_ensemble: list[UnitaryMatrix] = list(chain.from_iterable(sub_ensemble))
+        sub_ensemble = [UnitaryMatrix(u) for u in sub_ensemble]
+        fw_seeded_probs = GenerateProbabilityPass.calculate_probs(
+            ensemble=np.array(sub_ensemble), target=target, initial_probs=init_probs)
+    
+        
+        # Now calculate average unitaries and error terms
+        flat_gg_probs = np.concatenate(gg_probs)
+        gg_bias_err, gg_var_err, gg_covar_err = calculate_bias_var_covar(flat_ensemble, flat_gg_probs, target)
+        gg_avg_dist = np.average(flat_dists, weights=flat_gg_probs)
+        gamma = gg_bias_err / (gg_avg_dist ** 2)  
+
+        # FW Init Probs
+        flat_fw_init_probs = np.concatenate(fw_init_probs)
+        fw_bias_err, fw_var_err, fw_covar_err = calculate_bias_var_covar(
+            flat_ensemble, flat_fw_init_probs, target)
+        fw_avg_dist = np.average(flat_dists, weights=flat_fw_init_probs)
+        fw_gamma = fw_bias_err / (fw_avg_dist ** 2)
+
+        # FW Seeded Probs
+        fw_seeded_bias_err, fw_seeded_var_err, fw_seeded_covar_err = calculate_bias_var_covar(
+            sub_ensemble, fw_seeded_probs, target)
+
+        # Calculate gamma
+        fw_seeded_avg_dist = np.average(flat_dists, weights=fw_seeded_probs)
+        fw_seeded_gamma = fw_seeded_bias_err / (fw_seeded_avg_dist ** 2)
+
+        data["row_data"] = {
+            "Num Original Circs": len(orig_circs),
+            "Orig Ensemble Size": len(flat_ensemble),
+            "Sub Ensemble Size": len(sub_ensemble),
+
+            "Bias Err (GG)": gg_bias_err,
+            "Var Err + Covar Err (GG)": gg_var_err + gg_covar_err,
+            "Avg. Dist (GG)": gg_avg_dist,
+            "Scaling Factor (GG)": gamma,
+
+            "Bias Err (FW Init)": fw_bias_err,
+            "Var Err + Covar Err (FW Init)": fw_var_err + fw_covar_err,
+            "Avg. Dist (FW Init)": fw_avg_dist,
+            "Scaling Factor (FW Init)": fw_gamma,
+
+            "Bias Err (FW Seeded)": fw_seeded_bias_err,
+            "Var Err + Covar Err (FW Seeded)": fw_seeded_var_err + fw_seeded_covar_err,
+            "Avg. Dist (FW Seeded)": fw_seeded_avg_dist,
+            "Scaling Factor (FW Seeded)": fw_seeded_gamma
+        }
+
 class CreateProbEnsemble(BasePass):
 
     def __init__(self, success_threshold: float = 1e-5, limit: int = 10):
@@ -277,96 +441,86 @@ class CreateProbEnsemble(BasePass):
 
 if __name__ == '__main__':
 
-    compiler = Compiler(num_workers=128)
+    compiler = Compiler(num_workers=256)
+    base_checkpoint_dir_form = "small_block_checkpoints_final_paper_{block_size}_clifft_tket"
 
-    csv_data = []
-    for gg_num in range(4, 6):
-        # Random Circ
-        for _ in range(3):
-            circ = random_gg_circ(4, gg_num)
-            target = circ.get_unitary()
-            num_cnots = circ.count(CNOTGate())
-            num_u3s = circ.count(U3Gate())
+    all_id_data = {}
 
-            _, data = compiler.compile(circ, [
-                SetTargetPass(target),
-                CreateProbEnsemble(success_threshold=(10 ** (-tol)),
-                                limit=10),], 
-                request_data=True)
+    SMALL_BLOCK_SIZE = 4
 
-            uns = data['uns']
-            probs = data['probs']
-                
-            # Normalize probabilities
-            probs = np.array(probs)
-            if np.sum(probs) > 0:
-                probs /= np.sum(probs)
+    # Random ensembles to test
+    all_circ_data = [
+        ("add17", "00", 4.0),
+        # ("mult16", "05", 3.0),
+        # ("mult16", "05", 2.0),
+        # ("qpe10", "0", 2.0),
+        # ("qpe10", "1", 4.0),
+        # ("qpe10", "2", 3.0),
+    ]
+    all_row_data = []
 
-            # Pick 10000 random unitaries from the ensemble
-            NUM_CIRCS_PER_PROB = 4096
-            if len(uns) > NUM_CIRCS_PER_PROB:
-                rand_un_inds = np.random.choice(len(uns), size=NUM_CIRCS_PER_PROB, 
-                                                replace=False)
-                uns = [uns[i] for i in rand_un_inds]
-                dists = [dists[i] for i in rand_un_inds]
-                probs = [probs[i] for i in rand_un_inds]
+    for circ_data in all_circ_data:
+        circ_name, block_name, tol = circ_data
+        circ = load_block(circ_name, block_name, extra="_tket")
+        circ = Circuit.from_file(circ)
 
-            dists = [gp_frobenius_cost(u, target) for u in uns]
+        base_checkpoint_dir = base_checkpoint_dir_form.format(block_size=SMALL_BLOCK_SIZE)
+        checkpoint_dir = f"{base_checkpoint_dir}/{circ_name}_{block_name}_{tol}/"
 
-            ensemble = np.array(uns)
-            H, f = calculate_H_f(ensemble, target)
+        err_thresh = 10 ** (-1 * tol) / 2
 
-            # Method 1: Uniform Probabilities
-            uniform_probs = np.ones(len(uns)) / len(uns)
-            # Calculate the bias, var, and covar errors
-            bias_err, var_err, covar_err = calculate_bias_var_covar(uns, uniform_probs, target)
-            avg_dist = np.mean(dists)
-            gamma = bias_err / (avg_dist ** 2) 
+        jiggle_pass = JiggleEnsemblePass(success_threshold=err_thresh, 
+                            num_circs=2000, 
+                            use_scan_sols=True,
+                            use_ensemble=False,
+                            use_calculated_error=False,
+                            jiggle_skew=0,
+                            count_t=True,
+                            do_u3_perturbation=True,
+                            flood_circ=False,
+                            checkpoint_extra_str="_testing")
 
-            # Method 2: GG Probabilities
-            bias_err_gg, var_err_gg, covar_err_gg = calculate_bias_var_covar(uns, probs, target)
-            avg_dist_gg = np.average(dists, weights=probs)
-            gamma_gg = bias_err_gg / (avg_dist_gg ** 2)
+        id = compiler.submit(circ, [
+            CheckpointRestartPass(checkpoint_dir, 
+                        default_passes=[]),
+            ForEachBlockPass(
+                [
+                jiggle_pass,
+                GenerateProbabilityPass(
+                    run_on_ensemble_0=True,
+                    checkpoint_extra_str="_testing",
+                ),
+                CheckEnsembleQualityPass(
+                    checkpoint_extra_str="_testing",
+                )
+                # GenerateAllProbabilitiesPass(
+                #     checkpoint_extra_str="_testing"
+                # )
+                ])
+            ], request_data=True)
+        all_id_data[id] = circ_data
 
-            # Calculate Probs with QP
-            ensemble = np.array(uns)
-            qp_probs = calculate_probs_qp(H, f)
-
-            bias_err_qp, var_err_qp, covar_err_qp = calculate_bias_var_covar(uns, qp_probs, target)
-            avg_dist_qp = np.average(dists, weights=qp_probs)
-            gamma_qp = bias_err_qp / (avg_dist_qp ** 2)
-
-            #Frank-Wolf algorithm
-            fw_probs = calculate_probs_frank_wolf(H, f)
-            bias_err_fw, var_err_fw, covar_err_fw = calculate_bias_var_covar(uns, fw_probs, target)
-            avg_dist_fw = np.average(dists, weights=fw_probs)
-            gamma_fw = bias_err_fw / (avg_dist_fw ** 2)
-            
-            # Frank-Wolf with seeded probabilities
-            fws_probs = calculate_probs_frank_wolf(H, f, initial_xk=probs)
-            bias_err_fws, var_err_fws, covar_err_fws = calculate_bias_var_covar(uns, fws_probs, target) 
-            avg_dist_fws = np.average(dists, weights=fws_probs)
-            gamma_fws = bias_err_fws / (avg_dist_fws ** 2)
-
-            row = [avg_dist, len(uns), bias_err, var_err + covar_err, gamma,
-                   bias_err_gg, var_err_gg + covar_err_gg, gamma_gg,
-                   bias_err_qp, var_err_qp + covar_err_qp, gamma_qp,
-                   bias_err_fw, var_err_fw + covar_err_fw, gamma_fw,
-                   bias_err_fws, var_err_fws + covar_err_fws, gamma_fws]
-            csv_data.append(row)
+    for id, circ_data in all_id_data.items():
+        _, all_data = compiler.result(id)
+        circ_name, block_name, tol = circ_data
+        block_data = all_data[ForEachBlockPass.key][0]
+        for i, data in enumerate(block_data):
+            row_data = {}
+            row_data["circ_name"] = circ_name
+            row_data["block_name"] = block_name
+            row_data["tol"] = tol
+            row_data["block_num"] = str(i)
+            if len(data["row_data"]) > 0:
+                row_data.update(data["row_data"])
+                all_row_data.append(row_data)
 
     compiler.close()
-    # Write data to csv
-    headers = ["Epsilon", "Num Circs", 
-               "Bias Err (Uniform)", "Var Err + Covar Err (Uniform)", "Scaling Factor (Uniform)",
-               "Bias Err GG", "Var Err + Covar Err GG", "Scaling Factor GG",
-               "Bias Err QP", "Var Err + Covar Err QP", "Scaling Factor QP", 
-               "Bias Err FW", "Var Err + Covar Err FW", "Scaling Factor FW",
-               "Bias Err FW Seeded", "Var Err + Covar Err FW Seeded", "Scaling Factor FW Seeded"
-               ]
-    csv_file_name = 'gg_qp_all_results_rand_circs.csv'
+
+    csv_file_name = 'gg_qp_ckpt_results.csv'
+    headers = list(all_row_data[0].keys())
+    all_row_data = [list(row[h] for h in headers) for row in all_row_data]
     with open(csv_file_name, 'w', newline='') as f:
         writer = csv.writer(f)
         writer.writerow(headers)
-        writer.writerows(csv_data)
+        writer.writerows(all_row_data)
         print("Data written to ", csv_file_name, flush=True)

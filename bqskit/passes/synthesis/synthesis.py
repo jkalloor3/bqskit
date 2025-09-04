@@ -49,4 +49,7 @@ class SynthesisPass(BasePass):
 
     async def run(self, circuit: Circuit, data: PassData) -> None:
         """Perform the pass's operation, see :class:`BasePass` for more."""
+        if circuit.num_qudits <= 1:
+            # If the circuit has only one qudit, we can just return it.
+            return
         circuit.become(await self.synthesize(data.target, data))

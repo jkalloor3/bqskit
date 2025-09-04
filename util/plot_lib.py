@@ -44,6 +44,7 @@ benchmark_labels = {
     "QITE_8_6": "QITE - 8q",
     "FermiHubbard2x2_fh": "Fermi Hubbard - 8q",
     "FermiHubbard2x2_jw_long": "Fermi Hubbard - 8q",
+    "neutrino_NX_3_NF_2_jw_long": "Neutrino Oscillation - 12q"
 }
 
 benchmarks = list(benchmark_labels.keys())
@@ -80,6 +81,7 @@ benchmark_colors = {
     "QITE_8_6": "#e377c2",
     "FermiHubbard2x2_fh": "#2ca02c",
     "FermiHubbard2x2_jw_long": "#2ca02c",
+    "neutrino_NX_3_NF_2_jw_long": "#d62728"
 }
 
 def plot_all_circ_violins(plot_data: dict, 
@@ -178,7 +180,7 @@ def plot_error_violins(circ_data: dict, axs: plt.Axes, color: str,
 
 def plot_dm_data(circ_names: list[str],
                  axs: plt.Axes, 
-                 folder_form="ensemble_dms_{circ_name}_rand",
+                 folder_form="ensemble_dms_{circ_name}",
                  y_label: str = "Trace Distance of Channel",
                  diff: bool = False):
     """
@@ -190,6 +192,8 @@ def plot_dm_data(circ_names: list[str],
     folders = [folder_form.format(circ_name=circ_name) for circ_name in circ_names]
     circ_names = [circ_name for circ_name in circ_names if os.path.exists(folder_form.format(circ_name=circ_name))]
     folders = [folder for folder in folders if os.path.exists(folder)]
+
+    print("Num Folders: ", len(folders))
 
     circ_folders = zip(circ_names, folders)
 
@@ -230,19 +234,31 @@ def plot_dm_data(circ_names: list[str],
                     # Plot Difference from true value
                     y_vals.append(np.abs(true_val - y))
         axs.scatter(x_vals, y_vals, label=benchmark_labels.get(circ_name, circ_name),
-                    color=benchmark_colors.get(circ_name, "black"), s=100)
+                    color=benchmark_colors.get(circ_name, "black"), s=150)
 
 
-    axs.set_xlabel('Epsilon')
-    axs.set_ylabel(y_label)
+    axs.set_xlabel('Epsilon', fontdict={"size": 16})
+    axs.set_ylabel(y_label, fontdict={"size": 16})
     axs.set_yscale('log')
     axs.set_xscale('log')
-    axs.legend()
-    axs.grid(True, which='both', linestyle='--', linewidth=0.5)
+    axs.legend(fontsize=14)
+
+    x_range = np.array(axs.get_xlim())
+    x_vals = np.linspace(x_range[0], x_range[1], 100)
+    axs.plot(x_vals, x_vals**2, color='black', linestyle='--', linewidth=3, label='$\eps^2$')
+
+    for label in axs.get_xticklabels():
+        label.set_fontsize(14)
+    for label in axs.get_yticklabels():
+        label.set_fontsize(14)
+
+
+    # axs.grid(True, which='both', linestyle='--', linewidth=0.5)
 
 
 def plot_td_convergence(circ_name: str,
-                         axs: plt.Axes):
+                         axs: plt.Axes,
+                         bias: bool = False):
     """
     Plot trace distance convergence for a given circuit.
 
@@ -253,6 +269,8 @@ def plot_td_convergence(circ_name: str,
     x_label: Label for the x-axis.
     """
     base_dir = "ensemble_td_convergences_new"
+    if bias:
+        base_dir = "ensemble_bias_convergences_new"
     full_form = os.path.join(base_dir, f"{circ_name}_*_*.pkl")
 
     all_files = glob.glob(full_form)
@@ -267,6 +285,9 @@ def plot_td_convergence(circ_name: str,
         if tol not in all_data:
             all_data[tol] = {}
         all_data[tol][num_samples] = pickle.load(open(file, 'rb'))
+
+    # Sort the data by tol
+    all_data = {k: v for k, v in sorted(all_data.items(), key=lambda item: item[0])}
 
     # Now plot each tol data in a separate line
     colors = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd', '#8c564b']

@@ -1,8 +1,8 @@
 from glob import glob
 import numpy as np
 import matplotlib.pyplot as plt
-from pathlib import Path
 import csv
+from pathlib import Path
 
 
 form = "small_block_checkpoints_final_paper_4_clifft_tket/*/block_*/ensemble_final_probs_fw.npy"
@@ -32,7 +32,9 @@ if __name__ == '__main__':
             if 'Ratio' in row:
                 final_ratio = min(final_ratio, float(row['Ratio']))
 
-        if final_ratio > 20:
+        tol_val = float(probs_file.split("/")[-3].split("_")[-1])
+        min_ratio = min(20, 10 ** (tol_val) / 4)
+        if final_ratio > min_ratio:
             continue
 
         # Get tol val
