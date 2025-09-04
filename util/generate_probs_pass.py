@@ -138,14 +138,16 @@ class GenerateProbabilityPass(BasePass):
 
 
         # Outer Probability Vector is Uniform - no QP at all
-        final_probs_file_1 = f"{checkpoint_dir}/ensemble_all_probs_1_{self.checkpoint_extra_str}.npy"
-        # Outer Probability Vector is according to QP on M unique circuits
-        final_probs_file_2 = f"{checkpoint_dir}/ensemble_all_probs_2_{self.checkpoint_extra_str}.npy"
-        # Outer Probability Vector is according to QP and then QP is run again on full ensemble
-        # In this case, the full ensemble may be shortened so that the QP can run
-        final_probs_file_3 = f"{checkpoint_dir}/ensemble_all_probs_3_{self.checkpoint_extra_str}.npy"
+        # final_probs_file_1 = f"{checkpoint_dir}/ensemble_all_probs_1_{self.checkpoint_extra_str}.npy"
+        # # Outer Probability Vector is according to QP on M unique circuits
+        # final_probs_file_2 = f"{checkpoint_dir}/ensemble_all_probs_2_{self.checkpoint_extra_str}.npy"
+        # # Outer Probability Vector is according to QP and then QP is run again on full ensemble
+        # # In this case, the full ensemble may be shortened so that the QP can run
+        # final_probs_file_3 = f"{checkpoint_dir}/ensemble_all_probs_3_{self.checkpoint_extra_str}.npy"
 
-        if os.path.exists(final_probs_file_3):
+        final_probs_no_qp_file = f"{checkpoint_dir}/ensemble_all_probs_no_qp_{self.checkpoint_extra_str}.npy"
+
+        if os.path.exists(final_probs_no_qp_file):
             return
 
         try:
@@ -158,22 +160,22 @@ class GenerateProbabilityPass(BasePass):
         except:
             return
 
-        target = data.target
+        # target = data.target
         
-        orig_circs = load_ensemble(ens_file)
+        # orig_circs = load_ensemble(ens_file)
         
-        orig_uns = []
-        all_caches = [c for _, _, _, c in circ_params]
-        for i , c in enumerate(orig_circs):
-            if all_caches[i] is not None:
-                w_cache = get_runtime().get_cache()
-                w_cache.clear()
-                w_cache.update(all_caches[i])
-            orig_uns.append(get_corrected_un(c.get_unitary(), target))
+        # orig_uns = []
+        # all_caches = [c for _, _, _, c in circ_params]
+        # for i , c in enumerate(orig_circs):
+        #     if all_caches[i] is not None:
+        #         w_cache = get_runtime().get_cache()
+        #         w_cache.clear()
+        #         w_cache.update(all_caches[i])
+        #     orig_uns.append(get_corrected_un(c.get_unitary(), target))
 
-        ensemble = await get_runtime().map(create_jiggled_unitaries, circ_params, 
-                                            target=target, add_cost=False,
-                                            drop_zeros=False)
+        # ensemble = await get_runtime().map(create_jiggled_unitaries, circ_params, 
+        #                                     target=target, add_cost=False,
+        #                                     drop_zeros=False)
         
         try:
             all_probs = np.load(probs_file)
@@ -187,86 +189,87 @@ class GenerateProbabilityPass(BasePass):
         # unitaries and then calculate the joint distribution of the full
         # ensemble
 
-        orig_ensemble = np.array(orig_uns)
-        # Uniform outer probabilities for original ensemble
+        # orig_ensemble = np.array(orig_uns)
+        # # Uniform outer probabilities for original ensemble
         outer_probs_1 = np.ones(M) / M
-        # Use QP to calculate outer probabilities
-        outer_probs_2 = GenerateProbabilityPass.calculate_probs(orig_ensemble,
-                                                             target)
+        # # Use QP to calculate outer probabilities
+        # outer_probs_2 = GenerateProbabilityPass.calculate_probs(orig_ensemble,
+        #                                                      target)
         
         # Calculate joint distribution for seeding FW
-        final_probs_1 = [[p * qp_p for p in probs] for probs, qp_p in zip(all_probs, outer_probs_1)]
-        final_probs_2 = [[p * qp_p for p in probs] for probs, qp_p in zip(all_probs, outer_probs_2)]
+        final_probs_no_qp = np.array([[p * qp_p for p in probs] for probs, qp_p in zip(all_probs, outer_probs_1)])
+        store_probs(final_probs_no_qp, final_probs_no_qp_file)
+        # final_probs_2 = [[p * qp_p for p in probs] for probs, qp_p in zip(all_probs, outer_probs_2)]
         # Calculate the initial probabilities for the last QP pass
-        init_probs = np.hstack(final_probs_2)
-        if M * N > MAX_QP_CIRCS:
-            # Choose a new N such that M * N <= MAX_QP_CIRCS
-            new_N = ceil(MAX_QP_CIRCS / M)
-            print(f"Reducing ensemble size to {M} * {new_N} = {M * new_N} for QP", flush=True)
+        # init_probs = np.hstack(final_probs_2)
+        # if M * N > MAX_QP_CIRCS:
+        #     # Choose a new N such that M * N <= MAX_QP_CIRCS
+        #     new_N = ceil(MAX_QP_CIRCS / M)
+        #     print(f"Reducing ensemble size to {M} * {new_N} = {M * new_N} for QP", flush=True)
 
-            # Now choose the N highest probabilities for each circuit
-            # If the probs are uniform, then choose random indices
-            new_inds = np.ones((M, new_N), dtype=int) * -1
-            for i, probs in enumerate(all_probs):
-                if uniform:
-                    # Get random indices
-                    new_inds[i] = np.random.choice(len(probs), new_N, 
-                                                   replace=False)
-                else:
-                    # Choose the indices of the highest probabilities
-                    sorted_indices = np.argsort(probs)[-new_N:]
-                    new_inds[i] = sorted_indices
+        #     # Now choose the N highest probabilities for each circuit
+        #     # If the probs are uniform, then choose random indices
+        #     new_inds = np.ones((M, new_N), dtype=int) * -1
+        #     for i, probs in enumerate(all_probs):
+        #         if uniform:
+        #             # Get random indices
+        #             new_inds[i] = np.random.choice(len(probs), new_N, 
+        #                                            replace=False)
+        #         else:
+        #             # Choose the indices of the highest probabilities
+        #             sorted_indices = np.argsort(probs)[-new_N:]
+        #             new_inds[i] = sorted_indices
 
-            # Now choose the new params and probabilities
-            old_params = np.array([params for _, params, _, _ in circ_params])
-            old_probs = np.array([probs for _, _, probs, _ in circ_params])
-            new_params = np.array([old_params[i][new_inds[i]] for i in range(M)])
-            new_probs = np.array([old_probs[i][new_inds[i]] for i in range(M)])
-            # Make sure to normalize the new_probs for each row
-            new_probs = new_probs / np.sum(new_probs, axis=1, keepdims=True)
-            # Multiply by outer probability vector
-            init_probs = [[p * qp_p for p in probs] for probs, qp_p in zip(new_probs, outer_probs_2)]
-            init_probs = np.hstack(init_probs)
+        #     # Now choose the new params and probabilities
+        #     old_params = np.array([params for _, params, _, _ in circ_params])
+        #     old_probs = np.array([probs for _, _, probs, _ in circ_params])
+        #     new_params = np.array([old_params[i][new_inds[i]] for i in range(M)])
+        #     new_probs = np.array([old_probs[i][new_inds[i]] for i in range(M)])
+        #     # Make sure to normalize the new_probs for each row
+        #     new_probs = new_probs / np.sum(new_probs, axis=1, keepdims=True)
+        #     # Multiply by outer probability vector
+        #     init_probs = [[p * qp_p for p in probs] for probs, qp_p in zip(new_probs, outer_probs_2)]
+        #     init_probs = np.hstack(init_probs)
 
-            # Calculate new circ_params
-            new_circ_params = []
-            for i in range(M):
-                new_circ_params.append((orig_circs[i], new_params[i], 
-                                        new_probs[i], all_caches[i]))
+        #     # Calculate new circ_params
+        #     new_circ_params = []
+        #     for i in range(M):
+        #         new_circ_params.append((orig_circs[i], new_params[i], 
+        #                                 new_probs[i], all_caches[i]))
                 
-            print("Init Probabilities shape: ", init_probs.shape, flush=True)
-            print("New Parameters shape: ", new_params.shape, flush=True)
+        #     print("Init Probabilities shape: ", init_probs.shape, flush=True)
+        #     print("New Parameters shape: ", new_params.shape, flush=True)
                 
-            # Calculate the new ensemble
-            ensemble = await get_runtime().map(create_jiggled_unitaries, 
-                                            new_circ_params, target=target,
-                                            drop_zeros=False, 
-                                            add_cost=False)
+        #     # Calculate the new ensemble
+        #     ensemble = await get_runtime().map(create_jiggled_unitaries, 
+        #                                     new_circ_params, target=target,
+        #                                     drop_zeros=False, 
+        #                                     add_cost=False)
             
-            # Now save the new params file to use in next pass
-            new_jiggle_file = os.path.join(checkpoint_dir, f"ensemble_0_jiggles_{self.checkpoint_extra_str}_sub.npy")
-            np.save(new_jiggle_file, new_params)
+        #     # Now save the new params file to use in next pass
+        #     new_jiggle_file = os.path.join(checkpoint_dir, f"ensemble_0_jiggles_{self.checkpoint_extra_str}_sub.npy")
+        #     np.save(new_jiggle_file, new_params)
             
-        full_ensemble = np.concatenate(ensemble, axis=0)
-        print("Full ensemble shape: ", full_ensemble.shape, flush=True)
+        # full_ensemble = np.concatenate(ensemble, axis=0)
+        # print("Full ensemble shape: ", full_ensemble.shape, flush=True)
 
 
-        print("Running Probability on ensemble of size: ", full_ensemble.shape[0], flush=True)
+        # print("Running Probability on ensemble of size: ", full_ensemble.shape[0], flush=True)
         
-        assert full_ensemble.shape[0] == len(init_probs), \
-            f"Full ensemble size does not match initial probabilities size {checkpoint_dir}"
+        # assert full_ensemble.shape[0] == len(init_probs), \
+        #     f"Full ensemble size does not match initial probabilities size {checkpoint_dir}"
             
-        final_probs_3 = GenerateProbabilityPass.calculate_probs(full_ensemble, 
-                                                            target=target,
-                                                            initial_probs=init_probs)
+        # final_probs_3 = GenerateProbabilityPass.calculate_probs(full_ensemble, 
+        #                                                     target=target,
+        #                                                     initial_probs=init_probs)
     
-        print("Sum of all probs: ", np.sum(final_probs_1), np.sum(final_probs_2), np.sum(final_probs_3), flush=True)
+        # print("Sum of all probs: ", np.sum(final_probs_1), np.sum(final_probs_2), np.sum(final_probs_3), flush=True)
         
-        # Reshape all_probs to be of shape (M, N)
-        final_probs_3 = np.array(final_probs_3).reshape(M, -1)
+        # # Reshape all_probs to be of shape (M, N)
+        # final_probs_3 = np.array(final_probs_3).reshape(M, -1)
 
-        # Store all probabilities
-        store_probs(final_probs_1, final_probs_file_1)
-        store_probs(final_probs_2, final_probs_file_2)
-        store_probs(final_probs_3, final_probs_file_3)
+        # # Store all probabilities
+        # store_probs(final_probs_1, final_probs_file_1)
+        # store_probs(final_probs_2, final_probs_file_2)
+        # store_probs(final_probs_3, final_probs_file_3)
 
