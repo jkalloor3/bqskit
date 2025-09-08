@@ -10,7 +10,7 @@ from qiskit.quantum_info import SparsePauliOp
 import pickle
 
 from bqskit.compiler import Compiler
-from bqskit.passes import ScanPartitioner
+from bqskit.passes import ScanPartitioner, ExtendBlockSizePass
 
 
 from common.io import (load_block, get_block_names)
@@ -21,7 +21,8 @@ def partition_circs(compiler: Compiler,
                     circ_name, 
                     block_num: str) -> tuple[dict[str, Circuit], Circuit]:
     workflow = [
-        ScanPartitioner(4)
+        ScanPartitioner(4),
+        ExtendBlockSizePass(4),
     ]
     circ_file = load_block(circ_name, block_num, extra="_tket")
     circ = Circuit.from_file(circ_file)
@@ -29,9 +30,11 @@ def partition_circs(compiler: Compiler,
 
 
 if __name__ == "__main__":
-    circ_names = ["FermiHubbard2x2_jw_long", "LiH_jw_long", "neutrino_NX_3_NF_2_jw_long", "heisenberg7"]
+    # circ_names = ["neutrino_NX_3_NF_2_jw_long", "heisenberg7"]
+    # circ_names = ["mult8", "qaoa10","draper_adder_12"]
+    circ_names = ["LiH_jw_long", "mult8", "qaoa10", "qae11"]
 
-    compiler = Compiler()
+    compiler = Compiler('localhost')
 
     all_partitioned_ids = {}
     all_partitioned_data = {}
@@ -45,7 +48,7 @@ if __name__ == "__main__":
         print("Using non-cliff-t circuits", flush=True)
         base_checkpoint_dir = "small_block_checkpoints_final_paper_4_more_cx_tket"
 
-    partitioned_data_file = f"partitioned_data_all_circs.pickle"
+    partitioned_data_file = f"partitioned_data_all_circs_clifft.pickle"
 
     missing_circ_names = circ_names.copy()
     if os.path.exists(partitioned_data_file):
@@ -54,10 +57,8 @@ if __name__ == "__main__":
         print("Loaded partitioned data from file.", list(all_partitioned_data.keys()))
         # Only run on circs that are not in data
         missing_circ_names = [name for name in circ_names if name not in all_partitioned_data]
-        print(f"Missing circ names: {missing_circ_names}")
-
-
-
+    
+    print(f"Missing circ names: {missing_circ_names}", flush=True)
     for circ_name in missing_circ_names:
         all_partitioned_ids[circ_name] = {}
         for large_block_num in get_block_names(circ_name, extra="_tket"):
@@ -90,7 +91,7 @@ if __name__ == "__main__":
         full_circ.remove_all_measurements()
         ham = generate_hamiltonian(circ_name, full_circ.num_qudits)
         init_sv = generate_init_state(circ_name, full_circ.num_qudits)
-        print("Init State:", init_sv, flush=True)
+        # print("Init State:", init_sv, flush=True)
         for tol in [1.0, 2.0, 3.0, 4.0, 5.0]:
             checkpoint_folder_form = f"{base_checkpoint_dir}/{circ_name}" + "_{large_block_num}_" + f"{tol}/"
             workflow = [
@@ -101,14 +102,13 @@ if __name__ == "__main__":
                     checkpoint_form=checkpoint_folder_form,
                     ham=ham,
                     partitioned_circ_file=f"partitioned_circs/{circ_name}.pickle",
-                    save_dir=f"ensemble_dms_{circ_name}_init/",
+                    save_dir=f"ensemble_dms_{circ_name}_init{cliff_t_string}/",
                     cliff_t=cliff_t,
                     init_sv=init_sv
                 )
             ]
-            # compiler.compile(full_circ, workflow=workflow)
-            # id = compiler.submit(full_circ, workflow=workflow)
-            # compiler_ids.append(id)
+            id = compiler.submit(full_circ, workflow=workflow)
+            compiler_ids.append(id)
 
     for id in compiler_ids:
         compiler.result(id)

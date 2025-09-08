@@ -15,8 +15,7 @@ import shutil
 
 # enable_logging(True)
 # input_folder = f"/pscratch/sd/j/jkalloor/bqskit/QITE_8"
-input_folder = "ensemble_benchmarks_new"
-# input_folder = "qce23_qfactor_benchmarks"
+input_folder = "qce23_qfactor_benchmarks"
 good_output_folder = 'good_blocks'
 bad_output_folder = 'bad_blocks'
 block_save_dir = "block_qasms_{circ_name}/"

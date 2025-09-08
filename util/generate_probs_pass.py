@@ -11,6 +11,7 @@ from .common import (load_jiggled_ensemble, create_jiggled_unitaries,
                      load_ensemble, store_params, store_probs)
 from .distance import get_corrected_un
 import os
+import csv
 import cvxpy as cp
 import cvxopt
 
@@ -18,10 +19,20 @@ MAX_QP_CIRCS = 6000
 
 class GenerateProbabilityPass(BasePass):
     
-    def __init__(self, run_on_ensemble_0: bool = False, 
-                 checkpoint_extra_str: str = "") -> None:
+    def __init__(self, eps: float,
+                  run_on_ensemble_0: bool = False, 
+                 checkpoint_extra_str: str = "",) -> None:
         self.run_on_ensemble_0 = run_on_ensemble_0
         self.checkpoint_extra_str = checkpoint_extra_str
+
+        factor = 4
+        if eps < 10e-2:
+            factor = 10
+        else:
+            factor = 50
+
+        self.max_eps = eps * factor
+        
 
     @staticmethod
     def calculate_probs(ensemble: np.ndarray, target: np.ndarray,
@@ -145,6 +156,22 @@ class GenerateProbabilityPass(BasePass):
         # # In this case, the full ensemble may be shortened so that the QP can run
         # final_probs_file_3 = f"{checkpoint_dir}/ensemble_all_probs_3_{self.checkpoint_extra_str}.npy"
 
+        # Check if CSV file exists and has bad data in it
+        # checkpoint_data_file: str = data["checkpoint_data_file"]
+        # final_csv_file = checkpoint_data_file.replace(".data", f"{self.checkpoint_extra_str}.csv")
+        # rerun = False
+        # if os.path.exists(final_csv_file):
+        #     with open(final_csv_file, 'r') as file:
+        #         reader = csv.DictReader(file)
+        #         for row in reader:
+        #             if "Epsilon" in row:  # Check if the column value is not empty
+        #                 dist = float(row["Epsilon"])
+        #                 if dist > self.max_eps:
+        #                     # Bad ensemble, just rerun
+        #                     rerun = True
+        #                     break
+
+        # if os.path.exists(final_probs_file_3) and not rerun:
         final_probs_no_qp_file = f"{checkpoint_dir}/ensemble_all_probs_no_qp_{self.checkpoint_extra_str}.npy"
 
         if os.path.exists(final_probs_no_qp_file):
@@ -173,10 +200,13 @@ class GenerateProbabilityPass(BasePass):
         #         w_cache.update(all_caches[i])
         #     orig_uns.append(get_corrected_un(c.get_unitary(), target))
 
-        # ensemble = await get_runtime().map(create_jiggled_unitaries, circ_params, 
-        #                                     target=target, add_cost=False,
+        # ensemble_dists: list[list[tuple[np.ndarray, float]]] = await get_runtime().map(create_jiggled_unitaries, circ_params, 
+        #                                     target=target, add_cost=True,
         #                                     drop_zeros=False)
-        
+
+        # ensemble = [[x[0] for x in sub_ens_dist] for sub_ens_dist in ensemble_dists]
+        # dists = np.array([[x[1] for x in sub_ens_dist] for sub_ens_dist in ensemble_dists])
+
         try:
             all_probs = np.load(probs_file)
             uniform = False
@@ -185,6 +215,23 @@ class GenerateProbabilityPass(BasePass):
             all_probs = [np.ones(N) / N for _ in range(M)]
             uniform = True
             pass
+
+        # For any dist > 100 * eps, set the corresponding prob to 0 and renormalize
+        # for i, probs in enumerate(all_probs):
+        #     bad_dist_inds = np.where(dists[i] > self.max_eps)[0]
+        #     if len(bad_dist_inds) > 0:
+        #         print(f"Bad dist indices for circuit {i}: {bad_dist_inds}", flush=True)
+        #         # Set the probabilities to 0 for these indices
+        #         probs[bad_dist_inds] = 0.0
+        #         # Renormalize the probabilities
+        #         if np.sum(probs) == 0:
+        #             print(f"All probabilities for circuit {i} are 0, setting to lowest distance - BAD ENSEMBLE", flush=True)
+        #             min_ind = np.argmin(dists[i])
+        #             probs[min_ind] = 1.0
+
+        #         probs /= np.sum(probs)
+        #     all_probs[i] = probs
+
         # To seed Frank-Wolf, we will first use Frank-Wolf on un-jiggled 
         # unitaries and then calculate the joint distribution of the full
         # ensemble

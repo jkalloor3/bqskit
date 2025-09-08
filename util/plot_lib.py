@@ -205,7 +205,7 @@ def plot_dm_data(circ_names: list[str],
         pickle_files = glob.glob(os.path.join(folder, '*.pkl'))
         x_vals = []
         y_vals = []
-        full_circ = load_circuit(circ_name, opt=False)
+        full_circ = load_circuit(circ_name)
         full_circ.remove_all_measurements()
         ham = None
         if diff:
