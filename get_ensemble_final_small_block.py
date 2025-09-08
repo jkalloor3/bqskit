@@ -110,7 +110,8 @@ def get_ensemble_workflow(circ_name: str, tol: float, extra: str = "") -> Workfl
                 ),
                 # second_synthesis_pass,
                 jiggle_pass,
-                GenerateProbabilityPass(run_on_ensemble_0=True,
+                GenerateProbabilityPass(eps=err_thresh * 10,
+                                        run_on_ensemble_0=True,
                                         checkpoint_extra_str=extra_str),
                 CheckEnsembleQualityPass(False,
                                          checkpoint_extra_str=extra_str,
@@ -161,7 +162,7 @@ def get_shortest_circuits(circ_data: list[tuple[str, str, float]], extra: str = 
         for circ_name, _, tol in circ_data
     ]
 
-    num_workers = min(os.cpu_count(), 200)
+    num_workers = min(os.cpu_count(), 250)
     compiler = Compiler(num_workers=num_workers)
     
     workflow_ind = 0
@@ -173,10 +174,12 @@ def get_shortest_circuits(circ_data: list[tuple[str, str, float]], extra: str = 
         if workflow:
             circ = Circuit.from_file(circ_file)
             ccount = circ.count(CNOTGate())
-            if ccount > 2:
+            if ccount > 4:
                 print("Original CNOT Count: ", circ.count(CNOTGate()), 
                       flush=True)
                 ids.append(compiler.submit(circ, workflow))
+            else:
+                print(f"Skipping {circ_file}, not enough CNOTs", flush=True)
 
     ind = 0
     for id in ids:

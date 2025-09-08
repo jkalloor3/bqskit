@@ -24,9 +24,14 @@ all_circs = plot_circs + large_circs + circs
 all_circs = set(all_circs)
 
 # block_form = "{circ}_*/data.csv"
-block_csv_form = "{circ}_*/block_*.csv"
+NO_QP = True
+if NO_QP:
+    block_csv_form = "{circ}_*/block_*no_qp.csv"
+else:
+    block_csv_form = "{circ}_*/block_*.csv"
 block_qasms_form = "{circ}_*/block_*/ensemble_final_fw.qasms"
 cx_counter = GateCounter(est=True)
+
 
 def find_tket_qasm(circ_name: str) -> str:
     """
@@ -86,7 +91,7 @@ def get_avg_count(checkpoints_dir: str,
                   cliff_t: bool = False):
 
     large_checkpoint_dir = os.path.join(checkpoints_dir, f"{circ_name}_{block_num}_{tol}")
-    qasms_file, jiggle_file, _, cache_file, csv_file = get_file_names(large_checkpoint_dir, small_block_num)
+    qasms_file, jiggle_file, _, cache_file, csv_file = get_file_names(large_checkpoint_dir, small_block_num, no_qp=NO_QP)
     if not check_good(csv_file, tol):
         return float("inf")
 
@@ -308,15 +313,14 @@ def get_orig_counts(circuits: list[str], cliff_t: bool = False,
 
 if __name__ == '__main__':
     # Collect data from all folders
-    use_small_block = True
     plot = True
+    cliff_t = False
     if plot:
         circs = plot_circs
         output_cx = False
     else:
         circs = all_circs
         output_cx = True
-    cliff_t = True
 
     if not cliff_t:
         small_block_checkpoints_dir_1 = f"small_block_checkpoints_final_paper_4_more_cx_tket"
@@ -326,7 +330,9 @@ if __name__ == '__main__':
         small_block_checkpoints_dir_2 = f"small_block_checkpoints_final_paper_4_clifft_less_t_tket"
 
     ratio_data = {c: {} for c in circs}
+    update_data_from_folders(ratio_data, small_block_checkpoints_dir_2)
     update_data_from_folders(ratio_data, small_block_checkpoints_dir_1)
+    
 
     print("Ratio data loaded", flush=True)
     if output_cx:
@@ -345,10 +351,15 @@ if __name__ == '__main__':
         print("CX data loaded", flush=True)
         print("CX data more cx:", list(orig_counts.keys()), flush=True)
 
-    if cliff_t:
-        extra = "_cliff"
+    if NO_QP:
+        extra = "_no_qp"
     else:
-        extra = "_nisq"
+        extra = ""
+
+    if cliff_t:
+        extra += "_cliff"
+    else:
+        extra += "_nisq"
 
     if plot:
         # Plot ratio data
