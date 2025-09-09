@@ -11,8 +11,8 @@ from typing import Generator
 from bqskit.compiler import Compiler
 
 from util import  (get_file_names, load_jiggled_ensemble, EnsembleSampler, 
-                   get_sub_block_count, GateCounter, load_circuit, trace_distance,
-                   get_density_matrix, get_block_names, frobenius_cost, tvd_dict)
+                   get_sub_block_count, GateCounter, load_circuit, 
+                   get_block_names, counts_to_probs, tvd)
 
 from bqskit.runtime import get_runtime
 
@@ -269,12 +269,8 @@ class FullCircTDPass(BasePass):
         return all_shot_data
 
     async def run(self, circ: Circuit, data: PassData) -> None:
-        self.final_svs = [circ.get_statevector(
-            rand_sv) for rand_sv in self.rand_svs]
-        
-        self.true_counts = [get_shots(sv.get_probs(), 
-                                      NUM_TOTAL_SHOTS) for sv in self.final_svs]
-    
+        self.final_svs = [circ.get_statevector(rand_sv) for rand_sv in self.rand_svs]
+        self.true_probs = [sv.get_probs() for sv in self.final_svs]
 
         un_futs = {}
         for ens_size in self.ens_sizes:
