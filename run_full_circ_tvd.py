@@ -275,7 +275,7 @@ class FullCircTDPass(BasePass):
         un_futs = {}
         for ens_size in self.ens_sizes:
             print("Running TVD calculations", flush=True)
-            output_file = f"ensemble_tvd_convergences_new/{self.circ_name}_{ens_size}_{self.tol}.pkl"
+            output_file = f"ensemble_tvd_convergences_sample_new/{self.circ_name}_{ens_size}_{self.tol}.pkl"
             if os.path.exists(output_file):
                 continue
             print(f"Calculating Data for ensemble size {ens_size}", flush=True)
@@ -292,15 +292,15 @@ class FullCircTDPass(BasePass):
             all_data = []
             for counts in all_counts:
                 # Get tvds for each random sv
-                tvds = [tvd_dict(count, 
-                                 self.true_counts[i]) for i, count in enumerate(counts)]
+                probs = counts_to_probs(counts, self.num_qudits)
+                tvds = [tvd(prob, self.true_probs[i]) for i, prob in enumerate(probs)]
                 # Pick max tvd
                 all_data.append(np.max(tvds))
                 
             print("All Data:", all_data, flush=True)
             td_time = time.time() - sampler_start
             print(f"Calculated data for ensemble size {ens_size} in {td_time:.2f} seconds", flush=True)
-            output_file = f"ensemble_tvd_convergences_new/{self.circ_name}_{ens_size}_{self.tol}.pkl"
+            output_file = f"ensemble_tvd_convergences_sample_new/{self.circ_name}_{ens_size}_{self.tol}.pkl"
             Path(output_file).parent.mkdir(parents=True, exist_ok=True)
             with open(output_file, 'wb') as f:
                 pickle.dump(all_data, f)
