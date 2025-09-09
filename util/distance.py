@@ -38,6 +38,15 @@ def tvd_sv(p: np.ndarray[np.complex128], q: np.ndarray[np.complex128]) -> np.flo
     q_probs = np.abs(q) ** 2
     return 0.5 * np.sum(np.abs(p_probs - q_probs))
 
+def counts_to_probs(counts: dict[str, int], 
+                    num_qubits: int) -> np.ndarray[np.float64]:
+    probs = np.zeros(2**num_qubits, dtype=np.float64)
+    shots = sum(counts.values())
+    for bitstring, count in counts.items():
+        index = int(bitstring, 2)
+        probs[index] = count / shots
+    return probs
+
 def tvd(p: np.ndarray[np.complex128], q: np.ndarray[np.complex128]) -> np.float64:
     return 0.5 * np.sum(np.abs(p - q))
 

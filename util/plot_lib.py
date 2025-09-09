@@ -237,7 +237,7 @@ def plot_dm_data(circ_names: list[str],
                     color=benchmark_colors.get(circ_name, "black"), s=150)
 
 
-    axs.set_xlabel('Epsilon', fontdict={"size": 16})
+    axs.set_xlabel('Epsilon ($\epsilon$)', fontdict={"size": 16})
     axs.set_ylabel(y_label, fontdict={"size": 16})
     axs.set_yscale('log')
     axs.set_xscale('log')
