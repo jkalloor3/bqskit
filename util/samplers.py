@@ -255,5 +255,9 @@ class OrderedEnsembleSampler:
             rho_out += batch_rho
 
         # Assert that the output is a valid density matrix
+        if not np.isclose(np.trace(rho_out), 1.0):
+            print("Warning: Output density matrix is not normalized.")
+            print(np.sum(self.all_probs))
+            print(np.trace(rho_out))
         assert np.isclose(np.trace(rho_out), 1.0)
         return rho_out
