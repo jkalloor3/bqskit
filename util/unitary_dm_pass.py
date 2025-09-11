@@ -13,13 +13,13 @@ import glob
 import csv
 from pathlib import Path
 from .counter import load_avg_ensemble_counts_full, GateCounter
-from .common import (create_avg_utry, load_jiggled_ensemble, 
-                     get_block_names, create_jiggled_unitaries)
-from .distance import trace_distance, get_density_matrix, frobenius_cost
+from .dm_runner import generate_full_runner
+from .distance import trace_distance, get_density_matrix
+from .common import get_block_names
 
 from bqskit.runtime import get_runtime
 
-NUM_SAMPLES = 30
+NUM_SAMPLES = 2
 
 
 def get_obs(dm: np.ndarray, ham: np.ndarray) -> float:
@@ -27,15 +27,6 @@ def get_obs(dm: np.ndarray, ham: np.ndarray) -> float:
     Get the observable for the output density matrix.
     '''
     return np.real(np.trace(ham @ dm))
-
-def get_final_dm_input(un: UnitaryMatrix, sv_in: StateVector) -> np.ndarray:
-    '''
-    Get the final density matrix for a circuit.
-    '''
-    sv = StateVector(sv_in.numpy)
-    sv.apply(un, list(range(un.num_qudits)))
-    dm =  get_density_matrix(sv.numpy)
-    return dm
 
 
 def get_final_dm(un: UnitaryMatrix) -> np.ndarray:
@@ -105,9 +96,11 @@ def get_sub_block_count(large_block_dir: str,
                 min_ratio = min(min_ratio, float(row["Ratio"]))
                 final_frob_cost = min(final_frob_cost, float(row["Norm. Bias"]))
 
+
     if min_ratio > max_ratio:
         # print(f"Skipping {small_block_num} as ratio is too high: {min_ratio}", flush=True)
         return False, 0
+    
     # Now we need to get the avg. number of CNOTs
     if not cliff_t:
         qasm_str = open(qasm_file, 'r').read()
@@ -120,6 +113,42 @@ def get_sub_block_count(large_block_dir: str,
                                               count_t=True)
 
     return True, count
+
+def calculate_good_blocks(circ_name: str, 
+                          checkpoint_form: str, 
+                          max_tol: float, 
+                          cliff_t: bool) -> tuple[dict[str, set[str]], int]:
+    large_block_nums = get_block_names(circ_name, extra="_tket")
+    print("Large Block Nums: ", large_block_nums)
+    good_blocks: dict[str, set[str]] = {}
+    num_good_blocks = 0
+    for large_block_num in large_block_nums:
+        good_blocks[large_block_num] = set()
+        large_block_dir = checkpoint_form.format(circ_name=circ_name,
+                                                  large_block_num=large_block_num,
+                                                  max_tol=max_tol)
+        small_block_nums = get_sub_block_nums(large_block_dir)
+        for small_block_num in small_block_nums:
+            good, _ = get_sub_block_count(large_block_dir,
+                                                small_block_num, max_tol,
+                                                cliff_t)
+            if not good:
+                continue
+            else:
+                good_blocks[large_block_num].add(small_block_num)
+                num_good_blocks += 1
+    return good_blocks, num_good_blocks
+
+def update_partitioned_data(partitioned_data: dict[str, tuple[dict[str, Circuit], Circuit]],
+                            good_blocks: dict[str, set[str]]) -> dict[str, tuple[dict[str, Circuit], Circuit]]: 
+    new_partitioned_data = {}
+    for large_block_num in good_blocks:
+        sub_partitioned_data, p_circ = partitioned_data[large_block_num]
+        new_sub_partitioned_data = {}
+        for small_block_num in good_blocks[large_block_num]:
+            new_sub_partitioned_data[small_block_num] = sub_partitioned_data[small_block_num]
+        new_partitioned_data[large_block_num] = (new_sub_partitioned_data, p_circ)
+    return new_partitioned_data
 
 
 def get_file_names(large_checkpoint_dir, 
@@ -156,7 +185,7 @@ def get_file_names(large_checkpoint_dir,
     return ensemble_file, jiggle_file, probs_file, cache_file, csv_file
 
 
-class UnitaryDMEvaluator(BasePass):
+class DMEvaluator(BasePass):
 
     def __init__(self, circ_name: str, max_tol: float,
                  partitioned_data: dict[str, tuple[dict[str, Circuit], Circuit]],
@@ -166,217 +195,72 @@ class UnitaryDMEvaluator(BasePass):
                  save_dir = "",
                  cliff_t: bool = False,
                  init_sv: StateVector = None) -> None:
-        self.max_tol = max_tol
         self.circ_name = circ_name
-        self.partitioned_data = partitioned_data
         self.ham = ham
-        self.partitioned_circ_file = partitioned_circ_file
+        self.max_tol = max_tol
         self.save_dir = save_dir
-        self.checkpoint_form = checkpoint_form
-        self.cliff_t = cliff_t
-        self.num_good_blocks = self.calculate_good_blocks()
         self.init_sv = init_sv
-    @staticmethod
-    def generate_circ_unitary(large_block_gates: dict[str, ConstantUnitaryGate],
-                                partitioned_circ: Circuit) -> UnitaryMatrix:
-        num_digits = len(str(partitioned_circ.num_operations))
-        circ = partitioned_circ.copy()
-        for block_ind, (cycle, op) in enumerate(circ.operations_with_cycles()):
-            pt = CircuitPoint(cycle, op.location[0])
-            block_name = str(block_ind).zfill(num_digits)
-            assert isinstance(op.gate, CircuitGate)
-            assert isinstance(op.gate._circuit, Circuit)
-            if block_name in large_block_gates:
-                new_block_gate = large_block_gates[block_name]
-                assert isinstance(new_block_gate, ConstantUnitaryGate)
-                if (op.gate._circuit.num_qudits != new_block_gate.num_qudits):
-                    print("Mismatch in qudits: ", block_name, 
-                            op.gate._circuit.num_qudits, 
-                            new_block_gate.num_qudits)
-                assert op.gate._circuit.num_qudits == new_block_gate.num_qudits
-                circ.replace_gate(pt, new_block_gate, op.location)
-        return circ.get_unitary()
+        self.checkpoint_form = checkpoint_form
+        self.partitioned_circ_file = partitioned_circ_file
+        self.cliff_t = cliff_t
+        self.good_blocks, self.num_good_blocks = calculate_good_blocks(
+            circ_name, checkpoint_form, max_tol, cliff_t
+        )
+        print("Good Blocks: ", self.good_blocks)
+        self.partitioned_data = update_partitioned_data(
+            partitioned_data, self.good_blocks
+        )
 
-    @staticmethod
-    async def generate_large_block_unitary(circ_name: str,
-                           block_files: dict[str, list[str]],
-                           block_names: list[str],
-                           block_targets: dict[str, UnitaryMatrix],
-                           pcirc: Circuit,
-                           tol: float = 1.0) -> tuple[ConstantUnitaryGate, 
-                                                    list[ConstantUnitaryGate]]:
-        
-        '''
-        Returns a tuple of the average unitary gate for the block and a list of
-        ConstantUnitaryGates for each sub-block.
-
-        The list contains sample unitaries for each sub-block, in order to 
-        calculate the average distance.
-        
-        '''
-        block_gates = {}
-
-        for block_name, files in block_files.items():
-            circ_params = load_jiggled_ensemble(*files)
-            target = block_targets[block_name]
-            if len(circ_params) < 4:
-                # Make 10 copies of each circuit and split the params amongst them
-                new_circ_params = []
-                for circ, params, probs, cache in circ_params:
-                    param_chunks = np.array_split(params, 10)
-                    probs_chunks = np.array_split(probs, 10)
-                    for i in range(10):
-                        if param_chunks[i].shape[0] > 5000:
-                            # pick a random subset of 5000
-                            rand_inds = np.random.choice(param_chunks[i].shape[0], 5000, replace=False)
-                            param_chunks[i] = param_chunks[i][rand_inds]
-                            probs_chunks[i] = probs_chunks[i][rand_inds]
-                        new_circ_params.append((circ, param_chunks[i], probs_chunks[i], cache))
-                circ_params = new_circ_params
-            
-            # print("Calculating average unitary for block: ", circ_name, block_name, flush=True)
-            utries = await get_runtime().map(create_avg_utry, circ_params, target=target,
-                                                            add_cost=False)
-            avg_utry = np.sum(utries, axis=0)
-            avg_gate = ConstantUnitaryGate(avg_utry)
-            avg_utry_dist = frobenius_cost(avg_utry, target)
-            print(f"Block: {block_name}, Avg. Dist: {avg_utry_dist} Tol: {tol}", flush=True)
-            if avg_utry_dist < 1: # Deal with weird errors?
-                block_gates[block_name] = avg_gate
-            else:
-                print(f"Block: {block_name}, Avg. Dist: {avg_utry_dist} too high", flush=True)
-
-        full_circs = []
-
-        # Get average gate
-        circ = pcirc.copy()
-        ind = 0
-        for cycle, op in circ.operations_with_cycles():
-            pt = CircuitPoint(cycle, op.location[0])
-            block_name = block_names[ind]
-            ind += 1
-            assert isinstance(op.gate, CircuitGate)
-            assert isinstance(op.gate._circuit, Circuit)
-            if block_name in block_gates:
-                un_gate = block_gates[block_name]
-                circ.replace_gate(pt, un_gate, op.location)
-
-        avg_gate = ConstantUnitaryGate(circ.get_unitary())
-        return (avg_gate, full_circs)
-
-    async def get_block_ensemble(self, large_block_num:str) -> tuple[ConstantUnitaryGate, 
-                                                                     list[ConstantUnitaryGate]]:
-        # print("Loading Block: ", large_block_num, flush=True)
-        if len(self.good_block_nums[large_block_num]) == 0:
-            print(f"No good blocks for {large_block_num}, skipping.", flush=True)
-            return None, []
-        print("Loading Block: ", large_block_num, flush=True)
-
-        small_block_circs, small_partitioned_circ = self.partitioned_data[large_block_num]
-        
-        block_files = {}
-        block_targets = {}
-        for small_block_num, small_circ in small_block_circs.items():
-            block_targets[small_block_num] = small_circ.get_unitary()
-
-        large_block_dir = self.checkpoint_form.format(large_block_num=large_block_num)
-        
-        for small_block_num  in self.good_block_nums[large_block_num]:
-            # print("Loading Circuits: ", small_block_num)
-            qasms_file, params_file, probs_file, cache_file, _ = get_file_names(large_block_dir, small_block_num)
-            block_files[small_block_num] = [qasms_file, params_file, cache_file, probs_file]
-
-        small_block_nums = get_sub_block_nums(large_block_dir)
-
-        return await UnitaryDMEvaluator.generate_large_block_unitary(
+        self.full_circ_runner = generate_full_runner(
             circ_name=self.circ_name,
-            block_files=block_files,
-            block_names=small_block_nums,
-            block_targets=block_targets,
-            pcirc=small_partitioned_circ,
-            tol=self.max_tol
+            max_tol=self.max_tol,
+            partitioned_data=self.partitioned_data,
+            checkpoint_form=self.checkpoint_form,
+            partitioned_circ_file=self.partitioned_circ_file,
+            cliff_t=self.cliff_t
         )
 
-    def calculate_good_blocks(self) -> None:
-        self.good_block_nums = {}
-        large_block_nums = get_block_names(self.circ_name, extra="_tket")
-        # print("Large Block Names: ", large_block_nums, flush=True)
-        num_good_blocks = 0
-        good_blocks = []
-        for large_block_num in large_block_nums:
-            self.good_block_nums[large_block_num] = set()
-            small_block_circs, _ = self.partitioned_data[large_block_num]
-            large_block_dir = self.checkpoint_form.format(large_block_num=large_block_num)
-            # print(f"Large Block Dir: {large_block_dir}", flush=True)
-            for small_block_num, small_circ in small_block_circs.items():
-                # print(f"Small Block: {small_block_num} in {large_block_num}", flush=True)
-                good, count = get_sub_block_count(large_block_dir, 
-                                                  small_block_num, self.max_tol,
-                                                  self.cliff_t)
-                if not good:
-                    continue
-                else:
-                    # Use block
-                    num_good_blocks += 1
-                    good_blocks.append((large_block_num, small_block_num, count))
-                    # print(f"Adding {small_block_num} to {large_block_num} with count: {count}", flush=True)
-                    self.good_block_nums[large_block_num].add(small_block_num)
-        # print(list(self.good_block_nums.keys()))
-        print(f"Good Blocks for {self.circ_name}-{self.max_tol}: {len(good_blocks)}", flush=True)
-        return num_good_blocks
-
-    async def run_full_ensemble(self) -> None:
+    async def run_full_ensemble(self, sv: StateVector) -> None:
         ens_data_file = os.path.join(self.save_dir, f"{self.max_tol}.pkl")
-        # print("Ensemble Data File: ", ens_data_file, flush=True)
         if os.path.exists(ens_data_file):
-            print("Already exists: ", ens_data_file, flush=True)
+            print(f"Ensemble data file {ens_data_file} already exists, skipping.", flush=True)
             return
         
-        large_block_nums = get_block_names(self.circ_name, extra="_tket")
-        if len(large_block_nums) == 0:
-            print(f"No large blocks found for {self.circ_name}, skipping.", flush=True)
-            return
-        # print("Large Block Names: ", large_block_nums, flush=True)
-        # print("Calculating Block Ensembles", self.circ_name, flush=True)
-        block_unitaries_samples = await get_runtime().map(self.get_block_ensemble, 
-                                                  large_block_nums)
-        
-        block_unitaries = [b[0] for b in block_unitaries_samples]
+        rho_in = get_density_matrix(sv.numpy)
+        rho_out = await self.full_circ_runner.run(rho_in)
 
-        large_block_uns = dict(zip(large_block_nums, block_unitaries))
-        # Remove all empty block circs
-        large_block_uns = {k: v for k, v in large_block_uns.items() if v is not None}
-        partitioned_circ = pickle.load(open(self.partitioned_circ_file, "rb"))
-
-        full_un = UnitaryDMEvaluator.generate_circ_unitary(
-            large_block_uns,
-            partitioned_circ=partitioned_circ
-        )
-        print(f"Generated full unitary for {self.circ_name} with shape {full_un.shape}", flush=True)
-        if self.ham is None:
-            full_dms = get_final_dms(full_un, self.rand_svs)
-            tds = trace_distances(full_dms, self.target_dms)
-            print(f"Trace Distances for {self.circ_name}: {tds}", flush=True)
-            ensemble_mag = np.max(tds)
-        else:
-            dm = get_final_dm_input(full_un, self.init_sv)
-            ensemble_mag = get_obs(dm, self.ham) - self.obs
-
-        print(f"Ensemble Values for full circ: {ensemble_mag, 10 ** (-1 * self.max_tol)}", flush=True)
-        Path(ens_data_file).parent.mkdir(parents=True, exist_ok=True)
-        pickle.dump((ensemble_mag, 10 ** (-1 * self.max_tol), self.num_good_blocks), open(ens_data_file, "wb"))
-
+        return rho_out
 
     async def run(self, circ: Circuit, data: PassData) -> None:
-        np.set_printoptions(precision=2, threshold=np.inf, linewidth=np.inf)
-        self.rand_svs = [StateVector.random(circ.num_qudits) for _ in range(20)]
-        if self.init_sv is None:
-            print("Generating random initial state for ensemble", flush=True)
-            self.init_sv = self.rand_svs[0]
-        self.target_dm = get_final_dm_input(circ.get_unitary(), self.init_sv)
-        self.target_dms = get_final_dms(circ.get_unitary(), self.rand_svs)
-        if self.ham is not None:
-            self.obs = get_obs(self.target_dm, self.ham)
-            print(f"Target Observable: {self.obs}", flush=True)
+        if self.num_good_blocks == 0:
+            print(f"No good blocks found for {self.circ_name} at tol {self.max_tol}, skipping.", flush=True)
+            return
 
-        await self.run_full_ensemble()
+        if self.ham is not None:
+            # out_sv = circ.get_statevector(self.init_sv)
+            # self.target_dm = get_density_matrix(out_sv.numpy)
+            # self.obs = get_obs(self.target_dm, self.ham)
+            # print(f"Target Observable: {self.obs}", flush=True)
+            rho_out = await self.run_full_ensemble(self.init_sv)
+            final_data = [(rho_out, self.init_sv)]
+        else:
+            rand_svs = [StateVector.random(circ.num_qudits) for _ in range(NUM_SAMPLES)]
+            # target_dms = get_final_dms(circ.get_unitary(), rand_svs)
+            # final_data = []
+            # for rand_sv, target_dm in zip(rand_svs, target_dms):
+            #     rho_out = await self.run_full_ensemble(rand_sv)
+            #     final_data.append((rho_out, rand_sv, target_dm))
+            final_rho_outs = await get_runtime().map(self.run_full_ensemble, rand_svs)
+            final_data = list(zip(final_rho_outs, rand_svs))
+        
+        # Save output rho
+        rho_file = os.path.join(self.save_dir, f"{self.max_tol}_rho_outs.pkl")
+        Path(rho_file).parent.mkdir(parents=True, exist_ok=True)
+        # np.save(rho_file, rho_out)
+        pickle.dump(final_data, open(rho_file, "wb"))
+
+        # ensemble_mag = get_obs(rho_out, self.ham) - self.obs
+
+        # print(f"Ensemble Values for full circ: {ensemble_mag, 10 ** (-1 * self.max_tol)}", flush=True)
+        # Path(ens_data_file).parent.mkdir(parents=True, exist_ok=True)
+        # pickle.dump((ensemble_mag, 10 ** (-1 * self.max_tol), len(self.good_blocks)), open(ens_data_file, "wb"))
