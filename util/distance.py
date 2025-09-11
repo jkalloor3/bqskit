@@ -4,10 +4,19 @@ Library to calculate the trace distance between two density matrices.
 import numpy as np
 from bqskit.qis import UnitaryMatrix
 from bqskit.utils.math import canonical_unitary
+import scipy.linalg
 
-'''
-Calculate the trace distance between two density matrices
-'''
+
+def fidelity(rho: np.ndarray[np.complex128], sigma: np.ndarray[np.complex128]) -> np.float64:
+    '''
+    Calculate the fidelity between two density matrices. These
+    matrices are Hermitian.
+    '''
+    sqrt_rho = canonical_unitary(scipy.linalg.sqrtm(rho))
+    product = sqrt_rho @ sigma @ sqrt_rho
+    sqrt_product = scipy.linalg.sqrtm(product)
+    return np.real(np.trace(sqrt_product)) ** 2
+
 
 def trace_distance(rho: np.ndarray[np.complex128], sigma: np.ndarray[np.complex128]) -> np.float64:
     '''
