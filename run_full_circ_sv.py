@@ -27,8 +27,8 @@ def partition_circs(compiler: Compiler,
 
 
 if __name__ == "__main__":
-    circ_names = ["mult8", "qaoa10", "qae11", "draper_adder_12"]
-    circ_names += ["LiH_jw_long", "heisenberg7", "FermiHubbard2x2_jw_long"]
+    # circ_names = ["mult8", "qaoa10", "qae11", "draper_adder_12"]
+    circ_names = ["LiH_jw_long", "heisenberg7"]
     # circ_names = ["FermiHubbard2x2_jw_long"]
     # circ_names = ["mult8"]
 
@@ -107,8 +107,15 @@ if __name__ == "__main__":
                     init_sv=init_sv
                 )
             ]
-            id = compiler.submit(full_circ, workflow=workflow)
-            compiler_ids.append(id)
+            if full_circ.num_qudits >= 8:
+                # Await the result before starting a new one
+                compiler.compile(full_circ, workflow=workflow)
+            else:
+                # Can launch all jobs at once
+                id = compiler.submit(full_circ, workflow=workflow)
+                compiler_ids.append(id)
 
     for id in compiler_ids:
         compiler.result(id)
+
+    compiler.close()

@@ -210,20 +210,29 @@ class OrderedEnsembleSampler:
         if self.circ_ind >= len(self.circs):
             return None
 
-        rhos = await get_runtime().map(get_next_rho, 
-                                        self.params[self.circ_ind],
-                                        circuit=self.circs[self.circ_ind],
-                                        rho_in=rho_in,
-                                        qubits=qubits,
-                                        cache=self.caches[self.circ_ind],
-                                        cliff_t=self.cliff_t)
-        
+        # Split params into 6 batches to avoid memory issues
+        param_batches = np.array_split(self.params[self.circ_ind], 
+                                       16, axis=0)
+        probs_batches = np.array_split(self.all_probs[self.circ_ind], 
+                                       16, axis=0)
 
+        rho_out = np.zeros_like(rho_in, dtype=np.complex128)
+
+        for param_batch, probs_batch in zip(param_batches, probs_batches):
+            rhos = await get_runtime().map(get_next_rho,
+                                            param_batch,
+                                            circuit=self.circs[self.circ_ind],
+                                            rho_in=rho_in,
+                                            qubits=qubits,
+                                            cache=self.caches[self.circ_ind],
+                                            cliff_t=self.cliff_t)
+            rho_out += np.tensordot(probs_batch, rhos, axes=([0], [0]))
+        
         # Update circ index
         self.circ_ind += 1
         self.param_ind = 0
 
-        return rhos
+        return rho_out
 
     def reset(self) -> None:
         self.circ_ind = 0
@@ -234,20 +243,16 @@ class OrderedEnsembleSampler:
         rho_out = np.zeros_like(rho_in, dtype=np.complex128)
         done = False
         while not done:
-            rho_outs = await self.get_next_batch_rhos(
+            batch_rho = await self.get_next_batch_rhos(
                 rho_in=rho_in,
                 qubits=qubits
             )
 
-            if rho_outs is None:
+            if batch_rho is None:
                 done = True
                 break
             
-            # Scale by probabilities and add to output
-            # rho outs are shape (1024, 256, 256)
-            # all_probs[circ_ind - 1] is shape (1024,)
-            # want to do a weighted sum over axis 0
-            rho_out += np.tensordot(self.all_probs[self.circ_ind - 1], rho_outs, axes=([0], [0]))
+            rho_out += batch_rho
 
         # Assert that the output is a valid density matrix
         assert np.isclose(np.trace(rho_out), 1.0)
