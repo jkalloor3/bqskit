@@ -27,6 +27,14 @@ def trace_distance(rho: np.ndarray[np.complex128], sigma: np.ndarray[np.complex1
     eigvals, _ = np.linalg.eigh(diff)
     return 0.5 * np.sum(np.abs(eigvals))
 
+def operator_norm(rho: np.ndarray[np.complex128]) -> np.float64:
+    '''
+    Calculate the operator norm between two density matrices. These
+    matrices are Hermitian.
+    '''
+    eigvals, _ = np.linalg.eigh(rho)
+    return np.max(np.abs(eigvals))
+
 def get_density_matrix(vector: np.ndarray[np.complex128]) -> np.ndarray[np.complex128]:
     return np.array(np.outer(vector, vector.conj()), dtype=np.complex128)
 
