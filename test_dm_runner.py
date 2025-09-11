@@ -16,9 +16,11 @@ from bqskit.compiler.passdata import PassData
 from bqskit.compiler import Compiler
 
 
-partitioned_data_file = f"partitioned_data_all_circs_clifft.pickle"
+partitioned_data_file = f"partitioned_data_all_circs.pickle"
 all_partitioned_data = pickle.load(open(partitioned_data_file, "rb"))
 
+CLIFF_T = False
+checkpoint_form = "small_block_checkpoints_final_paper_4_more_cx_tket/{circ_name}_{large_block_num}_{max_tol}"
 
 # Testing with bqskit compiler
 
@@ -29,17 +31,17 @@ class TestRunner(BasePass):
 
         # await test_large_runner("mult8")
         await test_circ_runner("FermiHubbard2x2_jw_long", 2.0)
+        # await test_small_runner()
 
 
 async def test_circ_runner(circ_name: str = "LiH_jw_long", 
                       max_tol: float = 2.0):
-    checkpoint_form = "small_block_checkpoints_final_paper_4_clifft_tket/{circ_name}_{large_block_num}_{tol}"
     good_blocks = calculate_good_blocks(
         circ_name=circ_name,
         checkpoint_form=checkpoint_form,
         max_tol=max_tol,
-        cliff_t=True
-    )
+        cliff_t=CLIFF_T
+    )[0]
     # Just use 2 of the small blocks for each large block
     for large_block_num in good_blocks:
         good_blocks[large_block_num] = set(list(good_blocks[large_block_num])[:2])
@@ -59,10 +61,10 @@ async def test_circ_runner(circ_name: str = "LiH_jw_long",
         partitioned_data=updated_data,
         checkpoint_form=checkpoint_form,
         partitioned_circ_file=f"partitioned_circs/{circ_name}.pickle",
-        cliff_t=True
+        cliff_t=CLIFF_T
     )
 
-    init_sv = StateVector.random(orig_circ.num_qudits)
+    init_sv = StateVector.random(num_qubits)
     rho_in = np.outer(init_sv.numpy, np.conj(init_sv.numpy))
     # Get original unitary for comparison
     original_unitary = orig_circ.get_unitary()
@@ -77,13 +79,12 @@ async def test_large_runner(circ_name: str = "LiH_jw_long",
                       large_block_num: str = "0", 
                       max_tol: float = 2.0):
 
-    checkpoint_form = "small_block_checkpoints_final_paper_4_clifft_tket/{circ_name}_{large_block_num}_{max_tol}"
     good_blocks = calculate_good_blocks(
         circ_name=circ_name,
         checkpoint_form=checkpoint_form,
         max_tol=max_tol,
-        cliff_t=True
-    )
+        cliff_t=CLIFF_T
+    )[0]
 
     # Just use 2 of the small blocks
     good_blocks[large_block_num] = set(list(good_blocks[large_block_num])[:2])
@@ -106,7 +107,7 @@ async def test_large_runner(circ_name: str = "LiH_jw_long",
         max_tol=max_tol,
         partitioned_data=updated_data[large_block_num],
         checkpoint_form=checkpoint_form,
-        cliff_t=True
+        cliff_t=CLIFF_T
     )
 
     init_sv = StateVector.random(orig_circ.num_qudits)
@@ -136,13 +137,17 @@ async def test_large_runner(circ_name: str = "LiH_jw_long",
 
 
 
-def test_small_runner(circ_name: str = "heisenberg7", 
+async def test_small_runner(circ_name: str = "heisenberg7", 
                       large_block_num: str = "0", 
                       max_tol: float = 2.0):
 
     sub_block_num = "00"
     ensemble_file_names = get_file_names(
-        large_checkpoint_dir=f"small_block_checkpoints_final_paper_4_clifft_tket/{circ_name}_{large_block_num}_{max_tol}",
+        large_checkpoint_dir=checkpoint_form.format(
+            circ_name=circ_name,
+            large_block_num=large_block_num,
+            max_tol=max_tol
+        ),
         small_block_num=sub_block_num
     )[:-1]
 
@@ -152,7 +157,7 @@ def test_small_runner(circ_name: str = "heisenberg7",
     runner = DensityMatrixRunner(
         qubits=[0,1,2,3],
         ensemble_file_names=ensemble_file_names,
-        cliff_t=True
+        cliff_t=CLIFF_T
     )
 
     init_sv = StateVector.random(4)
@@ -169,7 +174,7 @@ def test_small_runner(circ_name: str = "heisenberg7",
     sample_rho_out = u @ rho_in @ np.conj(u.T)
     runner.sampler.reset()
 
-    rho_out = runner.run(rho_in)
+    rho_out = await runner.run(rho_in)
 
 
     final_time = time.time() - start
@@ -186,7 +191,7 @@ if __name__ == '__main__':
     # test_small_runner()
     # test_large_runner(circ_name="mult8")
 
-    compiler = Compiler(num_workers=128)
+    compiler = Compiler(num_workers=256)
     circ = Circuit(2)
 
     start = time.time()
