@@ -47,8 +47,8 @@ class TestRunner(BasePass):
         """Test the DensityMatrixRunner within a pass."""
 
         # await test_small_runner()
-        # await test_large_runner("mult8")
-        await test_circ_runner("FermiHubbard2x2_jw_long", 2.0)
+        await test_large_runner("draper_adder_12", "0")
+        # await test_circ_runner("FermiHubbard2x2_jw_long", 2.0)
         # await get_runtime().map(TestRunner.rho_comp_test, range(5))
         # for i in range(5):
         #     await TestRunner.rho_comp_test(i)
@@ -208,16 +208,12 @@ async def test_large_runner(circ_name: str = "LiH_jw_long",
         cliff_t=CLIFF_T
     )[0]
 
-    # Just use 2 of the small blocks
-    good_blocks[large_block_num] = set(list(good_blocks[large_block_num])[:2])
-    
+    good_blocks[large_block_num] = ['0', '6', '7']
 
     updated_data = update_partitioned_data(
         partitioned_data=all_partitioned_data[circ_name],
         good_blocks=good_blocks
     )
-
-    # updated_data = {large_block_num: ({}, updated_data[large_block_num][1])}
 
     print("Updated Data Keys: ", list(updated_data[large_block_num][0].keys()))
 
@@ -233,7 +229,8 @@ async def test_large_runner(circ_name: str = "LiH_jw_long",
         cliff_t=CLIFF_T
     )
 
-    await runner.initialize()
+    await runner.initialize("test_large_runner")
+    runner.save("test_large_runner")
 
     init_sv = StateVector.random(orig_circ.num_qudits)
     rho_in = np.outer(init_sv.numpy, np.conj(init_sv.numpy))
@@ -242,15 +239,6 @@ async def test_large_runner(circ_name: str = "LiH_jw_long",
     original_circ = updated_data[large_block_num][1]
     original_unitary = original_circ.get_unitary()
     rho_orig = original_unitary @ rho_in @ np.conj(original_unitary.T)
-
-
-    # Get a random unitary from runner sampler to compare against
-    # u, _ = next(runner.sampler)
-    # sample_rho_out = u @ rho_in @ np.conj(u.T)
-    # runner.sampler.reset()
-
-    # Calculate trace distance of rhos
-    # eps = trace_distance(sample_rho_out, rho_orig)
 
     rho_out = runner.run(rho_in, qubits=np.arange(num_qubits))
 

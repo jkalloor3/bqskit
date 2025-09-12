@@ -6,12 +6,14 @@ from bqskit.runtime import get_runtime
 from bqskit.ir.circuit import Circuit, CircuitPoint, CircuitLocationLike
 from bqskit.ir.gates import ConstantUnitaryGate
 from bqskit.qis import UnitaryMatrix
-from .common import create_jiggled_unitaries
+from .common import create_jiggled_unitaries, get_corrected_un
 from .gg import gridsynth_gates_to_cir, GridSynthGate
+from .distance import frobenius_cost
 
 
 def get_superop(params: np.array, circ: Circuit, 
-                cache: dict, cliff_t: bool) -> np.ndarray:
+                cache: dict, cliff_t: bool,
+                target: UnitaryMatrix) -> np.ndarray:
     ''' Return the density matrix for a single circuit with a single parameter option. '''
     out_circ = circ.copy()
     out_circ.set_params(params)
@@ -30,8 +32,8 @@ def get_superop(params: np.array, circ: Circuit,
                                         ConstantUnitaryGate(clifft_un), 
                                         location=op.location)
 
-    u = out_circ.get_unitary()
-    return np.kron(u.conj(), u)
+    u = get_corrected_un(out_circ.get_unitary(), target)
+    return np.kron(u.conj(), u), u
 
 def get_file_names(large_checkpoint_dir, 
                    small_block_num: str,

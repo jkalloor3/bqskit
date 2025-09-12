@@ -220,18 +220,21 @@ class DMEvaluator(BasePass):
             cliff_t=self.cliff_t
         )
 
-    async def run_full_ensemble(self, sv: StateVector) -> None:
+    async def run_full_ensemble(self, svs: list[StateVector]) -> list[np.ndarray]:
         ens_data_file = os.path.join(self.save_dir, f"{self.max_tol}.pkl")
         if os.path.exists(ens_data_file):
             print(f"Ensemble data file {ens_data_file} already exists, skipping.", flush=True)
             return
         
-        rho_in = get_density_matrix(sv.numpy)
-        await self.full_circ_runner.initialize()
-        num_qubits = sv.num_qudits
-        rho_out = self.full_circ_runner.run(rho_in, np.arange(num_qubits))
+        save_file = os.path.join(self.save_dir, f"{self.max_tol}_superop")
+        await self.full_circ_runner.initialize(save_file)
 
-        return rho_out
+        self.full_circ_runner.save(save_file)
+
+        num_qubits = svs[0].num_qudits
+        rho_ins = [get_density_matrix(sv.numpy) for sv in svs]
+        rho_outs = [self.full_circ_runner.run(rho_in, np.arange(num_qubits)) for rho_in in rho_ins]
+        return rho_outs
 
     async def run(self, circ: Circuit, data: PassData) -> None:
         if self.num_good_blocks == 0:
@@ -239,30 +242,14 @@ class DMEvaluator(BasePass):
             return
 
         if self.ham is not None:
-            # out_sv = circ.get_statevector(self.init_sv)
-            # self.target_dm = get_density_matrix(out_sv.numpy)
-            # self.obs = get_obs(self.target_dm, self.ham)
-            # print(f"Target Observable: {self.obs}", flush=True)
-            rho_out = await self.run_full_ensemble(self.init_sv)
+            rho_out = await self.run_full_ensemble([self.init_sv])[0]
             final_data = [(rho_out, self.init_sv)]
         else:
             rand_svs = [StateVector.random(circ.num_qudits) for _ in range(NUM_SAMPLES)]
-            # target_dms = get_final_dms(circ.get_unitary(), rand_svs)
-            # final_data = []
-            # for rand_sv, target_dm in zip(rand_svs, target_dms):
-            #     rho_out = await self.run_full_ensemble(rand_sv)
-            #     final_data.append((rho_out, rand_sv, target_dm))
-            final_rho_outs = await get_runtime().map(self.run_full_ensemble, rand_svs)
+            final_rho_outs = await self.run_full_ensemble(rand_svs)
             final_data = list(zip(final_rho_outs, rand_svs))
         
         # Save output rho
         rho_file = os.path.join(self.save_dir, f"{self.max_tol}_rho_outs.pkl")
         Path(rho_file).parent.mkdir(parents=True, exist_ok=True)
-        # np.save(rho_file, rho_out)
         pickle.dump(final_data, open(rho_file, "wb"))
-
-        # ensemble_mag = get_obs(rho_out, self.ham) - self.obs
-
-        # print(f"Ensemble Values for full circ: {ensemble_mag, 10 ** (-1 * self.max_tol)}", flush=True)
-        # Path(ens_data_file).parent.mkdir(parents=True, exist_ok=True)
-        # pickle.dump((ensemble_mag, 10 ** (-1 * self.max_tol), len(self.good_blocks)), open(ens_data_file, "wb"))
