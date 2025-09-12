@@ -19,7 +19,7 @@ from .common import get_block_names
 
 from bqskit.runtime import get_runtime
 
-NUM_SAMPLES = 2
+NUM_SAMPLES = 6
 
 
 def get_obs(dm: np.ndarray, ham: np.ndarray) -> float:
@@ -227,7 +227,9 @@ class DMEvaluator(BasePass):
             return
         
         rho_in = get_density_matrix(sv.numpy)
-        rho_out = await self.full_circ_runner.run(rho_in)
+        await self.full_circ_runner.initialize()
+        num_qubits = sv.num_qudits
+        rho_out = self.full_circ_runner.run(rho_in, np.arange(num_qubits))
 
         return rho_out
 

@@ -10,15 +10,14 @@ from .common import create_jiggled_unitaries
 from .gg import gridsynth_gates_to_cir, GridSynthGate
 
 
-def get_next_rho(params: np.array, circuit: Circuit,
-                 rho_in: np.ndarray, qubits: CircuitLocationLike,
-                 cache: dict, cliff_t: bool) -> np.ndarray:
+def get_superop(params: np.array, circ: Circuit, 
+                cache: dict, cliff_t: bool) -> np.ndarray:
     ''' Return the density matrix for a single circuit with a single parameter option. '''
-    out_circ = circuit.copy()
+    out_circ = circ.copy()
     out_circ.set_params(params)
     if cliff_t:
         # Lower all GridSynthGates to corresponding Cliff T circs
-        for cycle, op in circuit.operations_with_cycles():
+        for cycle, op in circ.operations_with_cycles():
             if isinstance(op.gate, GridSynthGate):
                 pt = CircuitPoint(cycle, op.location[0])
                 cache_ind = (op.params[0], int(op.params[1]))
@@ -31,7 +30,8 @@ def get_next_rho(params: np.array, circuit: Circuit,
                                         ConstantUnitaryGate(clifft_un), 
                                         location=op.location)
 
-    return get_single_rho(out_circ.get_unitary(), rho_in, qubits)
+    u = out_circ.get_unitary()
+    return np.kron(u.conj(), u)
 
 def get_file_names(large_checkpoint_dir, 
                    small_block_num: str,
@@ -65,6 +65,77 @@ def get_file_names(large_checkpoint_dir,
     probs_file = os.path.join(small_checkpoint_dir, "ensemble_0_probs__fw.npy")
     cache_file = os.path.join(small_checkpoint_dir, "ensemble_0_cache__fw.pkl")
     return ensemble_file, jiggle_file, cache_file, probs_file, csv_file
+
+
+def reshape_rho(rho_in: np.ndarray) -> np.ndarray:
+    num_qubits = int(np.log2(rho_in.shape[0]))
+    assert rho_in.shape == (2**num_qubits, 2**num_qubits)
+    # Reshape rho from matrix to tensor
+    rho_tensor = rho_in.reshape([2]*2*num_qubits)
+    return rho_tensor
+
+def permute(rho_tensor: np.ndarray, 
+            gate_loc: np.ndarray[int], 
+            num_qubits: int) -> tuple[np.ndarray, list[int]]:
+    # Move the qubits to be acted on
+    target_ket = list(gate_loc)
+    other_ket = [i for i in range(num_qubits) if i not in gate_loc]
+    target_bra = [i + num_qubits for i in target_ket]
+    other_bra = [i + num_qubits for i in other_ket]
+    perm = target_ket + other_ket + target_bra + other_bra
+
+    # Permute
+    rho_perm = np.transpose(rho_tensor, axes=perm)
+    return rho_perm, perm
+
+def apply_small_superoperator(rho_perm: np.ndarray,
+                              superop: np.ndarray,
+                              gate_size: int,
+                              num_qubits: int) -> np.ndarray:
+    # Reshape into blocks
+    dT = 2 ** gate_size
+    dO = 2 ** (num_qubits - gate_size)
+    rho_block = rho_perm.reshape((dT, dO, dT, dO)).transpose(0,2,1,3)
+
+    # Reshape to matrix for superoperator application
+    rho_targets = rho_block.reshape(dT, dT, dO*dO, order='F')  # shape (ketT, braT, rest)
+    rho_targets = rho_targets.reshape(dT*dT, dO*dO, order='F')
+
+    # Apply superoperator
+    rho_targets = superop @ rho_targets
+
+    # Reshape back to tensor that's same shape
+    rho_targets = rho_targets.reshape(dT, dT, dO*dO, order='F')
+    rho_targets = rho_targets.reshape(dT, dT, dO, dO, order='F')
+    rho_targets = rho_targets.transpose(0,2,1,3)
+
+    return rho_targets
+
+def undo_perm(result: np.ndarray, 
+              perm: list[int],
+              num_qubits: int) -> np.ndarray:
+    # Undo the reshape and permute
+    rho_perm_back = result.reshape([2]*2*num_qubits)
+    inv_perm = np.argsort(perm)
+    rho_out_t = np.transpose(rho_perm_back, axes=inv_perm)
+    rho_out_reshape = rho_out_t.reshape((2**num_qubits, 2**num_qubits))
+    return rho_out_reshape
+
+
+def apply_superoperator(rho_in: np.ndarray,
+                        superop: np.ndarray,
+                        num_qubits: int,
+                        gate_loc: np.ndarray[int]) -> np.ndarray:
+    '''
+    Applies a superoperator to the input density matrix rho_in,
+    returning the output density matrix.
+    '''
+    rho_tensor = reshape_rho(rho_in)
+    rho_perm, perm = permute(rho_tensor, gate_loc, num_qubits)
+    rho_block = apply_small_superoperator(rho_perm, superop, 
+                                          len(gate_loc), num_qubits)
+    rho_out_reshape = undo_perm(rho_block, perm, num_qubits)
+    return rho_out_reshape
 
 def get_single_rho(u: UnitaryMatrix,
                    rho_in: np.ndarray, 
@@ -146,118 +217,3 @@ class EnsembleSampler:
                     out_circ.replace_with_circuit(pt, clifft_circ, as_circuit_gate=True)
             out_circ.unfold_all()
         return out_circ
-
-
-
-class OrderedEnsembleSampler:
-    def __init__(self, all_circ_params: list[tuple[Circuit, np.ndarray, np.ndarray, dict]],
-                 cliff_t: bool = False):
-        self.all_probs = [probs.flatten() for _, _, probs, _ in all_circ_params]
-        self.params = [params for _, params, _, _ in all_circ_params]
-        self.circs = [circ for circ, _, _, _ in all_circ_params]
-        self.caches = [cache for _, _, _, cache in all_circ_params]
-        self.cliff_t = cliff_t
-        self.circ_ind = 0
-        self.param_ind = 0
-    
-    def __iter__(self):
-        return self
-
-    def get_circ(self, param_ind: int, circ_ind: int) -> tuple[UnitaryMatrix, float]:
-        circ = self.circs[circ_ind]
-        param_options = self.params[circ_ind]
-        param = param_options[param_ind]
-        prob = self.all_probs[circ_ind][param_ind]
-        cache = self.caches[circ_ind]
-        out_circ = circ.copy()
-        out_circ.set_params(param)
-        if self.cliff_t:
-            # Lower all GridSynthGates to corresponding Cliff T circs
-            for cycle, op in out_circ.operations_with_cycles():
-                if isinstance(op.gate, GridSynthGate):
-                    pt = CircuitPoint(cycle, op.location[0])
-                    cache_ind = (op.params[0], int(op.params[1]))
-                    t_str = cache[cache_ind]
-                    if op.params[2] == 1:
-                        t_str = "Z" + t_str + "Z"
-                    clifft_un = gridsynth_gates_to_cir(t_str).get_unitary()
-
-                    out_circ.replace_gate(pt, 
-                                          ConstantUnitaryGate(clifft_un), 
-                                          location=op.location)
-
-        return out_circ.get_unitary(), prob
-    
-    def __next__(self):
-        un, prob = self.get_circ(self.param_ind, self.circ_ind)
-
-        param_options = self.params[self.circ_ind]
-
-        # Update indices
-        self.param_ind += 1
-        if self.param_ind >= len(param_options):
-            self.param_ind = 0
-            self.circ_ind += 1
-            if self.circ_ind >= len(self.circs):
-                raise StopIteration
-
-        return un, prob
-    
-    async def get_next_batch_rhos(self, 
-                                  rho_in: np.ndarray,
-                                  qubits: CircuitLocationLike) -> np.ndarray | None:
-        ''' Return all unitaries for a single circuit with all parameter options. '''
-        if self.circ_ind >= len(self.circs):
-            return None
-
-        # Split params into 6 batches to avoid memory issues
-        param_batches = np.array_split(self.params[self.circ_ind], 
-                                       16, axis=0)
-        probs_batches = np.array_split(self.all_probs[self.circ_ind], 
-                                       16, axis=0)
-
-        rho_out = np.zeros_like(rho_in, dtype=np.complex128)
-
-        for param_batch, probs_batch in zip(param_batches, probs_batches):
-            rhos = await get_runtime().map(get_next_rho,
-                                            param_batch,
-                                            circuit=self.circs[self.circ_ind],
-                                            rho_in=rho_in,
-                                            qubits=qubits,
-                                            cache=self.caches[self.circ_ind],
-                                            cliff_t=self.cliff_t)
-            rho_out += np.tensordot(probs_batch, rhos, axes=([0], [0]))
-        
-        # Update circ index
-        self.circ_ind += 1
-        self.param_ind = 0
-
-        return rho_out
-
-    def reset(self) -> None:
-        self.circ_ind = 0
-        self.param_ind = 0
-
-    async def output_rho(self, rho_in: np.ndarray, 
-                   qubits: CircuitLocationLike) -> np.ndarray:
-        rho_out = np.zeros_like(rho_in, dtype=np.complex128)
-        done = False
-        while not done:
-            batch_rho = await self.get_next_batch_rhos(
-                rho_in=rho_in,
-                qubits=qubits
-            )
-
-            if batch_rho is None:
-                done = True
-                break
-            
-            rho_out += batch_rho
-
-        # Assert that the output is a valid density matrix
-        if not np.isclose(np.trace(rho_out), 1.0):
-            print("Warning: Output density matrix is not normalized.")
-            print(np.sum(self.all_probs))
-            print(np.trace(rho_out))
-        assert np.isclose(np.trace(rho_out), 1.0)
-        return rho_out
