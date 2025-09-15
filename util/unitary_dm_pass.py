@@ -221,7 +221,7 @@ class DMEvaluator(BasePass):
         )
 
     async def run_full_ensemble(self, svs: list[StateVector]) -> list[np.ndarray]:
-        ens_data_file = os.path.join(self.save_dir, f"{self.max_tol}.pkl")
+        ens_data_file = os.path.join(self.save_dir, f"{self.max_tol}_rho_outs.pkl")
         if os.path.exists(ens_data_file):
             print(f"Ensemble data file {ens_data_file} already exists, skipping.", flush=True)
             return
@@ -242,11 +242,16 @@ class DMEvaluator(BasePass):
             return
 
         if self.ham is not None:
-            rho_out = await self.run_full_ensemble([self.init_sv])[0]
-            final_data = [(rho_out, self.init_sv)]
+            rho_outs = await self.run_full_ensemble([self.init_sv])
+            if rho_outs is None:
+                return
+            rho = rho_outs[0]
+            final_data = [(rho, self.init_sv)]
         else:
             rand_svs = [StateVector.random(circ.num_qudits) for _ in range(NUM_SAMPLES)]
             final_rho_outs = await self.run_full_ensemble(rand_svs)
+            if final_rho_outs is None:
+                return
             final_data = list(zip(final_rho_outs, rand_svs))
         
         # Save output rho
