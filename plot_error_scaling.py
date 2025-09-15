@@ -13,9 +13,9 @@ from util.plot_lib import plot_all_circ_violins, benchmark_labels
 
 # List of circuits
 circs = ["draper_adder_12", "qae13", "qpe_14", "lgt_17"]  # Replace with your list of circuits
-plot_circs = ["lgt_17", "mult16", "add17", "qpe_14", "qae11", "LiH_jw_long", "FermiHubbard2x2_jw_long", "heisenberg7"] 
-# circs = ["add17", "lgt_17", "qae13", "qpe_14", "QITE_8_0", "mult16", "draper_adder_12", "qae11"]
-large_circs = ["qae33"] #, "heisenberg64", "adder63"]
+plot_circs = ["lgt_17", "mult16", "add17", "qpe_14", "qae11", "LiH_jw_long", "FermiHubbard2x2_jw_long", "heisenberg7", "qugan_395"] 
+circs += ["add17", "lgt_17", "qae13", "qpe_14", "QITE_8_0", "mult16", "draper_adder_12", "qae11", "qaoa10"]
+large_circs = ["qae33", "heisenberg64", "adder63"]
 # plot_circs = []
 # circs = ["LiH_jw_long", "FermiHubbard2x2_jw_long"]
 # large_circs = []
@@ -24,7 +24,7 @@ all_circs = plot_circs + large_circs + circs
 all_circs = set(all_circs)
 
 # block_form = "{circ}_*/data.csv"
-NO_QP = True
+NO_QP = False
 if NO_QP:
     block_csv_form = "{circ}_*/block_*no_qp.csv"
 else:
@@ -91,9 +91,16 @@ def get_avg_count(checkpoints_dir: str,
                   cliff_t: bool = False):
 
     large_checkpoint_dir = os.path.join(checkpoints_dir, f"{circ_name}_{block_num}_{tol}")
-    qasms_file, jiggle_file, _, cache_file, csv_file = get_file_names(large_checkpoint_dir, small_block_num, no_qp=NO_QP)
+    qasms_file, jiggle_file, _, cache_file, csv_file = get_file_names(large_checkpoint_dir, small_block_num, no_qp=False)
     if not check_good(csv_file, tol):
-        return float("inf")
+        # return float("inf")
+        qasms_file, jiggle_file, _, cache_file, csv_file = get_file_names(large_checkpoint_dir, small_block_num, no_qp=True)
+        if not check_good(csv_file, tol):
+            return float("inf")
+
+    if not cliff_t:
+        jiggle_file = None
+        cache_file = None
 
     return load_avg_ensemble_counts_full(
         qasms_file, jiggle_file=jiggle_file, cache_file=cache_file,
@@ -118,17 +125,12 @@ def update_cx_data_from_folders(orig_cx_counts,
                     avg_count = float("inf")
 
                 block_ind = (large_block_num, small_block_num)
-                orig_count = orig_cx_counts[circ_name][block_ind][tol]
-                # If orig count is a tuple, take the 0th element
-                if isinstance(orig_count, tuple):
-                    orig_count, prev_count = orig_count
-                else:
-                    prev_count = orig_count
+                orig_count, prev_count = orig_cx_counts[circ_name][block_ind][tol]
+                # orig_count, prev_count = orig_count
 
+                print(prev_count, orig_count, avg_count, flush=True)
                 new_count = min(prev_count, avg_count)
                 orig_counts[circ_name][block_ind][tol] = (orig_count, new_count)
-                # if avg_count < 100000:
-                #     print(f"New Val: ", (orig_count, new_count), flush=True)
     return orig_counts
 
 # Function to read data.csv from each folder
@@ -206,14 +208,24 @@ def output_csv(data: dict, file_name: str, cliff_t: bool = False):
 
         # Interleave the original counts with the total counts
         row = [benchmark_labels.get(circ, circ)]
-        for eps in sorted_eps:
-            row += [total_orig_counts[eps], total_counts[eps]]
+        if cliff_t:
+            for eps in sorted_eps:
+                row += [total_orig_counts[eps], total_counts[eps]]
+        else:
+            # Just have Baseline at the beginning
+            row += [total_orig_counts[sorted_eps[0]]]
+            row += [total_counts[eps] for eps in sorted_eps]
         rows.append(row)
 
     # Step 3: Create labels for the columns
     labels = ['Circuit']
-    for eps in sorted_eps:
-        labels += [f"Tket: 10e-{int(eps * 2)}", f"Ens: 10e-{int(eps * 2)}"]
+    if cliff_t:
+        for eps in sorted_eps:
+            labels += [f"Baseline", f"Ens: 10e-{int(eps * 2)}"]
+    else:
+        labels += ['Baseline']
+        for eps in sorted_eps:
+            labels += [f"10e-{int(eps * 2)}"]
     # Step 3: Write to CSV
     with open(file_name, 'w', newline='') as f:
         writer = csv.writer(f)
@@ -257,15 +269,18 @@ def get_orig_counts(circuits: list[str], cliff_t: bool = False,
                         extra="_tket")
                 small_circ = Circuit.from_file(tket_file)
                 if small_circ.num_qudits <= 4:
+                    orig_cx_counts[circ_name][(block_num, "0")] = {}
                     if cliff_t:
-                        orig_cx_counts[circ_name][(block_num, "0")] = {}
                         t_counter = GateCounter(est = False)
                         for err in [1.0, 2.0, 3.0, 4.0, 5.0, 6.0]:
                             # print(f"{circ_name}:{block_num}:{err}:", flush=True)
-                            orig_cx_counts[circ_name][(block_num, "0")][err] = t_counter.count_t(small_circ, 10 ** (-err * 2))
+                            t_count = t_counter.count_t(small_circ, 10 ** (-err * 2))
+                            orig_cx_counts[circ_name][(block_num, "0")][err] = (t_count, t_count)
                     else:
                         cx_count = open(tket_file, 'r').read().count("cx")
-                        orig_cx_counts[circ_name][(block_num, "0")] = cx_count
+                        for err in [1.0, 2.0, 3.0, 4.0, 5.0, 6.0]:
+                            orig_cx_counts[circ_name][(block_num, "0")][err] = (cx_count,
+                                                                       cx_count)
                 else:
                     print("Partitioning small block for", circ_name, block_num, flush=True)
                     # We have to partition this small block FML
@@ -298,14 +313,16 @@ def get_orig_counts(circuits: list[str], cliff_t: bool = False,
                 # Check if checkpoint exists:
                 # Need to zero pad block ids for consistency
                 small_block_num = str(i).zfill(num_digits)
+                orig_cx_counts[circ_name][(block_num, small_block_num)] = {}
                 if cliff_t:
-                    orig_cx_counts[circ_name][(block_num, small_block_num)] = {}
                     t_counter = GateCounter(est = False)
                     for err in [1.0, 2.0, 3.0, 4.0, 5.0, 6.0]:
                         # print(f"{circ_name}:{block_num}:{small_block_num}:{err}:", flush=True)
                         orig_cx_counts[circ_name][(block_num, small_block_num)][err] = t_counter.count_t(op.gate._circuit, 10 ** (-err * 2))
                 else:
-                    orig_cx_counts[circ_name][(block_num, small_block_num)] = op.gate._circuit.count(CNOTGate())
+                    for err in [1.0, 2.0, 3.0, 4.0, 5.0, 6.0]:
+                        ccount = op.gate._circuit.count(CNOTGate())
+                        orig_cx_counts[circ_name][(block_num, small_block_num)][err] = (ccount, ccount)
 
     with open(save_file, 'wb') as f:
         pickle.dump(orig_cx_counts, f)
@@ -313,7 +330,8 @@ def get_orig_counts(circuits: list[str], cliff_t: bool = False,
 
 if __name__ == '__main__':
     # Collect data from all folders
-    plot = True
+    # plot = True
+    plot = False
     cliff_t = False
     if plot:
         circs = plot_circs
@@ -336,8 +354,8 @@ if __name__ == '__main__':
 
     print("Ratio data loaded", flush=True)
     if output_cx:
-        compiler = Compiler('localhost')
-        # compiler = Compiler(num_workers=128)
+        # compiler = Compiler('localhost')
+        compiler = Compiler(num_workers=256)
         orig_counts = get_orig_counts(circs, cliff_t=cliff_t, compiler=compiler)
         # Only use orig_counts for the circs we want
         orig_counts = {circ: orig_counts[circ] for circ in circs}
@@ -346,8 +364,8 @@ if __name__ == '__main__':
         update_cx_data_from_folders(orig_counts, small_block_checkpoints_dir_1,
                                       cliff_t=cliff_t)
 
-        # update_cx_data_from_folders(orig_counts, small_block_checkpoints_dir_2,
-        #                                           cliff_t=cliff_t)
+        update_cx_data_from_folders(orig_counts, small_block_checkpoints_dir_2,
+                                                  cliff_t=cliff_t)
         print("CX data loaded", flush=True)
         print("CX data more cx:", list(orig_counts.keys()), flush=True)
 

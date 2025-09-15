@@ -220,8 +220,7 @@ def plot_dm_data(circ_names: list[str],
             print(f"True value for {circ_name}: {true_val}")
         for pf in pickle_files:
             with open(pf, 'rb') as f:
-                item = pickle.load(f)
-                y = item[0]
+                all_data: list[tuple[np.ndarray, np.ndarray]]= pickle.load(f)
                 # Get tol from filename
                 filename = os.path.basename(pf)
                 parts = filename.split('.')
@@ -229,8 +228,18 @@ def plot_dm_data(circ_names: list[str],
                 x = (10 ** (-tol))
                 x_vals.append(x)
                 if ham is None:
-                    y_vals.append(np.abs(y))
+                    # Calculate Trace Distance from full circ
+                    max_dist = 0
+                    for rho_out, sv in all_data:
+                        sv_out = full_circ.get_statevector(sv)
+                        dm_out = get_density_matrix(sv_out.numpy)
+                        y = trace_distance(dm_out, rho_out)
+                        if np.abs(y) > max_dist:
+                            max_dist = np.abs(y)
+                    y_vals.append(max_dist)
                 else:
+                    rho_out, _ = all_data[0]
+                    y = get_obs(rho_out, ham)
                     # Plot Difference from true value
                     y_vals.append(np.abs(true_val - y))
         axs.scatter(x_vals, y_vals, label=benchmark_labels.get(circ_name, circ_name),

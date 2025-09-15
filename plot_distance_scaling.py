@@ -9,11 +9,10 @@ if __name__ == '__main__':
 
     if TRACE_DISTANCE:
         circ_names = [
-            "qaoa10",
-            "qpe_11",
+            # "qpe_11",
             "mult8",
             "draper_adder_12",
-            # "qae11",
+            "qae11",
         ]
     else:
         circ_names = [
@@ -26,7 +25,7 @@ if __name__ == '__main__':
         ]
         
 
-    folder_form = "ensemble_dms_{circ_name}_init_clifft/"
+    folder_form = "ensemble_dms_{circ_name}_final/"
 
     fig, axs = plt.subplots(1, 1, figsize=(10, 6))
 
