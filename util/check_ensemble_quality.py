@@ -93,31 +93,35 @@ class CheckEnsembleQualityPass(BasePass):
         checkpoint_dir: str = data["checkpoint_dir"]
         checkpoint_data_file: str = data["checkpoint_data_file"]
         csv_file = checkpoint_data_file.replace(".data", f"{self.csv_name}{self.checkpoint_extra_str}_no_qp.csv")
-        final_qasms_file_no_qp = f"{checkpoint_dir}/ensemble_final{self.checkpoint_extra_str}_no_qp.qasms"
-        final_jiggle_file_no_qp = f"{checkpoint_dir}/ensemble_final_jiggle{self.checkpoint_extra_str}_no_qp.npy"
-        final_probs_file_no_qp = f"{checkpoint_dir}/ensemble_final_probs{self.checkpoint_extra_str}_no_qp.npy"
-        final_cache_file_no_qp = f"{checkpoint_dir}/ensemble_final_cache{self.checkpoint_extra_str}_no_qp.pkl"
+        # final_qasms_file_no_qp = f"{checkpoint_dir}/ensemble_final{self.checkpoint_extra_str}_no_qp.qasms"
+        # final_jiggle_file_no_qp = f"{checkpoint_dir}/ensemble_final_jiggle{self.checkpoint_extra_str}_no_qp.npy"
+        # final_probs_file_no_qp = f"{checkpoint_dir}/ensemble_final_probs{self.checkpoint_extra_str}_no_qp.npy"
+        # final_cache_file_no_qp = f"{checkpoint_dir}/ensemble_final_cache{self.checkpoint_extra_str}_no_qp.pkl"
+        final_qasms_file = f"{checkpoint_dir}/ensemble_final{self.checkpoint_extra_str}.qasms"
+        final_jiggle_file = f"{checkpoint_dir}/ensemble_final_jiggle{self.checkpoint_extra_str}.npy"
+        final_probs_file = f"{checkpoint_dir}/ensemble_final_probs{self.checkpoint_extra_str}.npy"
+        final_cache_file = f"{checkpoint_dir}/ensemble_final_cache{self.checkpoint_extra_str}.pkl"
 
         print("Checkpoint Dir: ", checkpoint_dir, flush=True)
         print("Starting Check Ensemble Quality Pass", flush=True)
 
-        # rerun = False
+        rerun = False
 
-        # if os.path.exists(csv_file):
-        #     with open(csv_file, 'r') as file:
-        #         reader = csv.DictReader(file)
-        #         for row in reader:
-        #             if "Epsilon" in row:  # Check if the column value is not empty
-        #                 dist = float(row["Epsilon"])
-        #                 if dist > self.max_eps:
-        #                     # Bad ensemble, just rerun
-        #                     rerun = True
-        #                     print("Bad Ensemble Found, rerunning pass", flush=True)
-        #                     break
+        if os.path.exists(csv_file):
+            with open(csv_file, 'r') as file:
+                reader = csv.DictReader(file)
+                for row in reader:
+                    if "Epsilon" in row:  # Check if the column value is not empty
+                        dist = float(row["Epsilon"])
+                        if dist > self.max_eps:
+                            # Bad ensemble, just rerun
+                            rerun = True
+                            print("Bad Ensemble Found, rerunning pass", flush=True)
+                            break
 
         
-        # if os.path.exists(final_probs_file) and not rerun:
-        if os.path.exists(final_probs_file_no_qp):
+        if os.path.exists(final_probs_file) and not rerun:
+        # if os.path.exists(final_probs_file_no_qp):
             print("Final Probs File already exists, skipping pass", flush=True)
             return
 
@@ -133,17 +137,17 @@ class CheckEnsembleQualityPass(BasePass):
 
         # Compare 3 different probability files
         ensemble = []
-        # for i in range (1, 4):
-        #     probs_file = f"{checkpoint_dir}/ensemble_all_probs_{i}_{self.checkpoint_extra_str}.npy"
-        #     if i == 3:
-        #         # Last ensemble may be shorter, so find the smaller jiggle file
-        #         if os.path.exists(jiggle_file_sub):
-        #             print("Using Smaller Jiggle File: ", jiggle_file_sub, flush=True)
-        #             jiggle_file = jiggle_file_sub
-        #     if os.path.exists(probs_file):
-        #         ensemble.append((ens_file, jiggle_file, cache_file, probs_file))
-        no_qp_probs_file = f"{checkpoint_dir}/ensemble_all_probs_no_qp_{self.checkpoint_extra_str}.npy"
-        ensemble.append((ens_file, jiggle_file, cache_file, no_qp_probs_file))
+        for i in range (1, 4):
+            probs_file = f"{checkpoint_dir}/ensemble_all_probs_{i}_{self.checkpoint_extra_str}.npy"
+            if i == 3:
+                # Last ensemble may be shorter, so find the smaller jiggle file
+                if os.path.exists(jiggle_file_sub):
+                    print("Using Smaller Jiggle File: ", jiggle_file_sub, flush=True)
+                    jiggle_file = jiggle_file_sub
+            if os.path.exists(probs_file):
+                ensemble.append((ens_file, jiggle_file, cache_file, probs_file))
+        # no_qp_probs_file = f"{checkpoint_dir}/ensemble_all_probs_no_qp_{self.checkpoint_extra_str}.npy"
+        # ensemble.append((ens_file, jiggle_file, cache_file, no_qp_probs_file))
 
         if len(ensemble) == 0:
             print("No ensembles found, skipping pass", flush=True)
@@ -234,9 +238,9 @@ class CheckEnsembleQualityPass(BasePass):
             best_cache_file_name = ensemble[best_ind][2]
             best_probs_file = ensemble[best_ind][3]
             if os.path.exists(best_ensemble_file_name):
-                shutil.copyfile(best_ensemble_file_name, final_qasms_file_no_qp)
-                shutil.copyfile(best_jiggle_file_name, final_jiggle_file_no_qp)
-                shutil.copyfile(best_probs_file, final_probs_file_no_qp)
+                shutil.copyfile(best_ensemble_file_name, final_qasms_file)
+                shutil.copyfile(best_jiggle_file_name, final_jiggle_file)
+                shutil.copyfile(best_probs_file, final_probs_file)
                 if os.path.exists(best_cache_file_name):
-                    shutil.copyfile(best_cache_file_name, final_cache_file_no_qp)
+                    shutil.copyfile(best_cache_file_name, final_cache_file)
                 print("Copied best ensemble files to final files", flush=True)
