@@ -7,9 +7,9 @@ from pathlib import Path
 from bqskit.ir.circuit import Circuit, CircuitPoint, CircuitGate
 from bqskit.qis import UnitaryMatrix
 from bqskit.runtime import get_runtime
-from .samplers import get_file_names, get_single_rho, apply_superoperator, get_superop
-from .common import get_block_names, load_jiggled_ensemble
-from .distance import trace_distance, frobenius_cost
+from .samplers import get_single_rho, apply_superoperator, get_superop
+from .common import get_block_names, load_jiggled_ensemble, get_file_names
+from .distance import frobenius_cost
 
 def create_large_block_runner(circ_name: str,
                               large_block_num: str,
@@ -164,6 +164,7 @@ class DensityMatrixRunner:
         """Initialize the DensityMatrixRunner."""
         # If we are given ensemble file names, then we should not be given
         # partitioned circuits or block runners.
+        self.correct = True
         if ensemble_file_names is not None:
             assert partitioned_circ is None
             assert block_runners is None
@@ -173,6 +174,7 @@ class DensityMatrixRunner:
                 target=target, 
                 cliff_t=cliff_t
             )
+            self.correct = (self.runner.circs[0].num_qudits == target.num_qudits)
         else:
             assert partitioned_circ is not None
             assert block_runners is not None

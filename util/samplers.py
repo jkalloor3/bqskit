@@ -1,14 +1,9 @@
-
-import os
-from typing import Generator
 import numpy as np
-from bqskit.runtime import get_runtime
 from bqskit.ir.circuit import Circuit, CircuitPoint, CircuitLocationLike
 from bqskit.ir.gates import ConstantUnitaryGate
 from bqskit.qis import UnitaryMatrix
 from .common import create_jiggled_unitaries, get_corrected_un
 from .gg import gridsynth_gates_to_cir, GridSynthGate
-from .distance import frobenius_cost
 
 
 def get_superop(params: np.array, circ: Circuit, 
@@ -34,40 +29,6 @@ def get_superop(params: np.array, circ: Circuit,
 
     u = get_corrected_un(out_circ.get_unitary(), target)
     return np.kron(u.conj(), u), u
-
-def get_file_names(large_checkpoint_dir, 
-                   small_block_num: str,
-                   no_qp: bool = False) -> tuple[str, str, str, str, str]:
-    small_checkpoint_dir = os.path.join(large_checkpoint_dir, f"block_{small_block_num}")
-
-    if no_qp:
-        ensemble_file = os.path.join(small_checkpoint_dir, "ensemble_final_fw_no_qp.qasms")
-        jiggle_file = os.path.join(small_checkpoint_dir, "ensemble_final_jiggle_fw_no_qp.npy")
-        cache_file = os.path.join(small_checkpoint_dir, "ensemble_final_cache_fw_no_qp.pkl")
-        csv_file = os.path.join(large_checkpoint_dir, f"block_{small_block_num}_fw_no_qp.csv")
-        return ensemble_file, jiggle_file, cache_file, final_probs_file, csv_file
-
-    # Try outputs of newest passes
-    final_probs_file = os.path.join(small_checkpoint_dir, "ensemble_final_probs_fw.npy")
-    if os.path.exists(final_probs_file):
-        ensemble_file = os.path.join(small_checkpoint_dir, "ensemble_final_fw.qasms")
-        jiggle_file = os.path.join(small_checkpoint_dir, "ensemble_final_jiggle_fw.npy")
-        cache_file = os.path.join(small_checkpoint_dir, "ensemble_final_cache_fw.pkl")
-        csv_file = os.path.join(large_checkpoint_dir, f"block_{small_block_num}_fw.csv")
-        return ensemble_file, jiggle_file, cache_file, final_probs_file, csv_file
-    
-    # Otherwise, we do not have the newest set of files, so return the old ones
-    csv_file = os.path.join(large_checkpoint_dir,
-                             f"block_{small_block_num}_fw.csv")
-    if not os.path.exists(csv_file):
-        csv_file = os.path.join(large_checkpoint_dir, 
-                                 f"block_{small_block_num}.csv")
-    ensemble_file = os.path.join(small_checkpoint_dir, "ensemble_0__fw.qasms")
-    jiggle_file = os.path.join(small_checkpoint_dir, "ensemble_0_jiggles__fw.npy")
-    probs_file = os.path.join(small_checkpoint_dir, "ensemble_0_probs__fw.npy")
-    cache_file = os.path.join(small_checkpoint_dir, "ensemble_0_cache__fw.pkl")
-    return ensemble_file, jiggle_file, cache_file, probs_file, csv_file
-
 
 def reshape_rho(rho_in: np.ndarray) -> np.ndarray:
     num_qubits = int(np.log2(rho_in.shape[0]))
@@ -122,7 +83,6 @@ def undo_perm(result: np.ndarray,
     rho_out_t = np.transpose(rho_perm_back, axes=inv_perm)
     rho_out_reshape = rho_out_t.reshape((2**num_qubits, 2**num_qubits))
     return rho_out_reshape
-
 
 def apply_superoperator(rho_in: np.ndarray,
                         superop: np.ndarray,

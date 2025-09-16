@@ -390,3 +390,36 @@ def check_if_finished(circ_name: str,
         ret_1 = ret_1 and (len(rand_ind_files) > 0)
         ret_2 = ret_2 and (len(jiggle_files) > 0)
     return ret_1, ret_2
+
+def get_file_names(large_checkpoint_dir, 
+                   small_block_num: str,
+                   no_qp: bool = False) -> tuple[str, str, str, str, str]:
+    small_checkpoint_dir = os.path.join(large_checkpoint_dir, f"block_{small_block_num}")
+
+    if no_qp:
+        ensemble_file = os.path.join(small_checkpoint_dir, "ensemble_final_fw_no_qp.qasms")
+        jiggle_file = os.path.join(small_checkpoint_dir, "ensemble_final_jiggle_fw_no_qp.npy")
+        cache_file = os.path.join(small_checkpoint_dir, "ensemble_final_cache_fw_no_qp.pkl")
+        csv_file = os.path.join(large_checkpoint_dir, f"block_{small_block_num}_fw_no_qp.csv")
+        return ensemble_file, jiggle_file, cache_file, final_probs_file,  csv_file
+
+    # Try outputs of newest passes
+    final_probs_file = os.path.join(small_checkpoint_dir, "ensemble_final_probs_fw.npy")
+    if os.path.exists(final_probs_file):
+        ensemble_file = os.path.join(small_checkpoint_dir, "ensemble_final_fw.qasms")
+        jiggle_file = os.path.join(small_checkpoint_dir, "ensemble_final_jiggle_fw.npy")
+        cache_file = os.path.join(small_checkpoint_dir, "ensemble_final_cache_fw.pkl")
+        csv_file = os.path.join(large_checkpoint_dir, f"block_{small_block_num}_fw.csv")
+        return ensemble_file, jiggle_file, cache_file, final_probs_file, csv_file
+
+    # Otherwise, we do not have the newest set of files, so return the old ones
+    csv_file = os.path.join(large_checkpoint_dir,
+                             f"block_{small_block_num}_fw.csv")
+    if not os.path.exists(csv_file):
+        csv_file = os.path.join(large_checkpoint_dir, 
+                                 f"block_{small_block_num}.csv")
+    ensemble_file = os.path.join(small_checkpoint_dir, "ensemble_0__fw.qasms")
+    jiggle_file = os.path.join(small_checkpoint_dir, "ensemble_0_jiggles__fw.npy")
+    probs_file = os.path.join(small_checkpoint_dir, "ensemble_0_probs__fw.npy")
+    cache_file = os.path.join(small_checkpoint_dir, "ensemble_0_cache__fw.pkl")
+    return ensemble_file, jiggle_file, cache_file, probs_file, csv_file

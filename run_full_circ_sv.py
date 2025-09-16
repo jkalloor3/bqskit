@@ -11,7 +11,9 @@ from bqskit.passes import ScanPartitioner, ExtendBlockSizePass
 
 
 from common.io import (load_block, get_block_names)
-from util import load_circuit, DMEvaluator, get_sub_block_nums, generate_hamiltonian, generate_init_state
+from util.common import load_circuit
+from util.unitary_dm_pass import DMEvaluator, get_sub_block_nums
+from util.hamiltonian import generate_hamiltonian, generate_init_state
 
 # Get partitioned circuits for all 8-qubit blocks
 def partition_circs(compiler: Compiler,
@@ -27,10 +29,7 @@ def partition_circs(compiler: Compiler,
 
 
 if __name__ == "__main__":
-    # circ_names = ["mult8", "qaoa10", "qae11", "draper_adder_12"]
-    circ_names = ["LiH_jw_long", "heisenberg7"]
-    # circ_names = ["FermiHubbard2x2_jw_long"]
-    # circ_names = ["mult8"]
+    circ_names = ["lgt_17", "qae13", "draper_adder_12", "add17"]
 
     # compiler = Compiler('localhost')
     compiler = Compiler(num_workers=128)
@@ -91,8 +90,10 @@ if __name__ == "__main__":
     for circ_name in circ_names:
         full_circ = load_circuit(circ_name)
         full_circ.remove_all_measurements()
-        ham = generate_hamiltonian(circ_name, full_circ.num_qudits)
-        init_sv = generate_init_state(circ_name, full_circ.num_qudits)
+        # ham = generate_hamiltonian(circ_name, full_circ.num_qudits)
+        ham = None
+        # init_sv = generate_init_state(circ_name, full_circ.num_qudits)
+        init_sv = None
         for tol in [1.0, 2.0, 3.0, 4.0, 5.0]:
             workflow = [
                 DMEvaluator(
@@ -104,16 +105,12 @@ if __name__ == "__main__":
                     partitioned_circ_file=f"partitioned_circs/{circ_name}.pickle",
                     save_dir=f"ensemble_dms_{circ_name}{cliff_t_string}_final/",
                     cliff_t=cliff_t,
-                    init_sv=init_sv
+                    init_sv=init_sv,
+                    run_blocks=True
                 )
             ]
-            if full_circ.num_qudits >= 8:
-                # Await the result before starting a new one
-                compiler.compile(full_circ, workflow=workflow)
-            else:
-                # Can launch all jobs at once
-                id = compiler.submit(full_circ, workflow=workflow)
-                compiler_ids.append(id)
+            # Await the result before starting a new one
+            compiler.compile(full_circ, workflow=workflow)
 
     for id in compiler_ids:
         compiler.result(id)
