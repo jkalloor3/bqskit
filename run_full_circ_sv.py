@@ -29,15 +29,25 @@ def partition_circs(compiler: Compiler,
 
 
 if __name__ == "__main__":
-    circ_names = ["lgt_17", "qae13", "draper_adder_12", "add17"]
+    # circ_names = ["mult8", "qaoa10", "qae11", "draper_adder_12"]
+    # circ_names = ["LiH_jw_long", "heisenberg7"]
+    # circ_names = ["FermiHubbard2x2_jw_long"]
+    # circ_names = ["mult8"]
+    circ_names = [argv[1]]
+    tol = float(argv[2]) if len(argv) > 2 else -1.0
+
+    if tol < 0:
+        tols = [1.0, 2.0, 3.0, 4.0, 5.0]
+    else:
+        tols = [tol]
 
     # compiler = Compiler('localhost')
-    compiler = Compiler(num_workers=128)
+    compiler = Compiler(num_workers=256)
 
     all_partitioned_ids = {}
     all_partitioned_data = {}
 
-    cliff_t = True
+    cliff_t = False
     cliff_t_string = "_clifft" if cliff_t else ""
     if cliff_t:
         print("Using cliff-t circuits", flush=True)
@@ -46,7 +56,7 @@ if __name__ == "__main__":
         print("Using non-cliff-t circuits", flush=True)
         base_checkpoint_dir = "small_block_checkpoints_final_paper_4_more_cx_tket"
 
-    partitioned_data_file = f"partitioned_data_all_circs_clifft.pickle"
+    partitioned_data_file = f"partitioned_data_all_circs{cliff_t_string}.pickle"
 
     missing_circ_names = circ_names.copy()
     if os.path.exists(partitioned_data_file):
@@ -90,11 +100,9 @@ if __name__ == "__main__":
     for circ_name in circ_names:
         full_circ = load_circuit(circ_name)
         full_circ.remove_all_measurements()
-        # ham = generate_hamiltonian(circ_name, full_circ.num_qudits)
-        ham = None
-        # init_sv = generate_init_state(circ_name, full_circ.num_qudits)
-        init_sv = None
-        for tol in [1.0, 2.0, 3.0, 4.0, 5.0]:
+        ham = generate_hamiltonian(circ_name, full_circ.num_qudits)
+        init_sv = generate_init_state(circ_name, full_circ.num_qudits)
+        for tol in tols:
             workflow = [
                 DMEvaluator(
                     circ_name=circ_name,
