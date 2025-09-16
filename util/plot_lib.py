@@ -322,3 +322,42 @@ def plot_td_convergence(circ_name: str,
     # axs.set_xscale('log')
     axs.legend()
     axs.grid(True, which='both', linestyle='--', linewidth=0.5)
+
+def plot_tvd_convergence(all_data: dict,
+                          total_shots: int,
+                          sampling_error: float,
+                          circ_name: str,
+                          axs: plt.Axes):
+    """
+    Plot TVD convergence for a given circuit.
+
+    circ_name: Name of the circuit to plot.
+    axs: Matplotlib Axes object to plot on.
+    folder_form: The folder form for loading the density matrix data.
+    y_label: Label for the y-axis.
+    x_label: Label for the x-axis.
+    """
+    # Now plot each tol data in a separate line
+    color = benchmark_colors.get(circ_name, "black")
+    x_vals = []
+    y_means = []
+    y_mins = []
+    y_maxs = []
+    for sample_size, data in all_data.items():
+        x_vals.append(sample_size)
+        y_means.append(np.mean(data))
+        y_mins.append(np.min(data))
+        y_maxs.append(np.max(data))
+
+    axs.plot(x_vals, y_means, label=benchmark_labels.get(circ_name, circ_name), color=color)
+    axs.fill_between(x_vals, y_mins, y_maxs,
+                     color=color, alpha=0.2)
+    # Plot a horizontal dotted line at sampling error
+    axs.axhline(y=sampling_error, color='red', linestyle='--', linewidth=2,
+                label='Sampling Error of Full Circuit')
+
+    axs.set_xlabel("Number of Sampled Circuits")
+    axs.set_ylabel(f"Num Shots: {total_shots} \n TVD")
+    axs.set_yscale('log')
+    axs.legend()
+    axs.grid(True, which='both', linestyle='--', linewidth=0.5)
