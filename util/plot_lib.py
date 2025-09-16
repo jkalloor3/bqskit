@@ -6,7 +6,7 @@ import glob
 import os
 import pickle 
 
-from .hamiltonian import generate_hamiltonian, get_obs
+from .hamiltonian import generate_hamiltonian, get_obs, generate_init_state
 from .common import load_circuit
 from .distance import get_density_matrix, tvd_dict, trace_distance
 
@@ -182,7 +182,7 @@ def plot_dm_data(circ_names: list[str],
                  axs: plt.Axes, 
                  folder_form="ensemble_dms_{circ_name}",
                  y_label: str = "Trace Distance of Channel",
-                 diff: bool = False):
+                 calc_obs: bool = False):
     """
     Plot density matrix data for a list of circuits.
 
@@ -201,20 +201,31 @@ def plot_dm_data(circ_names: list[str],
     x_vals = []
     y_vals = []
 
+    if calc_obs:
+        file_name = "*rho_out.pkl"
+    else:
+        file_name = "*rho_outs.pkl"
+
+    superop_file_name = "*superop*.npy"
+    min_num_blocks = {circ_name: float('inf') for circ_name in circ_names}
+
     for circ_name, folder in circ_folders:
-        pickle_files = glob.glob(os.path.join(folder, '*.pkl'))
+        pickle_files = glob.glob(os.path.join(folder, file_name))
+        print(f"File name: {os.path.join(folder, file_name)}")
+        print(f"Num pickle files for {circ_name}: {len(pickle_files)}")
+        num_blocks = len(glob.glob(os.path.join(folder, superop_file_name)))
+        if num_blocks < min_num_blocks[circ_name]:
+            min_num_blocks[circ_name] = num_blocks
+            print(f"Num Blocks for {circ_name}: {num_blocks}")
         x_vals = []
         y_vals = []
         full_circ = load_circuit(circ_name)
         full_circ.remove_all_measurements()
         ham = None
-        if diff:
+        if calc_obs:
             ham = generate_hamiltonian(circ_name, full_circ.num_qudits)
-
-        if ham is not None:
-            state = np.zeros(2 ** full_circ.num_qudits)
-            state[0] = 1.0
-            sv_out = full_circ.get_statevector(state)
+            init_sv = generate_init_state(circ_name, full_circ.num_qudits)
+            sv_out = full_circ.get_statevector(init_sv)
             dm = get_density_matrix(sv_out.numpy)
             true_val = get_obs(dm, ham)
             print(f"True value for {circ_name}: {true_val}")
@@ -227,7 +238,7 @@ def plot_dm_data(circ_names: list[str],
                 tol = float(parts[0])  # Assuming the second part is the tolerance
                 x = (10 ** (-tol))
                 x_vals.append(x)
-                if ham is None:
+                if not calc_obs:
                     # Calculate Trace Distance from full circ
                     max_dist = 0
                     for rho_out, sv in all_data:
@@ -244,7 +255,16 @@ def plot_dm_data(circ_names: list[str],
                     y_vals.append(np.abs(true_val - y))
         axs.scatter(x_vals, y_vals, label=benchmark_labels.get(circ_name, circ_name),
                     color=benchmark_colors.get(circ_name, "black"), s=150)
-
+        
+    # Plot num_blocks * eps^2 in benchmark color
+    for circ_name, num_blocks in min_num_blocks.items():
+        if num_blocks == 0:
+            continue
+        x_range = [10**-5, 0.1]
+        x_vals = np.linspace(x_range[0], x_range[1], 100)
+        axs.plot(x_vals, num_blocks * (x_vals**2), 
+                 color=benchmark_colors.get(circ_name, "black"), 
+                 linestyle='--', linewidth=3)
 
     axs.set_xlabel('Epsilon ($\epsilon$)', fontdict={"size": 16})
     axs.set_ylabel(y_label, fontdict={"size": 16})
@@ -252,9 +272,9 @@ def plot_dm_data(circ_names: list[str],
     axs.set_xscale('log')
     axs.legend(fontsize=14)
 
-    x_range = np.array(axs.get_xlim())
-    x_vals = np.linspace(x_range[0], x_range[1], 100)
-    axs.plot(x_vals, x_vals**2, color='black', linestyle='--', linewidth=3, label='$\eps^2$')
+    # x_range = np.array(axs.get_xlim())
+    # x_vals = np.linspace(x_range[0], x_range[1], 100)
+    # axs.plot(x_vals, x_vals**2, color='black', linestyle='--', linewidth=3, label='$\eps^2$')
 
     for label in axs.get_xticklabels():
         label.set_fontsize(14)
