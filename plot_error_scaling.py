@@ -91,10 +91,10 @@ def get_avg_count(checkpoints_dir: str,
                   cliff_t: bool = False):
 
     large_checkpoint_dir = os.path.join(checkpoints_dir, f"{circ_name}_{block_num}_{tol}")
-    qasms_file, jiggle_file, _, cache_file, csv_file = get_file_names(large_checkpoint_dir, small_block_num, no_qp=False)
+    qasms_file, jiggle_file, cache_file, _, csv_file = get_file_names(large_checkpoint_dir, small_block_num, no_qp=False)
     if not check_good(csv_file, tol):
         # return float("inf")
-        qasms_file, jiggle_file, _, cache_file, csv_file = get_file_names(large_checkpoint_dir, small_block_num, no_qp=True)
+        qasms_file, jiggle_file, cache_file, _, csv_file = get_file_names(large_checkpoint_dir, small_block_num, no_qp=True)
         if not check_good(csv_file, tol):
             return float("inf")
 
@@ -108,8 +108,7 @@ def get_avg_count(checkpoints_dir: str,
     )
 
 # Function to read data.csv from each folder
-def update_cx_data_from_folders(orig_cx_counts, 
-                              checkpoints_dir, cliff_t: bool = False):
+def update_count_data(orig_cx_counts, checkpoints_dir, cliff_t: bool = False):
     for circ_name, block_data in orig_cx_counts.items():
         for (large_block_num, small_block_num) in block_data.keys():
             for tol in block_data[(large_block_num, small_block_num)].keys():
@@ -126,8 +125,6 @@ def update_cx_data_from_folders(orig_cx_counts,
 
                 block_ind = (large_block_num, small_block_num)
                 orig_count, prev_count = orig_cx_counts[circ_name][block_ind][tol]
-                # orig_count, prev_count = orig_count
-
                 print(prev_count, orig_count, avg_count, flush=True)
                 new_count = min(prev_count, avg_count)
                 orig_counts[circ_name][block_ind][tol] = (orig_count, new_count)
@@ -181,7 +178,6 @@ def output_csv(data: dict, file_name: str, cliff_t: bool = False):
             orig_counts = orig_circ.count(CNOTGate())
             full_orig_counts[circ] = orig_counts
 
-    
     # Step 2: Build rows
     rows = []
     for circ, block_data in data.items():
@@ -273,7 +269,6 @@ def get_orig_counts(circuits: list[str], cliff_t: bool = False,
                     if cliff_t:
                         t_counter = GateCounter(est = False)
                         for err in [1.0, 2.0, 3.0, 4.0, 5.0, 6.0]:
-                            # print(f"{circ_name}:{block_num}:{err}:", flush=True)
                             t_count = t_counter.count_t(small_circ, 10 ** (-err * 2))
                             orig_cx_counts[circ_name][(block_num, "0")][err] = (t_count, t_count)
                     else:
@@ -299,7 +294,7 @@ def get_orig_counts(circuits: list[str], cliff_t: bool = False,
                             extra="_tket")
                 circ = Circuit.from_file(tket_file)
                 if circ.num_operations == 0:
-                    orig_cx_counts[circ_name][(block_num, "0")] = 0
+                    orig_cx_counts[circ_name][(block_num, "0")] = (0, 0)
                     continue
                 id = compiler.submit(circ.copy(), workflow)
                 id_data[circ_name][block_num] = id
@@ -318,7 +313,8 @@ def get_orig_counts(circuits: list[str], cliff_t: bool = False,
                     t_counter = GateCounter(est = False)
                     for err in [1.0, 2.0, 3.0, 4.0, 5.0, 6.0]:
                         # print(f"{circ_name}:{block_num}:{small_block_num}:{err}:", flush=True)
-                        orig_cx_counts[circ_name][(block_num, small_block_num)][err] = t_counter.count_t(op.gate._circuit, 10 ** (-err * 2))
+                        t_count = t_counter.count_t(op.gate._circuit, 10 ** (-err * 2))
+                        orig_cx_counts[circ_name][(block_num, small_block_num)][err] = (t_count, t_count)
                 else:
                     for err in [1.0, 2.0, 3.0, 4.0, 5.0, 6.0]:
                         ccount = op.gate._circuit.count(CNOTGate())
@@ -330,9 +326,8 @@ def get_orig_counts(circuits: list[str], cliff_t: bool = False,
 
 if __name__ == '__main__':
     # Collect data from all folders
-    # plot = True
     plot = False
-    cliff_t = False
+    cliff_t = True
     if plot:
         circs = plot_circs
         output_cx = False
@@ -351,20 +346,19 @@ if __name__ == '__main__':
     update_data_from_folders(ratio_data, small_block_checkpoints_dir_2)
     update_data_from_folders(ratio_data, small_block_checkpoints_dir_1)
     
-
     print("Ratio data loaded", flush=True)
     if output_cx:
-        # compiler = Compiler('localhost')
-        compiler = Compiler(num_workers=256)
+        compiler = Compiler('localhost')
+        # compiler = Compiler(num_workers=256)
         orig_counts = get_orig_counts(circs, cliff_t=cliff_t, compiler=compiler)
         # Only use orig_counts for the circs we want
         orig_counts = {circ: orig_counts[circ] for circ in circs}
         compiler.close()
         print("Original counts loaded", flush=True)
-        update_cx_data_from_folders(orig_counts, small_block_checkpoints_dir_1,
+        update_count_data(orig_counts, small_block_checkpoints_dir_1,
                                       cliff_t=cliff_t)
 
-        update_cx_data_from_folders(orig_counts, small_block_checkpoints_dir_2,
+        update_count_data(orig_counts, small_block_checkpoints_dir_2,
                                                   cliff_t=cliff_t)
         print("CX data loaded", flush=True)
         print("CX data more cx:", list(orig_counts.keys()), flush=True)
