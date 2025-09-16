@@ -193,7 +193,7 @@ class DMEvaluator(BasePass):
                         small_block_num)[:-1]
                     print([os.path.exists(f) for f in ensemble_file_names], flush=True)
                     all_exists = all([os.path.exists(f) for f in ensemble_file_names])
-                    if not all_exists:
+                    if (not all_exists and cliff_t):
                         print(f"Skipping block {large_block_num}, {small_block_num} as files do not exist.", flush=True)
                         continue
                     runner = DensityMatrixRunner(
