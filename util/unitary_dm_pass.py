@@ -17,7 +17,7 @@ from .distance import trace_distance, get_density_matrix
 from .common import get_block_names, get_file_names
 from .dm_runner import generate_full_runner, DensityMatrixRunner
 
-NUM_SAMPLES = 6
+NUM_SAMPLES = 10
 
 
 def get_obs(dm: np.ndarray, ham: np.ndarray) -> float:
@@ -291,6 +291,9 @@ class DMEvaluator(BasePass):
             final_data = list(zip(final_rho_outs, rand_svs))
         
         # Save output rho
-        rho_file = os.path.join(self.save_dir, f"{self.max_tol}_rho_outs.pkl")
-        Path(rho_file).parent.mkdir(parents=True, exist_ok=True)
-        pickle.dump(final_data, open(rho_file, "wb"))
+        if len(final_data) == 1:
+            file_name = os.path.join(self.save_dir, f"{self.max_tol}_rho_out.pkl")
+        else:
+            file_name = os.path.join(self.save_dir, f"{self.max_tol}_rho_outs.pkl")
+        Path(file_name).parent.mkdir(parents=True, exist_ok=True)
+        pickle.dump(final_data, open(file_name, "wb"))
