@@ -3160,7 +3160,7 @@ class Circuit(DifferentiableUnitary, StateVectorMap, Collection[Operation]):
         are equal.
         """
         if not isinstance(rhs, Circuit):
-            raise NotImplemented
+            return NotImplemented
 
         if self is rhs:
             return True
