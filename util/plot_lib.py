@@ -5,6 +5,7 @@ import numpy as np
 import glob
 import os
 import pickle 
+from bqskit.ir.circuit import Circuit
 
 from .hamiltonian import generate_hamiltonian, get_obs, generate_init_state
 from .common import load_circuit
@@ -182,7 +183,8 @@ def plot_dm_data(circ_names: list[str],
                  axs: plt.Axes, 
                  folder_form="ensemble_dms_{circ_name}",
                  y_label: str = "Trace Distance of Channel",
-                 calc_obs: bool = False):
+                 calc_obs: bool = False,
+                 cliff_t: bool = False):
     """
     Plot density matrix data for a list of circuits.
 
@@ -206,17 +208,27 @@ def plot_dm_data(circ_names: list[str],
     else:
         file_name = "*rho_outs.pkl"
 
-    superop_file_name = "*superop*.npy"
-    min_num_blocks = {circ_name: float('inf') for circ_name in circ_names}
+    if cliff_t:
+        cliff_t_string = "_clifft"
+    else:
+        cliff_t_string = ""
+    
+    partitioned_data_file = f"partitioned_data_all_circs{cliff_t_string}.pickle"
+
+    all_partitioned_data = pickle.load(open(partitioned_data_file, "rb"))
+
+    num_blocks = {circ_name: 0 for circ_name in circ_names}
+    for circ_name in circ_names:
+        for _, block_data in all_partitioned_data[circ_name].items():
+            b_circ: Circuit = block_data[1]
+            num_blocks[circ_name] += b_circ.num_operations
+
+    print("Num Blocks: ", num_blocks)
 
     for circ_name, folder in circ_folders:
         pickle_files = glob.glob(os.path.join(folder, file_name))
         print(f"File name: {os.path.join(folder, file_name)}")
         print(f"Num pickle files for {circ_name}: {len(pickle_files)}")
-        num_blocks = len(glob.glob(os.path.join(folder, superop_file_name)))
-        if num_blocks < min_num_blocks[circ_name]:
-            min_num_blocks[circ_name] = num_blocks
-            print(f"Num Blocks for {circ_name}: {num_blocks}")
         x_vals = []
         y_vals = []
         full_circ = load_circuit(circ_name)
@@ -257,7 +269,7 @@ def plot_dm_data(circ_names: list[str],
                     color=benchmark_colors.get(circ_name, "black"), s=150)
         
     # Plot num_blocks * eps^2 in benchmark color
-    for circ_name, num_blocks in min_num_blocks.items():
+    for circ_name, num_blocks in num_blocks.items():
         if num_blocks == 0:
             continue
         x_range = [10**-5, 0.1]

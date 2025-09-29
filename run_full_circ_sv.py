@@ -29,25 +29,14 @@ def partition_circs(compiler: Compiler,
 
 
 if __name__ == "__main__":
-    # circ_names = ["mult8", "qaoa10", "qae11", "draper_adder_12"]
-    # circ_names = ["LiH_jw_long", "heisenberg7"]
-    # circ_names = ["FermiHubbard2x2_jw_long"]
-    # circ_names = ["mult8"]
-    circ_names = [argv[1]]
-    tol = float(argv[2]) if len(argv) > 2 else -1.0
-
-    if tol < 0:
-        tols = [1.0, 2.0, 3.0, 4.0, 5.0]
-    else:
-        tols = [tol]
-
-    # compiler = Compiler('localhost')
-    compiler = Compiler(num_workers=256)
+    circ_names = ["LiH_jw_long", "heisenberg7"]
+    circ_names += ["FermiHubbard2x2_jw_long"]
+    compiler = Compiler(num_workers=128)
 
     all_partitioned_ids = {}
     all_partitioned_data = {}
 
-    cliff_t = False
+    cliff_t = True
     cliff_t_string = "_clifft" if cliff_t else ""
     if cliff_t:
         print("Using cliff-t circuits", flush=True)
@@ -100,9 +89,11 @@ if __name__ == "__main__":
     for circ_name in circ_names:
         full_circ = load_circuit(circ_name)
         full_circ.remove_all_measurements()
-        ham = generate_hamiltonian(circ_name, full_circ.num_qudits)
-        init_sv = generate_init_state(circ_name, full_circ.num_qudits)
-        for tol in tols:
+        ham = None
+        init_sv = None
+        # ham = generate_hamiltonian(circ_name, full_circ.num_qudits)
+        # init_sv = generate_init_state(circ_name, full_circ.num_qudits)
+        for tol in [1.0, 2.0, 3.0, 4.0, 5.0]:
             workflow = [
                 DMEvaluator(
                     circ_name=circ_name,

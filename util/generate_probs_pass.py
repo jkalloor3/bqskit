@@ -160,16 +160,17 @@ class GenerateProbabilityPass(BasePass):
         checkpoint_data_file: str = data["checkpoint_data_file"]
         final_csv_file = checkpoint_data_file.replace(".data", f"{self.checkpoint_extra_str}.csv")
         rerun = False
-        if os.path.exists(final_csv_file):
-            with open(final_csv_file, 'r') as file:
-                reader = csv.DictReader(file)
-                for row in reader:
-                    if "Epsilon" in row:  # Check if the column value is not empty
-                        dist = float(row["Epsilon"])
-                        if dist > self.max_eps:
-                            # Bad ensemble, just rerun
-                            rerun = True
-                            break
+        # if os.path.exists(final_csv_file):
+        #     with open(final_csv_file, 'r') as file:
+        #         reader = csv.DictReader(file)
+        #         for row in reader:
+        #             if "Epsilon" in row:  # Check if the column value is not empty
+        #                 dist = float(row["Epsilon"])
+        #                 if dist > self.max_eps:
+        #                     # Bad ensemble, just rerun
+        #                     print("Bad ensemble detected from CSV, rerunning probability pass", flush=True)
+        #                     rerun = True
+        #                     break
 
         if os.path.exists(final_probs_file_3) and not rerun:
             return

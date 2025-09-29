@@ -30,34 +30,36 @@ cliff_t = True
 # cliff_t = False
 
 if __name__ == '__main__':
-    # file = "get_ensemble_final_small_block"
+    file = "get_ensemble_final_small_block_clifft"
     # if cliff_t:
     #     file += "_clifft"
     # file = "run_full_circ_sim"
-    file = "run_full_circ_td"
+    # file = "run_full_circ_td"
     # file = "run_full_circ_sv"
-    circs = []
+    # circs = []
     # circs += ["LiH_hatt"]
     # circs = [f"QITE_8_{i}" for i in range(7)]
     # circs.extend(["qae11", "qaoa10", "qpe_11"])
     # circs += ["qaoa10", "qpe10", "LiH", "mult16"]
     # circs = ["heisenberg7"]
-    circs.extend(["qae11"])
+    # circs.extend(["qae11"])
+    # circs = ["lgt_17", "mult16", "qpe_14", "qae11", "LiH_jw_long", "FermiHubbard2x2_jw_long", "heisenberg7"] 
+    circs = ["mult8"]
 
     circs = set(circs)
 
     for circ in circs:
-        # timesteps = ["all_blocks"]
+        timesteps = ["all_blocks"]
         # timesteps = ["first_half_blocks", "second_half_blocks"]
         # if cliff_t:
         # timesteps = get_block_names(circ)
-        timesteps = [1.0, 2.0, 3.0, 4.0, 5.0]
+        # timesteps = [1.0, 2.0, 3.0, 4.0, 5.0]
         for timestep in timesteps:
-            tols  = [0, 1]
+            # tols  = [0, 1]
             # tols = [0]
             # tols = [-2.0, -3.0]
             # tols = [1.0, 2.0, 3.0, 4.0, 5.0]
-            # tols = [0]
+            tols = [5.0]
             # tols = [0]
             for tol in tols:
                 diversities = [1]
@@ -69,8 +71,8 @@ if __name__ == '__main__':
                     to_write.close()
                     time.sleep(2*sleep_time)
                     print(f"python {file}.py {circ} {timestep} {tol} {diversity}")
-                    # has_err = os.system(f"python {file}.py {circ} {timestep} {tol} {diversity}")
+                    has_err = os.system(f"python {file}.py {circ} {timestep} {tol} {diversity}")
                     time.sleep(2*sleep_time)
-                    output = subprocess.check_output(['sbatch' , file_name])
-                    print(output)
-                    time.sleep(sleep_time)
+                    # output = subprocess.check_output(['sbatch' , file_name])
+                    # print(output)
+                    # time.sleep(sleep_time)

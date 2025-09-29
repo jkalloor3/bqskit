@@ -218,8 +218,8 @@ def get_shortest_circuits(circ_data: list[tuple[str, str, float]], extra: str = 
     ]
 
     # num_workers = min(os.cpu_count(), 200)
-    # compiler = Compiler(num_workers=128)
-    compiler = Compiler('localhost')
+    compiler = Compiler(num_workers=128)
+    # compiler = Compiler('localhost')
     
     workflow_ind = 0
     ids: list[int] = []
@@ -230,10 +230,12 @@ def get_shortest_circuits(circ_data: list[tuple[str, str, float]], extra: str = 
         if workflow:
             circ = Circuit.from_file(circ_file)
             ccount = circ.count(CNOTGate())
-            if ccount > 2:
+            if ccount > 3:
                 print("Original CNOT Count: ", circ.count(CNOTGate()), 
                       flush=True)
                 ids.append(compiler.submit(circ, workflow))
+            else:
+                print("Skipping small circ: ", circ_file, flush=True)
 
     ind = 0
     for id in ids:

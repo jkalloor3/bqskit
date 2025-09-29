@@ -92,7 +92,7 @@ class CheckEnsembleQualityPass(BasePass):
         print("Check Ensemble Quality Pass", flush=True)
         checkpoint_dir: str = data["checkpoint_dir"]
         checkpoint_data_file: str = data["checkpoint_data_file"]
-        csv_file = checkpoint_data_file.replace(".data", f"{self.csv_name}{self.checkpoint_extra_str}_no_qp.csv")
+        csv_file = checkpoint_data_file.replace(".data", f"{self.csv_name}{self.checkpoint_extra_str}.csv")
         # final_qasms_file_no_qp = f"{checkpoint_dir}/ensemble_final{self.checkpoint_extra_str}_no_qp.qasms"
         # final_jiggle_file_no_qp = f"{checkpoint_dir}/ensemble_final_jiggle{self.checkpoint_extra_str}_no_qp.npy"
         # final_probs_file_no_qp = f"{checkpoint_dir}/ensemble_final_probs{self.checkpoint_extra_str}_no_qp.npy"
@@ -107,17 +107,17 @@ class CheckEnsembleQualityPass(BasePass):
 
         rerun = False
 
-        if os.path.exists(csv_file):
-            with open(csv_file, 'r') as file:
-                reader = csv.DictReader(file)
-                for row in reader:
-                    if "Epsilon" in row:  # Check if the column value is not empty
-                        dist = float(row["Epsilon"])
-                        if dist > self.max_eps:
-                            # Bad ensemble, just rerun
-                            rerun = True
-                            print("Bad Ensemble Found, rerunning pass", flush=True)
-                            break
+        # if os.path.exists(csv_file):
+        #     with open(csv_file, 'r') as file:
+        #         reader = csv.DictReader(file)
+        #         for row in reader:
+        #             if "Epsilon" in row:  # Check if the column value is not empty
+        #                 dist = float(row["Epsilon"])
+        #                 if dist > self.max_eps:
+        #                     # Bad ensemble, just rerun
+        #                     rerun = True
+        #                     print("Bad Ensemble Found, rerunning pass", flush=True)
+        #                     break
 
         
         if os.path.exists(final_probs_file) and not rerun:

@@ -18,12 +18,18 @@ from bqskit.compiler.passdata import PassData
 from bqskit.compiler import Compiler
 from bqskit.runtime import get_runtime
 
+CLIFF_T = True
+cliff_t_string = "_clifft" if CLIFF_T else ""
 
-partitioned_data_file = f"partitioned_data_all_circs.pickle"
+partitioned_data_file = f"partitioned_data_all_circs{cliff_t_string}.pickle"
 all_partitioned_data = pickle.load(open(partitioned_data_file, "rb"))
 
-CLIFF_T = False
-checkpoint_form = "small_block_checkpoints_final_paper_4_more_cx_tket/{circ_name}_{large_block_num}_{max_tol}"
+if CLIFF_T:
+    print("Using cliff-t circuits", flush=True)
+    checkpoint_form = "small_block_checkpoints_final_paper_4_clifft_tket/{circ_name}_{large_block_num}_{max_tol}"
+else:
+    print("Using non-cliff-t circuits", flush=True) 
+    checkpoint_form = "small_block_checkpoints_final_paper_4_more_cx_tket/{circ_name}_{large_block_num}_{max_tol}"
 
 def embed_unitary(u, qubits, n):
     builder = UnitaryBuilder(n)
