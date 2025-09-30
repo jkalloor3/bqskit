@@ -23,7 +23,7 @@ from bqskit.compiler.passdata import PassData
 from bqskit.qis.unitary.unitarybuilder import UnitaryBuilder
 from bqskit.runtime import get_runtime
 
-cliff_t = True
+cliff_t = False
 
 NUM_RANDOM_SEEDS = 10
 
@@ -79,6 +79,7 @@ def get_sub_block_count(large_block_dir: str,
         num_circs = qasm_str.count("BREAK") + 1
         count = count / num_circs
     else:
+        print("Cliff-t count", cliff_t, flush=True)
         count = load_avg_ensemble_counts_full(qasm_file, jiggle_file, 
                                               cache_file, target_error=(10 ** (-tol)),
                                               count_t=True)
@@ -269,7 +270,7 @@ class FullCircvRPass(BasePass):
 if __name__ == "__main__":
     circ_names = ["heisenberg7", "qaoa10"]
     compiler = Compiler(num_workers=256)
-    cliff_t = True
+    cliff_t = False
   
     all_partitioned_data = pickle.load(open(partitioned_data_file, "rb"))
 

@@ -449,7 +449,7 @@ class SecondLEAPSynthesisPass(BasePass):
                 pickle.dump(data, open(save_file, "wb"))
             return
 
-        await self.synthesize(data, target=data.target, default_circuit=data['scan_sols'][-1][0])
+        await self.synthesize(data, target=data.target, default_circuit=circuit)
 
         data["finished_second_leap"] = True
         if save_file:

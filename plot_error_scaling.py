@@ -12,15 +12,16 @@ from bqskit.ir.gates import CircuitGate, CNOTGate
 from util.plot_lib import plot_all_circ_violins, benchmark_labels
 
 # List of circuits
-circs = ["draper_adder_12", "qae13", "qpe_14", "lgt_17"]  # Replace with your list of circuits
-plot_circs = ["lgt_17", "mult16", "add17", "qpe_14", "qae11", "LiH_jw_long", "FermiHubbard2x2_jw_long", "heisenberg7", "qugan_395"] 
-circs += ["add17", "lgt_17", "qae13", "qpe_14", "QITE_8_0", "mult16", "draper_adder_12", "qae11", "qaoa10"]
-large_circs = ["qae33", "heisenberg64", "adder63"]
-# plot_circs = []
+# circs = ["draper_adder_12", "qae13", "qpe_14", "lgt_17"]  # Replace with your list of circuits
+# plot_circs = ["lgt_17", "mult16", "add17", "qpe_14", "qae11", "LiH_jw_long", "FermiHubbard2x2_jw_long", "heisenberg7", "qugan_395"] 
+# circs += ["add17", "lgt_17", "qae13", "qpe_14", "QITE_8_0", "mult16", "draper_adder_12", "qae11", "qaoa10"]
+# large_circs = ["qae33", "heisenberg64", "adder63"]
+plot_circs = []
 # circs = ["LiH_jw_long", "FermiHubbard2x2_jw_long"]
-# large_circs = []
+large_circs = []
 
-all_circs = plot_circs + large_circs + circs
+# all_circs = plot_circs + large_circs + circs
+all_circs = ["qaoa10", "heisenberg7", "add17", "mult16", "qpe_14", "qae13", "LiH_jw_long", "FermiHubbard2x2_jw_long"] 
 all_circs = set(all_circs)
 
 # block_form = "{circ}_*/data.csv"
@@ -249,7 +250,7 @@ def get_orig_counts(circuits: list[str], cliff_t: bool = False,
 
     workflow = [
         ScanPartitioner(4),
-        ExtendBlockSizePass(4)
+        # ExtendBlockSizePass(4)
     ]
 
     id_data = {}
@@ -327,7 +328,7 @@ def get_orig_counts(circuits: list[str], cliff_t: bool = False,
 if __name__ == '__main__':
     # Collect data from all folders
     plot = False
-    cliff_t = True
+    cliff_t = False
     if plot:
         circs = plot_circs
         output_cx = False
@@ -348,8 +349,8 @@ if __name__ == '__main__':
     
     print("Ratio data loaded", flush=True)
     if output_cx:
-        compiler = Compiler('localhost')
-        # compiler = Compiler(num_workers=256)
+        # compiler = Compiler('localhost')
+        compiler = Compiler(num_workers=256)
         orig_counts = get_orig_counts(circs, cliff_t=cliff_t, compiler=compiler)
         # Only use orig_counts for the circs we want
         orig_counts = {circ: orig_counts[circ] for circ in circs}

@@ -195,8 +195,6 @@ def plot_dm_data(circ_names: list[str],
     circ_names = [circ_name for circ_name in circ_names if os.path.exists(folder_form.format(circ_name=circ_name))]
     folders = [folder for folder in folders if os.path.exists(folder)]
 
-    print("Num Folders: ", len(folders))
-
     circ_folders = zip(circ_names, folders)
 
 
@@ -228,7 +226,6 @@ def plot_dm_data(circ_names: list[str],
     for circ_name, folder in circ_folders:
         pickle_files = glob.glob(os.path.join(folder, file_name))
         print(f"File name: {os.path.join(folder, file_name)}")
-        print(f"Num pickle files for {circ_name}: {len(pickle_files)}")
         x_vals = []
         y_vals = []
         full_circ = load_circuit(circ_name)
@@ -298,8 +295,7 @@ def plot_dm_data(circ_names: list[str],
 
 
 def plot_td_convergence(circ_name: str,
-                         axs: plt.Axes,
-                         bias: bool = False):
+                         axs: plt.Axes):
     """
     Plot trace distance convergence for a given circuit.
 
@@ -309,9 +305,7 @@ def plot_td_convergence(circ_name: str,
     y_label: Label for the y-axis.
     x_label: Label for the x-axis.
     """
-    base_dir = "ensemble_td_convergences_new"
-    if bias:
-        base_dir = "ensemble_bias_convergences_new"
+    base_dir = "ensemble_td_convergences_final"
     full_form = os.path.join(base_dir, f"{circ_name}_*_*.pkl")
 
     all_files = glob.glob(full_form)
@@ -393,3 +387,53 @@ def plot_tvd_convergence(all_data: dict,
     axs.set_yscale('log')
     axs.legend()
     axs.grid(True, which='both', linestyle='--', linewidth=0.5)
+
+
+def plot_all_vr(circ_names: list[str], axs: list[plt.Axes], v_num: int = 0):
+    '''
+    Plot V and R data for all blocks of a given set of circuits.
+    '''
+
+    for circ_name in circ_names:
+        for tol in [1.0, 2.0, 3.0, 4.0, 5.0]:
+            file_name = f"ensemble_vRs_final/{circ_name}_{tol}.pkl"
+            print(f"Loading file: {file_name}")
+            if os.path.exists(file_name):
+                all_vRs, _, _ = pickle.load(open(file_name, "rb"))
+                vs = []
+                Rs = []
+                for block_num, (v_data, R) in all_vRs.items():
+                    vs.append(v_data[v_num])
+                    Rs.append(R)
+                # Only add label for first tol
+                if tol != 1.0:
+                    label = None
+                else:
+                    label = benchmark_labels.get(circ_name, circ_name)
+                # Plot V and R in separate subplots
+                axs[0].scatter([10**(-tol)] * len(vs), vs, 
+                               label=label,
+                               color=benchmark_colors.get(circ_name, "black"),
+                               facecolors='none',
+                               s=160, marker='o')
+                axs[1].scatter([10**(-tol)] * len(Rs), Rs, 
+                               label=label,
+                               color=benchmark_colors.get(circ_name, "black"),
+                               facecolors='none',
+                               s=140, marker='o')
+
+
+    labels = ["v", "R"]
+
+    for ax, label in zip(axs, labels):
+        ax.set_xlabel('Epsilon ($\epsilon$)', fontdict={"size": 16})
+        ax.set_ylabel(label, fontdict={"size": 16})
+        ax.set_yscale('log')
+        ax.set_xscale('log')
+        ax.legend(fontsize=14)
+        for label in ax.get_xticklabels():
+            label.set_fontsize(14)
+        for label in ax.get_yticklabels():
+            label.set_fontsize(14)  
+
+

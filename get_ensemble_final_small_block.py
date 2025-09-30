@@ -8,7 +8,7 @@ from bqskit.compiler.passdata import PassData
 from bqskit.compiler.compiler import Compiler, WorkflowLike
 from bqskit.ir.gates import CNOTGate
 # Generate a super ensemble for some error bounds
-from bqskit.passes import CheckpointRestartPass
+from bqskit.passes import CheckpointRestartPass, NOOPPass
 from bqskit.passes import ForEachBlockPass, ScanPartitioner, IfThenElsePass, PassPredicate
 from util import JiggleEnsemblePass, CleanupBlockFiles
 from util import  LEAPSynthesisPass2, SecondLEAPSynthesisPass, EnsScanningGateRemovalPass
@@ -19,7 +19,20 @@ from util import get_block_names, load_block
 
 
 class CountPredicate(PassPredicate):
+    def __init__(self, count_scan_sols: bool = False) -> None:
+        super().__init__()
+        self.count_scan_sols = count_scan_sols
+
+
     def get_truth_value(self, circuit, data):
+        if self.count_scan_sols:
+            # Check if any of the ensemble circuits have a count < circuit
+            base_count = circuit.count(CNOTGate())
+            for c, _ in data["scan_sols"]:
+                if c.count(CNOTGate()) < base_count:
+                    return True
+            return False
+
         return circuit.count(CNOTGate()) < 30
 
 good_instantiation_options = {
@@ -63,6 +76,15 @@ def get_ensemble_workflow(circ_name: str, tol: float, extra: str = "") -> Workfl
         max_layer_factor=1.01,
         instantiate_options=instantiation_options,
         max_layer=14,
+        max_psols=10
+    )
+
+    second_synthesis_pass = SecondLEAPSynthesisPass(
+        success_threshold = extra_err_thresh / 5,
+        partial_success_threshold=err_thresh / 5,
+        max_layer_factor=1.01,
+        instantiate_options=instantiation_options,
+        max_layer=14,
         max_psols=20
     )
 
@@ -95,13 +117,25 @@ def get_ensemble_workflow(circ_name: str, tol: float, extra: str = "") -> Workfl
                     synthesis_pass,
                     deletion_pass
                 ),
-                jiggle_pass,
-                GenerateProbabilityPass(eps=err_thresh * 10,
-                                        run_on_ensemble_0=True,
-                                        checkpoint_extra_str=extra_str),
-                CheckEnsembleQualityPass(False,
-                                         checkpoint_extra_str=extra_str,
-                                         zero_threshold=(err_thresh ** 2) / 10),
+                # Apply a second round of synthesis if count is bad still
+                IfThenElsePass(
+                    CountPredicate(count_scan_sols=True),
+                    NOOPPass(),
+                    second_synthesis_pass,
+                ),
+                # If counts are OK, then create ensemble and jiggle
+                IfThenElsePass(
+                    CountPredicate(count_scan_sols=True),
+                    [
+                        jiggle_pass,
+                        GenerateProbabilityPass(eps=err_thresh * 10,
+                            run_on_ensemble_0=True,
+                            checkpoint_extra_str=extra_str),
+                        CheckEnsembleQualityPass(False,
+                            checkpoint_extra_str=extra_str,
+                            zero_threshold=(err_thresh ** 2) / 10),
+                    ]
+                )
             ]
         ),
     ]
@@ -159,7 +193,7 @@ def get_shortest_circuits(circ_data: list[tuple[str, str, float]], extra: str = 
         if workflow:
             circ = Circuit.from_file(circ_file)
             ccount = circ.count(CNOTGate())
-            if ccount > 4:
+            if ccount > 3:
                 print("Original CNOT Count: ", circ.count(CNOTGate()), 
                       flush=True)
                 ids.append(compiler.submit(circ, workflow))

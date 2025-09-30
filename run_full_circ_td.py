@@ -361,8 +361,9 @@ class FullCircTDPass(BasePass):
 
 if __name__ == "__main__":
     circ_name = argv[1]
-    tol = float(argv[2])
-    small_ens = bool(int(argv[3])) if len(argv) > 3 else False
+    # tol = float(argv[2])
+    tols = [1.0, 2.0, 3.0, 4.0, 5.0]
+    small_ens = bool(int(argv[2])) if len(argv) > 2 else False
     # run_td = bool(int(argv[4])) if len(argv) > 4 else True
     run_td = True
     compiler = Compiler(num_workers=256)
@@ -373,30 +374,36 @@ if __name__ == "__main__":
     total_circs_queried = 0
     
     if small_ens:
-        ens_sizes = [1, 10, 50, 100, 500, 1000, 2000, 4000]
+        ens_sizes = [1, 10, 50, 100, 500, 1000, 2000, 4000, 8000, 16000]
     else:
-        ens_sizes = [256000, 512000]
+        ens_sizes = [32000, 64000, 128000]
 
     i = 0
     full_circ = load_circuit(circ_name)
     full_circ.remove_all_measurements()
 
-    checkpoint_folder_form = f"{base_checkpoint_dir}/{circ_name}" + "_{large_block_num}_" + f"{tol}/"
     partitioned_circ_file=f"partitioned_circs/{circ_name}.pickle"
     partitioned_circ = pickle.load(open(partitioned_circ_file, "rb"))
 
-    ens_pass = FullCircTDPass(
-        circ_name=circ_name,
-        tol=tol,
-        num_qudits=full_circ.num_qudits,
-        ens_sizes=ens_sizes,
-        partitioned_circ=partitioned_circ,
-        checkpoint_folder_form=checkpoint_folder_form,
-        all_partitioned_data=all_partitioned_data,
-        cliff_t=cliff_t
-    )
+    ids = []
+    for tol in tols:
+        checkpoint_folder_form = f"{base_checkpoint_dir}/{circ_name}" + "_{large_block_num}_" + f"{tol}/"
+        ens_pass = FullCircTDPass(
+            circ_name=circ_name,
+            tol=tol,
+            num_qudits=full_circ.num_qudits,
+            ens_sizes=ens_sizes,
+            partitioned_circ=partitioned_circ,
+            checkpoint_folder_form=checkpoint_folder_form,
+            all_partitioned_data=all_partitioned_data,
+            cliff_t=cliff_t
+        )
     
-    compiler.compile(full_circ, [ens_pass])
+        id = compiler.submit(full_circ, [ens_pass])
+        ids.append(id)
+    
+    for id in ids:
+        compiler.result(id)
     compiler.close()
 
     

@@ -21,7 +21,7 @@ def partition_circs(compiler: Compiler,
                     block_num: str) -> tuple[dict[str, Circuit], Circuit]:
     workflow = [
         ScanPartitioner(4),
-        ExtendBlockSizePass(4),
+        # ExtendBlockSizePass(4),
     ]
     circ_file = load_block(circ_name, block_num, extra="_tket")
     circ = Circuit.from_file(circ_file)
@@ -29,14 +29,14 @@ def partition_circs(compiler: Compiler,
 
 
 if __name__ == "__main__":
-    circ_names = ["LiH_jw_long", "heisenberg7"]
-    circ_names += ["FermiHubbard2x2_jw_long"]
+    circ_names = ["heisenberg7", "qaoa10"]
+    # circ_names += ["FermiHubbard2x2_jw_long"]
     compiler = Compiler(num_workers=128)
 
     all_partitioned_ids = {}
     all_partitioned_data = {}
 
-    cliff_t = True
+    cliff_t = False
     cliff_t_string = "_clifft" if cliff_t else ""
     if cliff_t:
         print("Using cliff-t circuits", flush=True)
@@ -79,6 +79,8 @@ if __name__ == "__main__":
     
     with open(partitioned_data_file, "wb") as f:
         pickle.dump(all_partitioned_data, f)
+
+    exit(0)
 
     compiler_ids = []
 
