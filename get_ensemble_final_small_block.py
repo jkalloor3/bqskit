@@ -17,18 +17,6 @@ from util import GenerateProbabilityPass
 from util import CreateEnsemblePass
 from util import get_block_names, load_block
 
-# from bqskit.ext import pytket_to_bqskit, bqskit_to_pytket
-# from pytket.passes import FullPeepholeOptimise
-
-
-# class TketPass(BasePass):
-#     async def run(self, circuit, data):
-#         print("Init CX Count: ", circuit.count(CNOTGate()), flush=True)
-#         tcirc = bqskit_to_pytket(circuit)
-#         FullPeepholeOptimise(allow_swaps=False).apply(tcirc)
-#         circuit = pytket_to_bqskit(tcirc)
-#         print("Post Tket CX Count: ", circuit.count(CNOTGate()), flush=True)
-
 
 class CountPredicate(PassPredicate):
     def get_truth_value(self, circuit, data):
@@ -102,13 +90,11 @@ def get_ensemble_workflow(circ_name: str, tol: float, extra: str = "") -> Workfl
                                 default_passes=partitioner_passes),
         ForEachBlockPass(
             [
-                # TketPass(),
                 IfThenElsePass(
                     CountPredicate(),
                     synthesis_pass,
                     deletion_pass
                 ),
-                # second_synthesis_pass,
                 jiggle_pass,
                 GenerateProbabilityPass(eps=err_thresh * 10,
                                         run_on_ensemble_0=True,
@@ -118,7 +104,6 @@ def get_ensemble_workflow(circ_name: str, tol: float, extra: str = "") -> Workfl
                                          zero_threshold=(err_thresh ** 2) / 10),
             ]
         ),
-        # CheckEnsembleQualityPass(False, sample_blocks = True),
     ]
     return leap_workflow
 

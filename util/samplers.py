@@ -2,6 +2,7 @@ import numpy as np
 from bqskit.ir.circuit import Circuit, CircuitPoint, CircuitLocationLike
 from bqskit.ir.gates import ConstantUnitaryGate
 from bqskit.qis import UnitaryMatrix
+from .distance import get_density_matrix
 from .common import create_jiggled_unitaries, get_corrected_un
 from .gg import gridsynth_gates_to_cir, GridSynthGate
 
@@ -142,8 +143,15 @@ class EnsembleSampler:
     def __init__(self, all_circ_params: list[tuple[Circuit, np.ndarray, np.ndarray, dict]],
                  cliff_t: bool = False):
         self.all_probs = [probs.flatten() for _, _, probs, _ in all_circ_params]
+        # Clip very small probs to avoid numerical issues
+        self.all_probs = np.array([np.clip(p, 1e-10, 1.0) for p in self.all_probs])
+        # Normalize total probs
+        self.all_probs /= np.sum(self.all_probs)
+
         self.circ_probs = np.array([np.sum(p) for p in self.all_probs])
         self.circ_probs /= np.sum(self.circ_probs)
+        # Normalize each set of probs
+        self.all_probs = [p / np.sum(p) for p in self.all_probs]
         self.params = [params for _, params, _, _ in all_circ_params]
         self.circs = [circ for circ, _, _, _ in all_circ_params]
         self.caches = [cache for _, _, _, cache in all_circ_params]
@@ -179,3 +187,67 @@ class EnsembleSampler:
                     out_circ.replace_with_circuit(pt, clifft_circ, as_circuit_gate=True)
             out_circ.unfold_all()
         return out_circ
+
+
+class EnsembleUnitarySampler:
+    def __init__(self, all_circ_params: list[tuple[Circuit, np.ndarray, np.ndarray, dict]],
+                 cliff_t: bool = False):
+        self.all_probs = [probs.flatten() for _, _, probs, _ in all_circ_params]
+        self.params = [params for _, params, _, _ in all_circ_params]
+        self.circs = [circ for circ, _, _, _ in all_circ_params]
+        self.caches = [cache for _, _, _, cache in all_circ_params]
+        self.cliff_t = cliff_t
+        self.circ_ind = 0
+        self.param_ind = 0
+
+    def __call__(self) -> np.ndarray[np.complex128] | list[tuple[UnitaryMatrix, float]]:
+        return create_jiggled_unitaries(self.circ_params, self.target, self.add_cost)
+    
+    def __iter__(self):
+        return self
+    
+    def __next__(self):
+        # Create a random circuit based on the probabilities
+        if self.circ_ind >= len(self.circs):
+            raise StopIteration
+        circ = self.circs[self.circ_ind]
+        param_options = self.params[self.circ_ind]
+        params = param_options[self.param_ind]
+        probs = self.all_probs[self.circ_ind][self.param_ind]
+
+        if self.cliff_t:
+            cache = self.caches[self.circ_ind]
+            out_circ = circ.copy()
+            out_circ.set_params(params)
+            # Lower all GridSynthGates to corresponding Cliff T circs
+            for cycle, op in out_circ.operations_with_cycles():
+                if isinstance(op.gate, GridSynthGate):
+                    pt = CircuitPoint(cycle, op.location)
+                    cache_ind = (op.params[0], int(op.params[1]))
+                    t_str = cache[cache_ind]
+                    if op.params[2] == 1:
+                        t_str = "Z" + t_str + "Z"
+                    clifft_circ = gridsynth_gates_to_cir(t_str)
+                    out_circ.replace_with_circuit(pt, clifft_circ, as_circuit_gate=True)
+            un = out_circ.get_unitary()
+        else:
+            un = circ.get_unitary(params)
+
+        # Update Indices
+        self.param_ind += 1
+        if self.param_ind >= len(param_options):
+            self.param_ind = 0
+            self.circ_ind += 1
+
+        return un, probs
+    
+    def get_rho_out(self, sv: np.ndarray) -> np.ndarray:
+        # ONLY WORKS FOR NISQ CIRCUITS
+        rho = get_density_matrix(sv)
+        empty_rho = np.zeros_like(rho)
+        for i, circ in enumerate(self.circs):
+            for j, param in enumerate(self.params[i]):
+                un = circ.get_unitary(param)
+                p = self.all_probs[i][j]
+                empty_rho += p * (un @ rho @ un.conj().T)
+        return empty_rho

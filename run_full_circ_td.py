@@ -6,21 +6,22 @@ from pathlib import Path
 import pickle
 from sys import argv
 import os
+import csv
 from typing import Generator
 
 from bqskit.compiler import Compiler
 
-
-from bqskit.qis.unitary.unitarybuilder import UnitaryBuilder
-from util import  (get_file_names, load_jiggled_ensemble, EnsembleSampler, 
-                   get_sub_block_count, GateCounter, load_circuit, trace_distance,
-                   get_density_matrix, get_block_names, frobenius_cost)
-
-from bqskit.runtime import get_runtime
+from util.counter import GateCounter, load_avg_ensemble_counts_full
+from util.distance import trace_distance, get_density_matrix, get_corrected_un
+from util.common import get_block_names, get_file_names, load_circuit, load_jiggled_ensemble
+from util.samplers import EnsembleSampler
 
 
 from bqskit.compiler.basepass import BasePass
 from bqskit.compiler.passdata import PassData
+
+from bqskit.qis.unitary.unitarybuilder import UnitaryBuilder
+from bqskit.runtime import get_runtime
 
 cliff_t = False
 
@@ -37,6 +38,53 @@ else:
 
 base_dir_form = os.path.join(base_checkpoint_dir, "{circ_name}_{large_block_num}_" + "{tol}/")
 # Get partitioned circuits for all 8-qubit blocks
+
+def get_sub_block_count(large_block_dir: str,
+                        small_block_num: str,
+                        tol: float,
+                        cliff_t: bool = False) -> tuple[bool, int]:
+    qasm_file, jiggle_file, cache_file, _, csv_file = get_file_names(large_block_dir,
+                                                   small_block_num)
+    # Read CSV file, if the ratio is < 20 then we can read counts
+    # print(qasm_file, csv_file, flush=True)
+    if not os.path.exists(csv_file):        # print(f"CSV file {csv_file} does not exist.", flush=True)
+        return False, 0
+
+    # Now we need to check if the ratio is less than 20
+    max_ratio = min(20, (10 ** (tol) / 4))
+
+    with open(csv_file, 'r') as f:
+        reader = csv.DictReader(f)
+        min_ratio = float("inf")
+        final_frob_cost = float("inf")
+        for row in reader:
+            if "Ratio" in row:  # Check if the column value is not empty
+                # Check if distance is less than 3* 10^(-tol)
+                max_dist = max_ratio * (10 ** (-tol))
+                dist = float(row["Epsilon"])
+                if dist > max_dist:
+                    continue
+                min_ratio = min(min_ratio, float(row["Ratio"]))
+                final_frob_cost = min(final_frob_cost, float(row["Norm. Bias"]))
+
+
+    if min_ratio > max_ratio:
+        # print(f"Skipping {small_block_num} as ratio is too high: {min_ratio}", flush=True)
+        return False, 0
+    
+    # Now we need to get the avg. number of CNOTs
+    if not cliff_t:
+        qasm_str = open(qasm_file, 'r').read()
+        count = qasm_str.count("cx ")
+        num_circs = qasm_str.count("BREAK") + 1
+        count = count / num_circs
+    else:
+        count = load_avg_ensemble_counts_full(qasm_file, jiggle_file, 
+                                              cache_file, target_error=(10 ** (-tol)),
+                                              count_t=True)
+
+    return True, count
+
 
 def get_final_dm(circs: list[Circuit], sv: StateVector) -> np.ndarray:
     '''
@@ -95,6 +143,7 @@ def generate_large_block_circ(circ_name: str,
                               large_block_num: str,
                               tol: float,
                               p_circ: Circuit,
+                              target: UnitaryMatrix,
                               good_blocks: set[str]) -> Generator[UnitaryMatrix, None, None]:
     circ_samplers = {}
     for good_block in good_blocks:
@@ -131,7 +180,7 @@ def generate_large_block_circ(circ_name: str,
             # print("Sampling small block:", small_block_num, flush=True)
             small_circ = next(circ_samplers[small_block_num])
             block_un.apply_right(small_circ.get_unitary(), op.location)
-        yield block_un.get_unitary()
+        yield get_corrected_un(block_un.get_unitary(), target)
 
 def generate_full_circ(circ_name: str, 
                        big_partitioned_circ: Circuit,
@@ -171,7 +220,8 @@ def generate_full_circ(circ_name: str,
             large_block_num,
             tol,
             partitioned_data[large_block_num][1],
-            good_blocks[large_block_num]
+            target=op.get_unitary(),
+            good_blocks=good_blocks[large_block_num]
         )
 
     while True:
@@ -212,25 +262,13 @@ class FullCircTDPass(BasePass):
                  partitioned_circ: Circuit,
                  checkpoint_folder_form: str,
                  all_partitioned_data: dict[str, Circuit],
-                 cliff_t: bool = False,
-                 run_td: bool = True) -> None:
+                 cliff_t: bool = False) -> None:
         super().__init__()
         self.circ_name = circ_name
         self.tol = tol
         self.ens_sizes = ens_sizes
         self.num_qudits = num_qudits
         self.rand_svs = [StateVector.random(num_qudits) for _ in range(NUM_RANDOM_SEEDS)]
-        # self.full_circ_generator = generate_full_circ(
-        #     circ_name=circ_name,
-        #     big_partitioned_circ=partitioned_circ,
-        #     tol=tol,
-        #     good_blocks=get_good_blocks(circ_name=circ_name,
-        #                                 tol=tol,
-        #                                 cliff_t=cliff_t,
-        #                                 checkpoint_folder_form=checkpoint_folder_form,
-        #                                 partitioned_data=all_partitioned_data[circ_name]),
-        #     partitioned_data=all_partitioned_data[circ_name]
-        # )
         self.partitioned_circ = partitioned_circ
         self.good_blocks = get_good_blocks(circ_name=circ_name,
                                            tol=tol,
@@ -238,28 +276,33 @@ class FullCircTDPass(BasePass):
                                            checkpoint_folder_form=checkpoint_folder_form,
                                            partitioned_data=all_partitioned_data[circ_name])
         self.partitioned_data = all_partitioned_data[circ_name]
-        self.num_trials = 6
-        self.run_td = run_td
+        self.num_trials = 10
 
 
-    async def get_trial_un(self, ens_size: int) -> np.ndarray:
+    async def get_trial_rho(self, ens_size: int, 
+                           sv: StateVector) -> np.ndarray[np.complex128]:
         '''
         Get the average unitary for a given ensemble size.
         '''
         full_circ_generator = generate_full_circ(
-            circ_name=self.circ_name,
-            big_partitioned_circ=self.partitioned_circ,
-            tol=self.tol,
-            good_blocks=self.good_blocks,
-            partitioned_data=self.partitioned_data
+                    circ_name=self.circ_name,
+                    big_partitioned_circ=self.partitioned_circ,
+                    tol=self.tol,
+                    good_blocks=self.good_blocks,
+                    partitioned_data=self.partitioned_data
         )
-        avg_un = np.zeros((2 ** self.num_qudits, 2 ** self.num_qudits), dtype=np.complex128)
+        
+        mean_rho = np.zeros((sv.shape[0], sv.shape[0]), dtype=np.complex128)
+
         for _ in range(ens_size):
-            avg_un += next(full_circ_generator)
-        avg_un /= ens_size
-        return avg_un
-    
-    async def get_trial_un_outer(self, ens_size: int) -> np.ndarray:
+            next_un = next(full_circ_generator)
+            sv_out = next_un @ sv.numpy
+            ens_dm = get_density_matrix(sv_out)
+            mean_rho += ens_dm
+        mean_rho /= ens_size
+        return mean_rho
+
+    async def get_trial_td(self, ens_size: int) -> float:
         '''
         Get the average unitary for a given ensemble size.
         '''
@@ -270,20 +313,20 @@ class FullCircTDPass(BasePass):
             split_ens = [CHUNK_SIZE] * (ens_size // CHUNK_SIZE)
         else:
             split_ens = [ens_size]
-        avg_uns = await get_runtime().map(self.get_trial_un, split_ens)
 
-        # Average the unitaries
-        avg_un = np.mean(avg_uns, axis=0)
-        return avg_un
+        all_tds = []
+        for j, sv in enumerate(self.rand_svs):
+            ens_rhos = await get_runtime().map(self.get_trial_rho, split_ens, sv=sv)
+            # Recombine chunks
+            ens_rhos = np.array(ens_rhos)
+            # Average over chunks
+            ens_rho = np.mean(ens_rhos, axis=0)
 
-    def get_trial_td(self, rand_sv, dm, un) -> float:
-        '''
-        Get the trace distance for a given average unitary.
-        '''
-        sv_out = un @ rand_sv
-        ens_dm = get_density_matrix(sv_out)
-        td = trace_distance(ens_dm, dm)
-        return td
+            # Now calculate trace distance
+            dm = self.true_dms[j]
+            td = trace_distance(ens_rho, dm)
+            all_tds.append(td)
+        return np.max(all_tds)
 
     async def run(self, circ: Circuit, data: PassData) -> None:
         # print("Running FullCircTDPass", flush=True)
@@ -292,42 +335,25 @@ class FullCircTDPass(BasePass):
 
         un_futs = {}
         for ens_size in self.ens_sizes:
-            if self.run_td:
-                output_file = f"ensemble_td_convergences_new/{self.circ_name}_{ens_size}_{self.tol}.pkl"
-            else:
-                output_file = f"ensemble_bias_convergences_new/{self.circ_name}_{ens_size}_{self.tol}.pkl"
+            output_file = f"ensemble_td_convergences_final/{self.circ_name}_{ens_size}_{self.tol}.pkl"
             if os.path.exists(output_file):
                 continue
             print(f"Calculating Data for ensemble size {ens_size}", flush=True)
-            avg_uns_fut = get_runtime().map(self.get_trial_un_outer, [ens_size] * self.num_trials)
-            un_futs[ens_size] = avg_uns_fut
+            tds_fut = get_runtime().map(self.get_trial_td, [ens_size] * self.num_trials)
+            un_futs[ens_size] = tds_fut
 
         for ens_size in un_futs:
             sampler_start = time.time()
-            avg_uns = await un_futs[ens_size]
+            all_data = await un_futs[ens_size]
+            # tds is a list of arrays of shape (ens_size, )
             sample_time = time.time() - sampler_start
             print(f"Sampled average unitaries for ensemble size {ens_size} in {sample_time:.2f} seconds", flush=True)
-            if self.run_td:
-                all_data = []
-                for i, un in enumerate(avg_uns):
-                    rand_tds = []
-                    for j, rand_sv in enumerate(self.rand_svs):
-                        td = self.get_trial_td(rand_sv, self.true_dms[j], un)
-                        rand_tds.append(td)
-                    print("Max TD:", np.max(rand_tds), flush=True)
-                    all_data.append(np.max(rand_tds))
-            else:
-                # Calculate bias for each un
-                all_data = [frobenius_cost(un, self.full_un) for un in avg_uns]
 
             print("All Data:", all_data, flush=True)
             
             td_time = time.time() - sampler_start
             print(f"Calculated data for ensemble size {ens_size} in {td_time:.2f} seconds", flush=True)
-            if self.run_td:
-                output_file = f"ensemble_td_convergences_new/{self.circ_name}_{ens_size}_{self.tol}.pkl"
-            else:
-                output_file = f"ensemble_bias_convergences_new/{self.circ_name}_{ens_size}_{self.tol}.pkl"
+            output_file = f"ensemble_td_convergences_final/{self.circ_name}_{ens_size}_{self.tol}.pkl"
             Path(output_file).parent.mkdir(parents=True, exist_ok=True)
             with open(output_file, 'wb') as f:
                 pickle.dump(all_data, f)
@@ -337,8 +363,9 @@ if __name__ == "__main__":
     circ_name = argv[1]
     tol = float(argv[2])
     small_ens = bool(int(argv[3])) if len(argv) > 3 else False
-    run_td = bool(int(argv[4])) if len(argv) > 4 else True
-    compiler = Compiler(num_workers=128)
+    # run_td = bool(int(argv[4])) if len(argv) > 4 else True
+    run_td = True
+    compiler = Compiler(num_workers=256)
     cliff_t = False
 
     all_partitioned_data = pickle.load(open(partitioned_data_file, "rb"))
@@ -346,11 +373,10 @@ if __name__ == "__main__":
     total_circs_queried = 0
     
     if small_ens:
-        ens_sizes = [1, 10, 50, 100, 500, 1000, 2000]
+        ens_sizes = [1, 10, 50, 100, 500, 1000, 2000, 4000]
     else:
-        ens_sizes = [4000, 8000, 16000, 64000]
+        ens_sizes = [256000, 512000]
 
-    # for circ_name in circ_names:
     i = 0
     full_circ = load_circuit(circ_name)
     full_circ.remove_all_measurements()
@@ -367,8 +393,7 @@ if __name__ == "__main__":
         partitioned_circ=partitioned_circ,
         checkpoint_folder_form=checkpoint_folder_form,
         all_partitioned_data=all_partitioned_data,
-        cliff_t=cliff_t,
-        run_td=run_td
+        cliff_t=cliff_t
     )
     
     compiler.compile(full_circ, [ens_pass])

@@ -159,8 +159,7 @@ class DMEvaluator(BasePass):
                  partitioned_circ_file: str = "",
                  save_dir = "",
                  cliff_t: bool = False,
-                 init_sv: StateVector = None,
-                 run_blocks: bool = False) -> None:
+                 init_sv: StateVector = None) -> None:
         self.circ_name = circ_name
         self.ham = ham
         self.max_tol = max_tol
@@ -178,44 +177,15 @@ class DMEvaluator(BasePass):
         )
 
         self.block_runners: dict[tuple, tuple[DensityMatrixRunner, int]] = {}
-        self.run_blocks = run_blocks
-        if run_blocks:
-            # Initializer a runner for each small block
-            for large_block_num in self.partitioned_data:
-                sub_block_circs, _ = self.partitioned_data[large_block_num]
-                for small_block_num, block_circ in sub_block_circs.items():
-                    ensemble_file_names = get_file_names(
-                        self.checkpoint_form.format(
-                            circ_name=self.circ_name,
-                            large_block_num=large_block_num,
-                            max_tol=self.max_tol
-                        ),
-                        small_block_num)[:-1]
-                    print([os.path.exists(f) for f in ensemble_file_names], flush=True)
-                    all_exists = all([os.path.exists(f) for f in ensemble_file_names])
-                    if (not all_exists and cliff_t):
-                        print(f"Skipping block {large_block_num}, {small_block_num} as files do not exist.", flush=True)
-                        continue
-                    runner = DensityMatrixRunner(
-                        ensemble_file_names=ensemble_file_names,
-                        target=block_circ.get_unitary(),
-                        cliff_t=self.cliff_t,
-                        label=f"{self.circ_name}_{large_block_num}_{small_block_num}_{self.max_tol}"
-                    )
-                    if runner.correct:
-                        self.block_runners[(large_block_num, 
-                                            small_block_num)] = (runner, 
-                                                                block_circ.num_qudits)
-        else:
-            # Initialize a full circuit runner
-            self.full_circ_runner = generate_full_runner(
-                circ_name=self.circ_name,
-                max_tol=self.max_tol,
-                partitioned_data=self.partitioned_data,
-                checkpoint_form=self.checkpoint_form,
-                partitioned_circ_file=self.partitioned_circ_file,
-                cliff_t=self.cliff_t
-            )
+        # Initialize a full circuit runner
+        self.full_circ_runner = generate_full_runner(
+            circ_name=self.circ_name,
+            max_tol=self.max_tol,
+            partitioned_data=self.partitioned_data,
+            checkpoint_form=self.checkpoint_form,
+            partitioned_circ_file=self.partitioned_circ_file,
+            cliff_t=self.cliff_t
+        )
 
     async def run_full_ensemble(self, svs: list[StateVector]) -> list[np.ndarray]:
         ens_data_file = os.path.join(self.save_dir, f"{self.max_tol}_rho_outs.pkl")
@@ -232,40 +202,6 @@ class DMEvaluator(BasePass):
         rho_ins = [get_density_matrix(sv.numpy) for sv in svs]
         rho_outs = [self.full_circ_runner.run(rho_in, np.arange(num_qubits)) for rho_in in rho_ins]
         return rho_outs
-    
-
-    async def run_block(self, large_block_num, small_block_num) -> None:
-        ens_data_file = os.path.join(self.save_dir, 
-                                     large_block_num, 
-                                     small_block_num, 
-                                     f"{self.max_tol}_rho_outs.pkl")
-        if os.path.exists(ens_data_file):
-            print(f"Ensemble data file {ens_data_file} already exists, skipping.", flush=True)
-            return
-        
-        save_file = os.path.join(self.save_dir, 
-                                 large_block_num, 
-                                 small_block_num, 
-                                 f"{self.max_tol}_superop")
-        runner, num_qudits = self.block_runners[(large_block_num, small_block_num)]
-        await runner.initialize(save_file)
-        runner.save(save_file)
-        # Create a bunch of random state vectors
-        rand_svs = [StateVector.random(num_qudits) for _ in range(NUM_SAMPLES)]
-        rho_ins = [get_density_matrix(sv.numpy) for sv in rand_svs]
-        rho_outs = [runner.run(rho_in, np.arange(num_qudits)) for rho_in in rho_ins]
-        final_data = list(zip(rho_outs, rand_svs))
-        Path(ens_data_file).parent.mkdir(parents=True, exist_ok=True)
-        pickle.dump(final_data, open(ens_data_file, "wb"))
-
-    async def run_block_ensembles(self) -> None:
-        # Calculate the output density matrices for each small block
-        tasks = []
-        for large_block_num, small_block_num in self.block_runners:
-            tasks.append(self.run_block(large_block_num, small_block_num))
-
-        for task in tasks:
-            await task
 
     async def run(self, circ: Circuit, data: PassData) -> None:
         if self.num_good_blocks == 0:
@@ -279,10 +215,6 @@ class DMEvaluator(BasePass):
             rho = rho_outs[0]
             final_data = [(rho, self.init_sv)]
         else:
-            if self.run_blocks:
-                # Run just blocks
-                await self.run_block_ensembles()
-                return
             # Otherwise, run full circuit with ensemble
             rand_svs = [StateVector.random(circ.num_qudits) for _ in range(NUM_SAMPLES)]
             final_rho_outs = await self.run_full_ensemble(rand_svs)
