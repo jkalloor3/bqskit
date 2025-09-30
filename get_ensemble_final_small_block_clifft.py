@@ -8,7 +8,7 @@ from bqskit.compiler.passdata import PassData
 from bqskit.compiler.compiler import Compiler, WorkflowLike
 from bqskit.ir.gates import CNOTGate
 # Generate a super ensemble for some error bounds
-from bqskit.passes import CheckpointRestartPass, ExtendBlockSizePass
+from bqskit.passes import CheckpointRestartPass, ExtendBlockSizePass, NOOPPass
 from bqskit.passes import ForEachBlockPass, ScanPartitioner, IfThenElsePass, PassPredicate
 from util import JiggleEnsemblePass, FixGlobalPhasePass
 from util import  LEAPSynthesisPass2, EnsScanningGateRemovalPass
@@ -77,6 +77,21 @@ class FilterDistancesPass(BasePass):
 class CountPredicate(PassPredicate):
     def get_truth_value(self, circuit, data):
         return circuit.count(CNOTGate()) < 26
+
+
+class ParamCountPredicate(PassPredicate):
+
+    def __init__(self, threshold: int):
+        super().__init__()
+        self.threshold = threshold
+
+    def get_truth_value(self, circuit, data):
+        # Fix angles
+        fixed_circ = circuit.copy()
+        FixAnglesPass.run_circ(fixed_circ, self.threshold)
+        print("Param Count After Fixing!: ", circuit.num_params,
+               fixed_circ.num_params, flush=True)
+        return fixed_circ.num_params > 1
 
 good_instantiation_options = {
     'multistarts': 8,
@@ -152,25 +167,32 @@ def get_ensemble_workflow(circ_name: str, tol: float, extra: str = "") -> Workfl
         ForEachBlockPass(
             [
                 IfThenElsePass(
-                    CountPredicate(),
-                    synthesis_pass,
-                    DoNothingPass()
+                    ParamCountPredicate(int(tol) * 2 + 1),
+                    [
+                        IfThenElsePass(
+                            CountPredicate(),
+                            synthesis_pass,
+                            DoNothingPass()
+                        ),
+                        FixAnglesPass(int(tol) * 2 + 2, run_scan_sols=True),
+                        ConvertToZXZXZSimple(group=False),
+                        ntro,
+                        FixAnglesPass(int(tol) * 2 + 1, run_scan_sols=True),
+                        FixGlobalPhasePass(),
+                        FilterDistancesPass(threshold=(err_thresh * 5)),
+                        # PrintDistancesPass(),
+                        jiggle_pass,
+                        GenerateProbabilityPass(eps=(err_thresh * 5),
+                                                run_on_ensemble_0=True,
+                                                checkpoint_extra_str=extra_str),
+                        CheckEnsembleQualityPass(eps=(err_thresh * 5),
+                                                count_t=True,
+                                                checkpoint_extra_str=extra_str,
+                                zero_threshold=((err_thresh ** 2) / 10)),
+
+                    ]
                 ),
-                FixAnglesPass(int(tol) * 2 + 2, run_scan_sols=True),
-                ConvertToZXZXZSimple(group=False),
-                ntro,
-                FixAnglesPass(int(tol) * 2 + 1, run_scan_sols=True),
-                FixGlobalPhasePass(),
-                FilterDistancesPass(threshold=(err_thresh * 5)),
-                # PrintDistancesPass(),
-                jiggle_pass,
-                GenerateProbabilityPass(eps=(err_thresh * 5),
-                                        run_on_ensemble_0=True,
-                                        checkpoint_extra_str=extra_str),
-                CheckEnsembleQualityPass(eps=(err_thresh * 5),
-                                         count_t=True,
-                                         checkpoint_extra_str=extra_str,
-                                         zero_threshold=((err_thresh ** 2) / 10)),
+
             ]
         ),
     ]
@@ -234,8 +256,8 @@ def get_shortest_circuits(circ_data: list[tuple[str, str, float]], extra: str = 
                 print("Original CNOT Count: ", circ.count(CNOTGate()), 
                       flush=True)
                 ids.append(compiler.submit(circ, workflow))
-            else:
-                print("Skipping small circ: ", circ_file, flush=True)
+            # else:
+            #     print("Skipping small circ: ", circ_file, flush=True)
 
     ind = 0
     for id in ids:

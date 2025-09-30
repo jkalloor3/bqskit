@@ -9,7 +9,7 @@ if __name__ == '__main__':
 
     if TRACE_DISTANCE:
         circ_names = [
-            "qae11",
+            # "qae11",
             "qaoa10",
             "FermiHubbard2x2_jw_long",
             "heisenberg7",

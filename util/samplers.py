@@ -19,10 +19,16 @@ def get_superop(params: np.array, circ: Circuit,
             if isinstance(op.gate, GridSynthGate):
                 pt = CircuitPoint(cycle, op.location[0])
                 cache_ind = (op.params[0], int(op.params[1]))
-                t_str = cache[cache_ind]
-                if op.params[2] == 1:
-                    t_str = "Z" + t_str + "Z"
-                clifft_un = gridsynth_gates_to_cir(t_str).get_unitary()
+                if cache_ind not in cache:
+                    assert np.isclose(op.params[0], 0.0)
+                    clifft_circ = Circuit(1)
+                else:
+                    t_str = cache[cache_ind]
+                    if op.params[2] == 1:
+                        t_str = "Z" + t_str + "Z"
+                    clifft_circ = gridsynth_gates_to_cir(t_str)
+                    
+                clifft_un = clifft_circ.get_unitary()
 
                 out_circ.replace_gate(pt, 
                                         ConstantUnitaryGate(clifft_un), 
@@ -180,10 +186,16 @@ class EnsembleSampler:
                 if isinstance(op.gate, GridSynthGate):
                     pt = CircuitPoint(cycle, op.location)
                     cache_ind = (op.params[0], int(op.params[1]))
-                    t_str = cache[cache_ind]
-                    if op.params[2] == 1:
-                        t_str = "Z" + t_str + "Z"
-                    clifft_circ = gridsynth_gates_to_cir(t_str)
+
+                    if cache_ind not in cache:
+                        assert np.isclose(op.params[0], 0.0)
+                        clifft_circ = Circuit(1)
+                    else:
+                        t_str = cache[cache_ind]
+                        if op.params[2] == 1:
+                            t_str = "Z" + t_str + "Z"
+                        
+                        clifft_circ = gridsynth_gates_to_cir(t_str)
                     out_circ.replace_with_circuit(pt, clifft_circ, as_circuit_gate=True)
             out_circ.unfold_all()
         return out_circ
@@ -222,12 +234,16 @@ class EnsembleUnitarySampler:
             # Lower all GridSynthGates to corresponding Cliff T circs
             for cycle, op in out_circ.operations_with_cycles():
                 if isinstance(op.gate, GridSynthGate):
-                    pt = CircuitPoint(cycle, op.location)
+                    pt = CircuitPoint(cycle, op.location[0])
                     cache_ind = (op.params[0], int(op.params[1]))
-                    t_str = cache[cache_ind]
-                    if op.params[2] == 1:
-                        t_str = "Z" + t_str + "Z"
-                    clifft_circ = gridsynth_gates_to_cir(t_str)
+                    if cache_ind not in cache:
+                        assert np.isclose(op.params[0], 0.0)
+                        clifft_circ = Circuit(1)
+                    else:
+                        t_str = cache[cache_ind]
+                        if op.params[2] == 1:
+                            t_str = "Z" + t_str + "Z"
+                        clifft_circ = gridsynth_gates_to_cir(t_str)
                     out_circ.replace_with_circuit(pt, clifft_circ, as_circuit_gate=True)
             un = out_circ.get_unitary()
         else:
@@ -245,9 +261,34 @@ class EnsembleUnitarySampler:
         # ONLY WORKS FOR NISQ CIRCUITS
         rho = get_density_matrix(sv)
         empty_rho = np.zeros_like(rho)
+        print("Getting Rho Out", self.cliff_t, flush=True)
         for i, circ in enumerate(self.circs):
+            cache = self.caches[i]
+            if self.cliff_t:
+                assert cache is not None
             for j, param in enumerate(self.params[i]):
-                un = circ.get_unitary(param)
+                if self.cliff_t:
+                    out_circ = circ.copy()
+                    out_circ.set_params(param)
+                    # Lower all GridSynthGates to corresponding Cliff T circs
+                    for cycle, op in out_circ.operations_with_cycles():
+                        if isinstance(op.gate, GridSynthGate):
+                            pt = CircuitPoint(cycle, op.location[0])
+                            cache_ind = (op.params[0], int(op.params[1]))
+                            if cache_ind not in cache:
+                                assert np.isclose(op.params[0], 0.0)
+                                clifft_circ = Circuit(1)
+                            else:
+                                t_str = cache[cache_ind]
+                                if op.params[2] == 1:
+                                    t_str = "Z" + t_str + "Z"
+                                clifft_circ = gridsynth_gates_to_cir(t_str)
+                            out_circ.replace_with_circuit(pt, clifft_circ, as_circuit_gate=True)
+                    out_circ.unfold_all()
+                    # print(out_circ.gate_counts)
+                    un = out_circ.get_unitary()
+                else:
+                    un = circ.get_unitary(param)
                 p = self.all_probs[i][j]
                 empty_rho += p * (un @ rho @ un.conj().T)
         return empty_rho

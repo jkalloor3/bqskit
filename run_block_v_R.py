@@ -23,14 +23,14 @@ from bqskit.compiler.passdata import PassData
 from bqskit.qis.unitary.unitarybuilder import UnitaryBuilder
 from bqskit.runtime import get_runtime
 
-cliff_t = False
+cliff_t = True
 
 NUM_RANDOM_SEEDS = 10
 
 if cliff_t:
     # print("Using cliff-t circuits", flush=True)
     base_checkpoint_dir = "small_block_checkpoints_final_paper_4_clifft_tket"
-    partitioned_data_file = "partitioned_data_all_clifft_circs.pickle"
+    partitioned_data_file = "partitioned_data_all_circs_clifft.pickle"
 else:
     # print("Using non-cliff-t circuits", flush=True)
     base_checkpoint_dir = "small_block_checkpoints_final_paper_4_more_cx_tket"
@@ -239,11 +239,14 @@ class FullCircvRPass(BasePass):
         
         block_nums = list(self.good_blocks.keys())
 
+        if len(block_nums) == 0:
+            print(f"No good blocks found for {self.circ_name} with tol {self.tol}. Skipping.", flush=True)
+            return
+
         rho_bars_fut = []
         svs = []
 
         for block_num in block_nums:
-            print(self.good_blocks[block_num], flush=True)
             sv = StateVector.random(self.good_blocks[block_num])
             svs.append(sv)
             rho_bars_fut.append(self.get_rho_bar_block(block_num, sv))
@@ -252,8 +255,6 @@ class FullCircvRPass(BasePass):
         self.rho_bars = dict(zip(block_nums, rho_bars))
 
         self.svs = dict(zip(block_nums, svs))
-
-        print(list(self.svs.keys()), flush=True)
 
         vRs = await get_runtime().map(self.get_trial_vR, block_nums)
         
@@ -266,28 +267,36 @@ class FullCircvRPass(BasePass):
 
 
 if __name__ == "__main__":
-    circ_name = argv[1]
+    circ_names = ["heisenberg7", "qaoa10"]
     compiler = Compiler(num_workers=256)
-    cliff_t = False
+    cliff_t = True
   
     all_partitioned_data = pickle.load(open(partitioned_data_file, "rb"))
 
-    partitioned_circ_file=f"partitioned_circs/{circ_name}.pickle"
-    partitioned_circ = pickle.load(open(partitioned_circ_file, "rb"))
+    ids = []
+    for circ_name in circ_names:
+        partitioned_circ_file=f"partitioned_circs/{circ_name}.pickle"
+        partitioned_circ = pickle.load(open(partitioned_circ_file, "rb"))
 
-    tols = [1.0, 2.0, 3.0, 4.0, 5.0]
+        tols = [1.0, 2.0, 3.0, 4.0, 5.0]
 
-    for tol in tols:
-        checkpoint_folder_form = f"{base_checkpoint_dir}/{circ_name}" + "_{large_block_num}_" + f"{tol}/"
-        ens_pass = FullCircvRPass(
-            circ_name=circ_name,
-            tol=tol,
-            checkpoint_folder_form=checkpoint_folder_form,
-            all_partitioned_data=all_partitioned_data,
-            cliff_t=cliff_t
-        )
-        
-        compiler.compile(Circuit(2), [ens_pass])
+        for tol in tols:
+            print(f"Running {circ_name} with tol {tol}", flush=True)
+            checkpoint_folder_form = f"{base_checkpoint_dir}/{circ_name}" + "_{large_block_num}_" + f"{tol}/"
+            ens_pass = FullCircvRPass(
+                circ_name=circ_name,
+                tol=tol,
+                checkpoint_folder_form=checkpoint_folder_form,
+                all_partitioned_data=all_partitioned_data,
+                cliff_t=cliff_t
+            )
+            
+            # compiler.compile(Circuit(2), [ens_pass])
+            id = compiler.submit(circuit=Circuit(7), workflow=[ens_pass])
+            ids.append(id)
+
+    for id in ids:
+        compiler.result(id)
         
     compiler.close()
 
