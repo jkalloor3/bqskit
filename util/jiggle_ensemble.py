@@ -205,6 +205,8 @@ class  JiggleEnsemblePass(BasePass):
                                                                         int_perturb_dists[len(gg_param_options)]))
                         
                         if gg_params is None: # Bad Scaling Factor, don't use
+                            gg_param_options.append([None])
+                            gg_probs.append([1.0])
                             continue
                         
                         total_cache[angle] = (gg_params, gg_strs, probs)
@@ -222,7 +224,8 @@ class  JiggleEnsemblePass(BasePass):
         return all_data
 
     @staticmethod
-    def single_jiggle_ham_clifft(circ_data: tuple[str, list, list], num: int) -> tuple[
+    def single_jiggle_ham_clifft(circ_data: tuple[str, list, list], 
+                                 num: int) -> tuple[
                                      np.ndarray[float], 
                                      np.ndarray[float]]:
         '''
@@ -254,7 +257,7 @@ class  JiggleEnsemblePass(BasePass):
 
         circ = lang.decode(circ_str)
         # This selects which gg str we should use
-        all_gg_inds = list(product(range(4), repeat=len(gg_probs)))
+        all_gg_inds = list(product(*[range(len(probs)) for probs in gg_probs]))
 
         final_params = np.zeros((num, circ.num_params))
         final_probs = np.zeros((num, ))
@@ -277,7 +280,9 @@ class  JiggleEnsemblePass(BasePass):
                     continue
                 if isinstance(op.gate, GridSynthGate):
                     new_gg_param = gg_params[gg_ind]
-                    op.params = new_gg_param
+                    if new_gg_param is not None:
+                        op.params = new_gg_param
+                    # Otherwise, use original params
                     gg_ind += 1
 
             assert new_circ.num_params == num_params
@@ -326,10 +331,6 @@ class  JiggleEnsemblePass(BasePass):
             empty_params = np.vstack([circ.params] * (num * 2))
             return empty_params
         if dist > success_threshold:
-            # print("Dist is too high!", dist, success_threshold, flush=True)
-            # empty_params = np.zeros((num * 2, circ.num_params))
-            # empty_params = np.vstack([circ.params] * (num * 2))
-            # return 
             dist = success_threshold / 2 # Still do perturbations
 
         # For each u3, come up with 16 param perturbations
@@ -535,8 +536,6 @@ class  JiggleEnsemblePass(BasePass):
             cache_file = os.path.join(checkpoint_dir, f"ensemble_{ens_ind}_cache_{self.checkpoint_extra_str}.pkl")
             # store_caches(all_caches, jiggle_file)
             pickle.dump(all_caches, open(cache_file, "wb"))
-
-
 
     async def run_scan_sols(self, circuit: Circuit, data: PassData) -> None:
         """Perform the pass's operation, see :class:`BasePass` for more."""

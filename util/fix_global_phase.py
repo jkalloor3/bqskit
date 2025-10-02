@@ -47,6 +47,9 @@ class FixGlobalPhasePass(BasePass):
         target = data.target
         new_scan_sols = []
         distances = []
+        if "scan_sols" not in data:
+            new = fix_phase(circuit, target)
+            return
         for psol in data["scan_sols"]:
             new = fix_phase(psol[0], target)
             new_scan_sols.append((psol[0], new))

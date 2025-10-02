@@ -44,13 +44,16 @@ class PrintDistancesPass(BasePass):
         if self.load_jiggles:
             checkpoint_dir: str = data["checkpoint_dir"]
             print("Checkpoint Dir: ", checkpoint_dir, flush=True)
-            ens_file = os.path.join(checkpoint_dir, "ensemble_0_.qasms")
-            jiggle_file = os.path.join(checkpoint_dir, "ensemble_0_jiggles_.npy")
-            cache_file = os.path.join(checkpoint_dir, "ensemble_0_cache_0.pkl")
-            circ_params = load_jiggled_ensemble(ens_file, jiggle_file, cache_file)
+            ens_file = os.path.join(checkpoint_dir, "ensemble_0__fw.qasms")
+            jiggle_file = os.path.join(checkpoint_dir, "ensemble_0_jiggles__fw.npy")
+            cache_file = os.path.join(checkpoint_dir, "ensemble_0_cache__fw.pkl")
+            probs_file = os.path.join(checkpoint_dir, "ensemble_0_probs___fw.npy")
+            circ_params = load_jiggled_ensemble(ens_file, jiggle_file, 
+                                                cache_file, probs_file)
 
             ensemble = await get_runtime().map(create_jiggled_unitaries, circ_params, 
-                                    target=data.target, add_cost=True)
+                                    target=data.target, add_cost=True,
+                                    drop_zeros=True)
             ensemble = list(itertools.chain.from_iterable(ensemble))
             ds = [d for _, d in ensemble]
             actual_ds = [normalized_gp_frob_cost(u, data.target) for u, _ in ensemble]
@@ -58,8 +61,8 @@ class PrintDistancesPass(BasePass):
             scan_sols = data.get('scan_sols', [])
             ds = [d for _, d in scan_sols]
             actual_ds = [normalized_gp_frob_cost(c.get_unitary(), data.target) for c, _ in scan_sols]
-        print("Distances: ", ds, flush=True)
-        print("Actual Distances: ", actual_ds, flush=True)
+        print("Avg. Distance: ", np.mean(ds), flush=True)
+        print("Actual Distances: ", np.mean(actual_ds), flush=True)
         pass 
 
 class FilterDistancesPass(BasePass):
@@ -78,7 +81,6 @@ class CountPredicate(PassPredicate):
     def get_truth_value(self, circuit, data):
         return circuit.count(CNOTGate()) < 26
 
-
 class ParamCountPredicate(PassPredicate):
 
     def __init__(self, threshold: int):
@@ -88,6 +90,7 @@ class ParamCountPredicate(PassPredicate):
     def get_truth_value(self, circuit, data):
         # Fix angles
         fixed_circ = circuit.copy()
+        ConvertToZXZXZSimple.run_circuit(fixed_circ, group=False)
         FixAnglesPass.run_circ(fixed_circ, self.threshold)
         print("Param Count After Fixing!: ", circuit.num_params,
                fixed_circ.num_params, flush=True)
@@ -104,7 +107,7 @@ good_instantiation_options = {
 }
 
 SMALL_BLOCK_SIZE = 4
-base_checkpoint_dir_form = "small_block_checkpoints_final_paper_{block_size}_clifft{extra}"
+base_checkpoint_dir_form = "small_block_checkpoints_final_paper_{block_size}_clifft{extra}_final"
 NUM_UNIQUE_CIRCS = 250
 
 def get_ensemble_workflow(circ_name: str, tol: float, extra: str = "") -> WorkflowLike:
@@ -180,8 +183,8 @@ def get_ensemble_workflow(circ_name: str, tol: float, extra: str = "") -> Workfl
                         FixAnglesPass(int(tol) * 2 + 1, run_scan_sols=True),
                         FixGlobalPhasePass(),
                         FilterDistancesPass(threshold=(err_thresh * 5)),
-                        # PrintDistancesPass(),
                         jiggle_pass,
+                        # PrintDistancesPass(load_jiggles=True),
                         GenerateProbabilityPass(eps=(err_thresh * 5),
                                                 run_on_ensemble_0=True,
                                                 checkpoint_extra_str=extra_str),
@@ -256,8 +259,6 @@ def get_shortest_circuits(circ_data: list[tuple[str, str, float]], extra: str = 
                 print("Original CNOT Count: ", circ.count(CNOTGate()), 
                       flush=True)
                 ids.append(compiler.submit(circ, workflow))
-            # else:
-            #     print("Skipping small circ: ", circ_file, flush=True)
 
     ind = 0
     for id in ids:

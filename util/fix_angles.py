@@ -7,9 +7,9 @@ import numpy as np
 from .distance import normalized_gp_frob_cost
 
 
-PI_over_4_gates = [np.pi * 0.25 * i for i in range(8)]
+PI_over_4_gates = [np.pi * 0.25 * i for i in range(9)]
 
-PI_over_4_circs = ["I", "T", "S", "Z Tdg", "Z", "Z T", "Sdg", "Tdg"]
+PI_over_4_circs = ["I", "T", "S", "Z Tdg", "Z", "Z T", "Sdg", "Tdg", "I"]
 
 def get_rz_gate_circ(angle, precision):
     circ = Circuit(1)

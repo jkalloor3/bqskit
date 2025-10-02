@@ -23,7 +23,7 @@ from .check_ensemble_quality import *
 from .jiggle_scans import JiggleScansPass
 from .jiggle_ensemble import JiggleEnsemblePass
 from .ensemble import CreateEnsemblePass
-from .fix_angles import FixAnglesPass, UnFixTPass
+from .fix_angles import *
 from .convert_to_clifft import *
 from .gg import *
 from .pauli_twirl import PauliTwirlPass
