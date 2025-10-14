@@ -21,7 +21,7 @@ plot_circs = []
 large_circs = []
 
 # all_circs = plot_circs + large_circs + circs
-all_circs = ["qaoa10", "heisenberg7", "add17", "mult16", "qpe_14", "qae13", "LiH_jw_long", "FermiHubbard2x2_jw_long"] 
+all_circs = ["lgt_380", "qae33"] 
 all_circs = set(all_circs)
 
 # block_form = "{circ}_*/data.csv"
@@ -68,20 +68,22 @@ def check_good(csv_file: str, tol: float) -> tuple[bool, float]:
     elif tol < 3.0:
         ratio_limit = 20.0
     else:
-        ratio_limit = 50.0
+        ratio_limit = 20.0
 
-    with open(csv_file, 'r') as file:
-        reader = csv.DictReader(file)
+    eps = None
+
+    with open(csv_file, 'r') as csv_file_obj:
+        reader = csv.DictReader(csv_file_obj)
         for row in reader:
             if "Ratio" in row:  # Check if the column value is not empty
                 if float(row["Ratio"]) < final_ratio:
-                    max_dist = ratio_limit * (10 ** (-2 * tol))
-                    bias = float(row["Bias"])
-                    if bias > max_dist:
-                        new_ratio = bias / (10 ** (-2 * tol))
-                    else:
-                        new_ratio = float(row["Ratio"])
+                    # max_dist = ratio_limit * (10 ** (-2 * tol))
+                    # bias = float(row["Bias"])
+                    new_ratio = float(row["Ratio"])
                     final_ratio = min(final_ratio, new_ratio)
+                    eps = float(row["Epsilon"])
+                    actual_ratio = row["Ratio"]
+
     return final_ratio < ratio_limit, final_ratio
 
 def get_avg_count(checkpoints_dir: str,
@@ -93,10 +95,12 @@ def get_avg_count(checkpoints_dir: str,
 
     large_checkpoint_dir = os.path.join(checkpoints_dir, f"{circ_name}_{block_num}_{tol}")
     qasms_file, jiggle_file, cache_file, _, csv_file = get_file_names(large_checkpoint_dir, small_block_num, no_qp=False)
-    if not check_good(csv_file, tol):
+    good, _ = check_good(csv_file, tol)
+    if not good:
         # return float("inf")
         qasms_file, jiggle_file, cache_file, _, csv_file = get_file_names(large_checkpoint_dir, small_block_num, no_qp=True)
-        if not check_good(csv_file, tol):
+        good, _ = check_good(csv_file, tol)
+        if not good:
             return float("inf")
 
     if not cliff_t:
@@ -126,7 +130,7 @@ def update_count_data(orig_cx_counts, checkpoints_dir, cliff_t: bool = False):
 
                 block_ind = (large_block_num, small_block_num)
                 orig_count, prev_count = orig_cx_counts[circ_name][block_ind][tol]
-                print(prev_count, orig_count, avg_count, flush=True)
+                # print(prev_count, orig_count, avg_count, flush=True)
                 new_count = min(prev_count, avg_count)
                 orig_counts[circ_name][block_ind][tol] = (orig_count, new_count)
     return orig_counts
@@ -340,8 +344,8 @@ if __name__ == '__main__':
         small_block_checkpoints_dir_1 = f"small_block_checkpoints_final_paper_4_more_cx_tket"
         small_block_checkpoints_dir_2 = f"small_block_checkpoints_final_paper_4_tket"
     else:
-        small_block_checkpoints_dir_1 = f"small_block_checkpoints_final_paper_4_clifft_tket"
-        small_block_checkpoints_dir_2 = f"small_block_checkpoints_final_paper_4_clifft_less_t_tket"
+        small_block_checkpoints_dir_1 = f"small_block_checkpoints_final_paper_4_clifft_tket_final"
+        small_block_checkpoints_dir_2 = f"small_block_checkpoints_final_paper_4_clifft"
 
     ratio_data = {c: {} for c in circs}
     update_data_from_folders(ratio_data, small_block_checkpoints_dir_2)
@@ -350,7 +354,7 @@ if __name__ == '__main__':
     print("Ratio data loaded", flush=True)
     if output_cx:
         # compiler = Compiler('localhost')
-        compiler = Compiler(num_workers=256)
+        compiler = Compiler(num_workers=1)
         orig_counts = get_orig_counts(circs, cliff_t=cliff_t, compiler=compiler)
         # Only use orig_counts for the circs we want
         orig_counts = {circ: orig_counts[circ] for circ in circs}
@@ -393,5 +397,5 @@ if __name__ == '__main__':
     # Output CX data to a csv file
     if output_cx:
         print("Outputting CX data to CSV", flush=True)
-        csv_file_name = f"count_data_final{extra}_final.csv"
+        csv_file_name = f"count_data_final{extra}_final_stricter.csv"
         output_csv(orig_counts, csv_file_name, cliff_t=cliff_t)

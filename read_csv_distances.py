@@ -4,7 +4,7 @@ import sys
 import os
 
 def read_distances(circ_name, tol):
-    pattern = f"small_block_checkpoints_final_paper_4_clifft_tket_final/{circ_name}_*_{tol}/*.csv"
+    pattern = f"small_block_checkpoints_final_paper_4_*/{circ_name}_*_{tol}/*.csv"
     files = glob.glob(pattern)
     if not files:
         print(f"No files found for pattern: {pattern}")

@@ -193,7 +193,7 @@ def get_shortest_circuits(circ_data: list[tuple[str, str, float]], extra: str = 
         if workflow:
             circ = Circuit.from_file(circ_file)
             ccount = circ.count(CNOTGate())
-            if ccount > 3:
+            if ccount > 3 and circ.num_qudits >= 3:
                 print("Original CNOT Count: ", circ.count(CNOTGate()), 
                       flush=True)
                 ids.append(compiler.submit(circ, workflow))
