@@ -108,8 +108,7 @@ def get_avg_count(checkpoints_dir: str,
     if ratio_2 < ratio_limit:
         count_2 = load_avg_ensemble_counts_full(
             qasms_file, jiggle_file=jiggle_file, cache_file=cache_file, 
-            probs_file=probs_file, target_error=(10 ** (-tol * 2)), 
-            count_t=cliff_t,
+            target_error=(10 ** (-tol * 2)), count_t=cliff_t,
         )
     else:
         count_2 = float("inf")
