@@ -6,7 +6,7 @@ from bqskit.ir.gates import *
 import numpy as np
 from .fix_angles import FixAnglesPass
 from .convert_to_cliff import ConvertToZXZXZSimple
-from .gg import GridSynthGate, gg_gate_def
+from .gg import GridSynthGate, gg_gate_def, get_approx_t_str
 import os
 import pickle
 
@@ -105,6 +105,7 @@ class GateCounter:
     def count_t(self, circ: Circuit, target_error: float = None, 
                 skip_fix: bool = False,
                 verbose: bool = False) -> int:
+
         if target_error is None:
             precision = 18
         else:
@@ -114,7 +115,7 @@ class GateCounter:
                 return circ.count(TGate()) + circ.count(TdgGate())
             error_per_param = target_error / num_params
             precision = ceil(-np.log10(error_per_param))
-        
+
         if GateCounter.has_non_rz(circ) and not skip_fix:
             out_circ = circ.copy()
             fix_angle_workflow(out_circ, precision=precision)
@@ -122,10 +123,11 @@ class GateCounter:
             out_circ = circ
         
         if verbose:
-            print(out_circ.gate_counts, precision, flush=True)
+            print(out_circ.gate_counts, target_error, precision, flush=True)
 
         # Count the number of T gates
         num_t = out_circ.count(TGate()) + out_circ.count(TdgGate())
+        local_cache = {}
         for op in out_circ.operations():
             if isinstance(op.gate, RZGate):
                 # On average, num_ts is about 10 * precisions
@@ -135,7 +137,14 @@ class GateCounter:
                     # Count Ts in gg_str
                     num_t += gg_str.count('T')
                 else:
-                    num_t += 10 * precision
+                    # num_t += 10 * precision
+                    if (op.params[0], precision) in local_cache:
+                        gg_str = local_cache[(op.params[0], precision)]
+                    else:
+                        gg_str = get_approx_t_str(op.params[0], precision)
+                        local_cache[(op.params[0], precision)] = gg_str
+                    num_t += gg_str.count('T')
+
             elif isinstance(op.gate, GridSynthGate):
                 gg_ind = (op.params[0], op.params[1])
                 if gg_ind in self.cache:
@@ -143,12 +152,19 @@ class GateCounter:
                     # Count Ts in gg_str
                     num_t += gg_str.count('T')
                 else:
-                    gg_prec = op.params[1]
-                    num_t += 10 * gg_prec
+                    if (op.params[0], precision) in local_cache:
+                        gg_str = local_cache[(op.params[0], precision)]
+                    else:
+                        gg_str = get_approx_t_str(op.params[0], precision)
+                        local_cache[(op.params[0], precision)] = gg_str
+                    num_t += gg_str.count('T')
             elif isinstance(op.gate, U3Gate):
                 # Assume 3 RZ gates per U3 -> This is explicitly converted in
                 # the fix_angle_workflow
                 num_t += 30 * precision
+
+        if verbose:
+            print(f"Total T count: {num_t}", flush=True)
         return num_t
 
 gate_counter_est = GateCounter(est=True)
@@ -202,8 +218,7 @@ def load_avg_ensemble_counts_est(ensemble_file: str, jiggle_file: str, target_er
     
 def load_ensemble_counts_full(ensemble_file: str, jiggle_file: str, 
                               cache_file: str, target_error: float, 
-                              count_t: bool = False, 
-                              count_rz: bool = False) -> float:
+                              count_t: bool = False, count_rz: bool = False) -> float:
     with open(ensemble_file, "r") as f:
         qasms = f.read().split("\nBREAK\n")
 
@@ -212,38 +227,38 @@ def load_ensemble_counts_full(ensemble_file: str, jiggle_file: str,
         counts = [gate_counter_full.count_qasm(q, target_error, 
                                                count_rz=count_rz, 
                                                count_t=count_t) for q in qasms]
+        return np.mean(counts)
     else:
         params = np.load(jiggle_file)
-        # Sample 50 of the qasms
-        rand_inds = np.random.randint(0, len(qasms), size=min(50, len(qasms)))
-        qasms = [qasms[i] for i in rand_inds]
 
-        # For each qasm, sample 4 random params
-        all_qasms = []
         counts = []
         for i, qasm in enumerate(qasms):
-            rand_params = np.random.randint(0, len(params[i]), size=4)
-            gate_counter_full = GateCounter(est=False, cache_file=cache_file,
+            new_circ = qlang.decode(qasm)
+            gate_counter_full = GateCounter(est=False, 
+                                            cache_file=cache_file,
                                             cache_ind=i)
-            for j in rand_params:
-                new_circ = qlang.decode(qasm)
+            
+            for j in range(len(params[i])):
                 new_circ.set_params(params[i][j])
-                all_qasms.append(new_circ)
+                new_count = gate_counter_full.count_t(new_circ, 
+                                                      target_error,
+                                                      skip_fix=True)
+                counts.append(new_count)
 
-        # Ensemble should already be fixed
-        counts = [gate_counter_full.count_t(circ, target_error, 
-                                            skip_fix=True) for 
-                                            circ in all_qasms]
     return np.mean(counts)
 
 def load_avg_ensemble_counts_full(ensemble_file: str, jiggle_file: str, 
-                                  cache_file: str, target_error: float, 
+                                  cache_file: str,target_error: float, 
                                   count_t: bool = False, 
                                   count_rz: bool = False) -> float:
 
-    counts = load_ensemble_counts_full(ensemble_file, jiggle_file, cache_file,
-                                        target_error, count_t, count_rz)
-    return np.mean(counts)
+    if os.path.exists(ensemble_file):
+        counts = load_ensemble_counts_full(ensemble_file, jiggle_file, 
+                                           cache_file, target_error, 
+                                           count_t, count_rz)
+        return np.mean(counts)
+    
+    return float("inf")
 
 
 def count_params(circ: Circuit) -> int:

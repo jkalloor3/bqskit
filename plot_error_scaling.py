@@ -1,3 +1,4 @@
+from sys import argv
 import os
 import csv
 import pickle
@@ -12,19 +13,15 @@ from bqskit.ir.gates import CircuitGate, CNOTGate
 from util.plot_lib import plot_all_circ_violins, benchmark_labels
 
 # List of circuits
-# circs = ["draper_adder_12", "qae13", "qpe_14", "lgt_17"]  # Replace with your list of circuits
-# plot_circs = ["lgt_17", "mult16", "add17", "qpe_14", "qae11", "LiH_jw_long", "FermiHubbard2x2_jw_long", "heisenberg7", "qugan_395"] 
-# circs += ["add17", "lgt_17", "qae13", "qpe_14", "QITE_8_0", "mult16", "draper_adder_12", "qae11", "qaoa10"]
-# large_circs = ["qae33", "heisenberg64", "adder63"]
-plot_circs = []
-# circs = ["LiH_jw_long", "FermiHubbard2x2_jw_long"]
-large_circs = []
+base_circs = ["draper_adder_12", "qae13", "qpe_14", "lgt_17"]  # Replace with your list of circuits
+plot_circs = ["lgt_17", "mult16", "add17", "qpe_14", "qae11", "LiH_jw_long", "FermiHubbard2x2_jw_long", "heisenberg7"] 
+base_circs += ["add17", "lgt_17", "qae13", "qpe_14", "QITE_8_0", "mult16", "draper_adder_12", "qae11", "qaoa10"]
+large_circs = ["qae33", "qaoa_148", "lgt_380"]
 
-# all_circs = plot_circs + large_circs + circs
-all_circs = ["lgt_380", "qae33"] 
-all_circs = set(all_circs)
+all_circs = ["heisenberg7", "FermiHubbard2x2_jw_long", "LiH_jw_long", "qpe_14", "qaoa10", "lgt_17", "mult16", "qae13"]
+all_circs += large_circs
 
-# block_form = "{circ}_*/data.csv"
+
 NO_QP = False
 if NO_QP:
     block_csv_form = "{circ}_*/block_*no_qp.csv"
@@ -58,75 +55,81 @@ def find_tket_qasm(circ_name: str) -> str:
 
     return None
 
-def check_good(csv_file: str, tol: float) -> tuple[bool, float]:
+def check_good(csv_file: str) -> float:
     """
     Check if the csv file has a good ratio for the given tolerance.
     """
     final_ratio = float("inf")
-    if tol == 1.0:
-        ratio_limit = 2.5
-    elif tol < 3.0:
-        ratio_limit = 20.0
-    else:
-        ratio_limit = 20.0
 
-    eps = None
+    if not os.path.exists(csv_file):
+        return final_ratio
 
     with open(csv_file, 'r') as csv_file_obj:
         reader = csv.DictReader(csv_file_obj)
         for row in reader:
             if "Ratio" in row:  # Check if the column value is not empty
                 if float(row["Ratio"]) < final_ratio:
-                    # max_dist = ratio_limit * (10 ** (-2 * tol))
-                    # bias = float(row["Bias"])
                     new_ratio = float(row["Ratio"])
                     final_ratio = min(final_ratio, new_ratio)
-                    eps = float(row["Epsilon"])
-                    actual_ratio = row["Ratio"]
 
-    return final_ratio < ratio_limit, final_ratio
+    return final_ratio
 
 def get_avg_count(checkpoints_dir: str,
                   circ_name: str, 
                   block_num: str,
                   tol: float,
                   small_block_num: str, 
-                  cliff_t: bool = False):
+                  cliff_t: bool,
+                  default_ratio_limit: float):
+    
+    if tol == 1.0:
+        ratio_limit = default_ratio_limit / 10
+    else:
+        ratio_limit = default_ratio_limit
 
     large_checkpoint_dir = os.path.join(checkpoints_dir, f"{circ_name}_{block_num}_{tol}")
-    qasms_file, jiggle_file, cache_file, _, csv_file = get_file_names(large_checkpoint_dir, small_block_num, no_qp=False)
-    good, _ = check_good(csv_file, tol)
-    if not good:
-        # return float("inf")
-        qasms_file, jiggle_file, cache_file, _, csv_file = get_file_names(large_checkpoint_dir, small_block_num, no_qp=True)
-        good, _ = check_good(csv_file, tol)
-        if not good:
-            return float("inf")
+    qasms_file, jiggle_file, cache_file, _, csv_file = get_file_names(large_checkpoint_dir, 
+                                                                      small_block_num, no_qp=False)
+    ratio_1 = check_good(csv_file)
 
-    if not cliff_t:
-        jiggle_file = None
-        cache_file = None
+    if ratio_1 < ratio_limit:
+        count_1 = load_avg_ensemble_counts_full(
+            qasms_file, jiggle_file=jiggle_file, cache_file=cache_file,
+            target_error=(10 ** (-tol * 2)), count_t=cliff_t,
+        )
+    else:
+        count_1 = float("inf")
 
-    return load_avg_ensemble_counts_full(
-        qasms_file, jiggle_file=jiggle_file, cache_file=cache_file,
-        target_error=(10 ** (-tol * 2)), count_t =cliff_t,
-    )
+    qasms_file, jiggle_file, cache_file, _, csv_file = get_file_names(large_checkpoint_dir, 
+                                                                      small_block_num, 
+                                                                      no_qp=True)
+    ratio_2 = check_good(csv_file)
+
+    if ratio_2 < ratio_limit:
+        count_2 = load_avg_ensemble_counts_full(
+            qasms_file, jiggle_file=jiggle_file, cache_file=cache_file, 
+            probs_file=probs_file, target_error=(10 ** (-tol * 2)), 
+            count_t=cliff_t,
+        )
+    else:
+        count_2 = float("inf")
+
+    return min(count_1, count_2)
 
 # Function to read data.csv from each folder
-def update_count_data(orig_cx_counts, checkpoints_dir, cliff_t: bool = False):
+def update_count_data(orig_cx_counts, checkpoints_dir, 
+                      cliff_t: bool, default_ratio_limit: float) -> dict:
     for circ_name, block_data in orig_cx_counts.items():
         for (large_block_num, small_block_num) in block_data.keys():
             for tol in block_data[(large_block_num, small_block_num)].keys():
                 # print(circ_name, large_block_num, small_block_num, tol, flush=True)
-                try:
-                    avg_count = get_avg_count(checkpoints_dir, 
-                                            circ_name, 
-                                            large_block_num, 
-                                            tol, 
-                                            small_block_num, 
-                                            cliff_t=cliff_t)
-                except:
-                    avg_count = float("inf")
+                avg_count = get_avg_count(checkpoints_dir, 
+                                        circ_name, 
+                                        large_block_num, 
+                                        tol, 
+                                        small_block_num, 
+                                        cliff_t=cliff_t,
+                                        default_ratio_limit=default_ratio_limit)
 
                 block_ind = (large_block_num, small_block_num)
                 orig_count, prev_count = orig_cx_counts[circ_name][block_ind][tol]
@@ -239,7 +242,7 @@ def get_orig_counts(circuits: list[str], cliff_t: bool = False,
     orig_cx_counts = {}
 
     cliff_t_text = "_cliff_t" if cliff_t else ""
-    save_file = f"orig_counts{cliff_t_text}.pickle"
+    save_file = f"orig_counts{cliff_t_text}_full.pickle"
 
     if os.path.exists(save_file):
         with open(save_file, 'rb') as f:
@@ -317,7 +320,6 @@ def get_orig_counts(circuits: list[str], cliff_t: bool = False,
                 if cliff_t:
                     t_counter = GateCounter(est = False)
                     for err in [1.0, 2.0, 3.0, 4.0, 5.0, 6.0]:
-                        # print(f"{circ_name}:{block_num}:{small_block_num}:{err}:", flush=True)
                         t_count = t_counter.count_t(op.gate._circuit, 10 ** (-err * 2))
                         orig_cx_counts[circ_name][(block_num, small_block_num)][err] = (t_count, t_count)
                 else:
@@ -332,7 +334,12 @@ def get_orig_counts(circuits: list[str], cliff_t: bool = False,
 if __name__ == '__main__':
     # Collect data from all folders
     plot = False
-    cliff_t = False
+    cliff_t = True
+
+    default_ratio_limit = float(argv[1])
+
+    print("Ratio limit:", default_ratio_limit, flush=True)
+
     if plot:
         circs = plot_circs
         output_cx = False
@@ -340,18 +347,18 @@ if __name__ == '__main__':
         circs = all_circs
         output_cx = True
 
+    print("Circuits to process:", list(circs), flush=True)
+
     if not cliff_t:
         small_block_checkpoints_dir_1 = f"small_block_checkpoints_final_paper_4_more_cx_tket"
         small_block_checkpoints_dir_2 = f"small_block_checkpoints_final_paper_4_tket"
     else:
-        small_block_checkpoints_dir_1 = f"small_block_checkpoints_final_paper_4_clifft_tket_final"
-        small_block_checkpoints_dir_2 = f"small_block_checkpoints_final_paper_4_clifft"
+        small_block_checkpoints_dir_1 = f"small_block_checkpoints_final_paper_4_clifft_tket"
+        small_block_checkpoints_dir_2 = f"small_block_checkpoints_final_paper_4_clifft_tket_final"
 
     ratio_data = {c: {} for c in circs}
-    update_data_from_folders(ratio_data, small_block_checkpoints_dir_2)
-    update_data_from_folders(ratio_data, small_block_checkpoints_dir_1)
-    
-    print("Ratio data loaded", flush=True)
+
+    # print("Ratio data loaded", flush=True)
     if output_cx:
         # compiler = Compiler('localhost')
         compiler = Compiler(num_workers=1)
@@ -360,42 +367,45 @@ if __name__ == '__main__':
         orig_counts = {circ: orig_counts[circ] for circ in circs}
         compiler.close()
         print("Original counts loaded", flush=True)
-        update_count_data(orig_counts, small_block_checkpoints_dir_1,
-                                      cliff_t=cliff_t)
+    #     update_count_data(orig_counts, small_block_checkpoints_dir_1,
+    #                                   cliff_t=cliff_t,
+    #                                   default_ratio_limit=default_ratio_limit)
 
-        update_count_data(orig_counts, small_block_checkpoints_dir_2,
-                                                  cliff_t=cliff_t)
-        print("CX data loaded", flush=True)
-        print("CX data more cx:", list(orig_counts.keys()), flush=True)
+    #     update_count_data(orig_counts, small_block_checkpoints_dir_2,
+    #                                               cliff_t=cliff_t,
+    #                                               default_ratio_limit=default_ratio_limit)
+    #     print("CX data loaded", flush=True)
+    #     print("CX data more cx:", list(orig_counts.keys()), flush=True)
 
-    if NO_QP:
-        extra = "_no_qp"
-    else:
-        extra = ""
+    # if NO_QP:
+    #     extra = "_no_qp"
+    # else:
+    #     extra = ""
 
-    if cliff_t:
-        extra += "_cliff"
-    else:
-        extra += "_nisq"
+    # if cliff_t:
+    #     extra += "_cliff"
+    # else:
+    #     extra += "_nisq"
 
-    if plot:
-        # Plot ratio data
-        fig, axes = plt.subplots(1, 1, figsize=(12, 6))
+    # if plot:
+    #     # Plot ratio data
+    #     fig, axes = plt.subplots(1, 1, figsize=(12, 6))
 
-        if cliff_t:
-            title = "Error Scaling (FT)"
-        else:
-            title = "Error Scaling (NISQ)"
+    #     if cliff_t:
+    #         title = "Error Scaling (FT)"
+    #     else:
+    #         title = "Error Scaling (NISQ)"
 
-        plot_all_circ_violins(ratio_data, axes, plot_title=title)
+    #     plot_all_circ_violins(ratio_data, axes, plot_title=title)
 
-        # Save the figure
-        fig.tight_layout()
-        fig.savefig(f"error_scaling_final{extra}.png", dpi=300)
+    #     # Save the figure
+    #     fig.tight_layout()
+    #     fig.savefig(f"error_scaling_final{extra}.png", dpi=300)
 
 
     # Output CX data to a csv file
     if output_cx:
         print("Outputting CX data to CSV", flush=True)
-        csv_file_name = f"count_data_final{extra}_final_stricter.csv"
+        # csv_file_name = f"count_data_final{extra}_{int(default_ratio_limit)}_weight.csv"
+        csv_file_name = f"orig_counts_full.csv"
         output_csv(orig_counts, csv_file_name, cliff_t=cliff_t)
