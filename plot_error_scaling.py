@@ -92,6 +92,11 @@ def get_avg_count(checkpoints_dir: str,
                                                                       small_block_num, no_qp=False)
     ratio_1 = check_good(csv_file)
 
+    if not cliff_t:
+        # No need to read params or cache, just counting CNOT
+        jiggle_file = None
+        cache_file = None
+
     if ratio_1 < ratio_limit:
         count_1 = load_avg_ensemble_counts_full(
             qasms_file, jiggle_file=jiggle_file, cache_file=cache_file,
@@ -104,6 +109,11 @@ def get_avg_count(checkpoints_dir: str,
                                                                       small_block_num, 
                                                                       no_qp=True)
     ratio_2 = check_good(csv_file)
+
+    if not cliff_t:
+        # No need to read params or cache, just counting CNOT
+        jiggle_file = None
+        cache_file = None
 
     if ratio_2 < ratio_limit:
         count_2 = load_avg_ensemble_counts_full(
@@ -241,7 +251,7 @@ def get_orig_counts(circuits: list[str], cliff_t: bool = False,
     orig_cx_counts = {}
 
     cliff_t_text = "_cliff_t" if cliff_t else ""
-    save_file = f"orig_counts{cliff_t_text}_full.pickle"
+    save_file = f"orig_counts{cliff_t_text}.pickle"
 
     if os.path.exists(save_file):
         with open(save_file, 'rb') as f:
@@ -333,7 +343,7 @@ def get_orig_counts(circuits: list[str], cliff_t: bool = False,
 if __name__ == '__main__':
     # Collect data from all folders
     plot = False
-    cliff_t = True
+    cliff_t = False
 
     default_ratio_limit = float(argv[1])
 
@@ -366,45 +376,45 @@ if __name__ == '__main__':
         orig_counts = {circ: orig_counts[circ] for circ in circs}
         compiler.close()
         print("Original counts loaded", flush=True)
-    #     update_count_data(orig_counts, small_block_checkpoints_dir_1,
-    #                                   cliff_t=cliff_t,
-    #                                   default_ratio_limit=default_ratio_limit)
+        update_count_data(orig_counts, small_block_checkpoints_dir_1,
+                                      cliff_t=cliff_t,
+                                      default_ratio_limit=default_ratio_limit)
 
-    #     update_count_data(orig_counts, small_block_checkpoints_dir_2,
-    #                                               cliff_t=cliff_t,
-    #                                               default_ratio_limit=default_ratio_limit)
-    #     print("CX data loaded", flush=True)
-    #     print("CX data more cx:", list(orig_counts.keys()), flush=True)
+        update_count_data(orig_counts, small_block_checkpoints_dir_2,
+                                                  cliff_t=cliff_t,
+                                                  default_ratio_limit=default_ratio_limit)
+        print("CX data loaded", flush=True)
+        print("CX data more cx:", list(orig_counts.keys()), flush=True)
 
-    # if NO_QP:
-    #     extra = "_no_qp"
-    # else:
-    #     extra = ""
+    if NO_QP:
+        extra = "_no_qp"
+    else:
+        extra = ""
 
-    # if cliff_t:
-    #     extra += "_cliff"
-    # else:
-    #     extra += "_nisq"
+    if cliff_t:
+        extra += "_cliff"
+    else:
+        extra += "_nisq"
 
-    # if plot:
-    #     # Plot ratio data
-    #     fig, axes = plt.subplots(1, 1, figsize=(12, 6))
+    if plot:
+        # Plot ratio data
+        fig, axes = plt.subplots(1, 1, figsize=(12, 6))
 
-    #     if cliff_t:
-    #         title = "Error Scaling (FT)"
-    #     else:
-    #         title = "Error Scaling (NISQ)"
+        if cliff_t:
+            title = "Error Scaling (FT)"
+        else:
+            title = "Error Scaling (NISQ)"
 
-    #     plot_all_circ_violins(ratio_data, axes, plot_title=title)
+        plot_all_circ_violins(ratio_data, axes, plot_title=title)
 
-    #     # Save the figure
-    #     fig.tight_layout()
-    #     fig.savefig(f"error_scaling_final{extra}.png", dpi=300)
+        # Save the figure
+        fig.tight_layout()
+        fig.savefig(f"error_scaling_final{extra}.png", dpi=300)
 
 
     # Output CX data to a csv file
     if output_cx:
         print("Outputting CX data to CSV", flush=True)
-        # csv_file_name = f"count_data_final{extra}_{int(default_ratio_limit)}_weight.csv"
-        csv_file_name = f"orig_counts_full.csv"
+        csv_file_name = f"count_data_final{extra}_{int(default_ratio_limit)}.csv"
+        # csv_file_name = f"orig_counts_full.csv"
         output_csv(orig_counts, csv_file_name, cliff_t=cliff_t)
