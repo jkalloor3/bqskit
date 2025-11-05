@@ -28,8 +28,14 @@ cliff_t = True
 # cliff_t = False
 
 if __name__ == '__main__':
-    file = "get_ensemble_final_small_block"
-    circs = ["qugan_395"] 
+    file = "get_ensemble_final_small_block_clifft"
+    # circs = ["qugan_395"] 
+    circs = ["heisenberg7", 
+             "LiH_jw_long",
+             "qae13", 
+             "qpe_14", 
+             "mult16", 
+             "lgt_17"]
 
     # circs = set(circs)
 
@@ -43,7 +49,8 @@ if __name__ == '__main__':
             # tols  = [0, 1]
             # tols = [0]
             # tols = [-2.0, -3.0]
-            tols = [1.0, 2.0, 3.0, 4.0, 5.0]
+            # tols = [1.0, 2.0, 3.0, 4.0, 5.0]
+            tols = [-1.0]
             # tols = [5.0]
             # tols = [0]
             for tol in tols:
@@ -56,8 +63,8 @@ if __name__ == '__main__':
                     to_write.close()
                     time.sleep(2*sleep_time)
                     print(f"python {file}.py {circ} {timestep} {tol} {diversity}")
-                    # has_err = os.system(f"OMP_NUM_THREAD=2 OPENBLAS_NUM_THREADS=2 MKL_NUM_THREADS=2 NUMEXPR_NUM_THREADS=2 VECLIB_MAXIMUM_THREADS=2 python {file}.py {circ} {timestep} {tol} {diversity}")
+                    has_err = os.system(f"OMP_NUM_THREAD=2 OPENBLAS_NUM_THREADS=2 MKL_NUM_THREADS=2 NUMEXPR_NUM_THREADS=2 VECLIB_MAXIMUM_THREADS=2 python {file}.py {circ} {timestep} {tol} {diversity}")
                     # time.sleep(2*sleep_time)
-                    output = subprocess.check_output(['sbatch' , file_name])
-                    print(output)
+                    # output = subprocess.check_output(['sbatch' , file_name])
+                    # print(output)
                     # time.sleep(sleep_time)

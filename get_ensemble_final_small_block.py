@@ -55,9 +55,9 @@ def get_ensemble_workflow(circ_name: str, tol: float, extra: str = "") -> Workfl
     base_checkpoint_dir = base_checkpoint_dir_form.format(block_size=SMALL_BLOCK_SIZE, 
                                                           extra=ckpt_extra)
     checkpoint_dir = f"{base_checkpoint_dir}/{circ_name}_{tol}/"
-    err_thresh = 10 ** (-1 * tol) / 10
+    err_thresh = 10 ** (-1 * tol)
 
-    extra_err_thresh = err_thresh * 0.01
+    extra_err_thresh = err_thresh * 0.1
     small_block_size = SMALL_BLOCK_SIZE
     print("Checkpoint Dir: ", checkpoint_dir, flush=True)
     print("Error Threshold: ", err_thresh, flush=True)
@@ -71,8 +71,8 @@ def get_ensemble_workflow(circ_name: str, tol: float, extra: str = "") -> Workfl
     
     synthesis_pass = LEAPSynthesisPass2(
         store_partial_solutions=True,
-        success_threshold = extra_err_thresh / 5,
-        partial_success_threshold=err_thresh / 5,
+        success_threshold = extra_err_thresh / 2,
+        partial_success_threshold=err_thresh / 2,
         max_layer_factor=1.01,
         instantiate_options=instantiation_options,
         max_layer=14,
@@ -80,8 +80,8 @@ def get_ensemble_workflow(circ_name: str, tol: float, extra: str = "") -> Workfl
     )
 
     second_synthesis_pass = SecondLEAPSynthesisPass(
-        success_threshold = extra_err_thresh / 5,
-        partial_success_threshold=err_thresh / 5,
+        success_threshold = extra_err_thresh / 2,
+        partial_success_threshold=err_thresh / 2,
         max_layer_factor=1.01,
         instantiate_options=instantiation_options,
         max_layer=14,
@@ -128,7 +128,7 @@ def get_ensemble_workflow(circ_name: str, tol: float, extra: str = "") -> Workfl
                     CountPredicate(count_scan_sols=True),
                     [
                         jiggle_pass,
-                        GenerateProbabilityPass(eps=err_thresh * 10,
+                        GenerateProbabilityPass(eps=err_thresh,
                             run_on_ensemble_0=True,
                             checkpoint_extra_str=extra_str),
                         CheckEnsembleQualityPass(False,
@@ -181,8 +181,9 @@ def get_shortest_circuits(circ_data: list[tuple[str, str, float]], extra: str = 
         for circ_name, _, tol in circ_data
     ]
 
-    num_workers = min(os.cpu_count(), 250)
-    compiler = Compiler(num_workers=num_workers)
+    # num_workers = min(os.cpu_count() - 3, 250)
+    # compiler = Compiler(num_workers=num_workers)
+    compiler = Compiler('localhost')
     
     workflow_ind = 0
     ids: list[int] = []

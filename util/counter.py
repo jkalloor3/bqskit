@@ -24,10 +24,12 @@ t_cache = {}
 
 
 class GateCounter:
-    def __init__(self, est: bool = True, cache_file: str = None,
-                 cache_ind: int = 0) -> None:
+    def __init__(self, est: bool = True, 
+                 cache_file: str = None,
+                 cache_ind: int = 0,
+                 cache: dict = None) -> None:
         self.est = est
-        self.cache = None
+        self.cache = cache
         if cache_file is not None:
             caches = pickle.load(open(cache_file, "rb"))
             self.cache = caches[cache_ind]
