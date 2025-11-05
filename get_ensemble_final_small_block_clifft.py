@@ -11,7 +11,7 @@ from bqskit.ir.gates import CNOTGate
 from bqskit.passes import CheckpointRestartPass, ExtendBlockSizePass, NOOPPass
 from bqskit.passes import ForEachBlockPass, ScanPartitioner, IfThenElsePass, PassPredicate
 from util import JiggleEnsemblePass, FixGlobalPhasePass
-from util import  LEAPSynthesisPass2, EnsScanningGateRemovalPass
+from util import  LEAPSynthesisPass2, DefaultGGEnsemblePass
 from util import CheckEnsembleQualityPass
 from util import GenerateProbabilityPass
 from bqskit.passes import CheckpointRestartPass
@@ -107,7 +107,7 @@ good_instantiation_options = {
 }
 
 SMALL_BLOCK_SIZE = 4
-base_checkpoint_dir_form = "small_block_checkpoints_final_paper_{block_size}_clifft{extra}_final"
+base_checkpoint_dir_form = "small_block_checkpoints_final_paper_{block_size}_clifft{extra}"
 NUM_UNIQUE_CIRCS = 250
 
 def get_ensemble_workflow(circ_name: str, tol: float, extra: str = "") -> WorkflowLike:
@@ -116,9 +116,9 @@ def get_ensemble_workflow(circ_name: str, tol: float, extra: str = "") -> Workfl
     base_checkpoint_dir = base_checkpoint_dir_form.format(block_size=SMALL_BLOCK_SIZE, 
                                                           extra=ckpt_extra)
     checkpoint_dir = f"{base_checkpoint_dir}/{circ_name}_{tol}/"
-    err_thresh = 10 ** (-1 * tol) / 10
+    err_thresh = 10 ** (-1 * tol)
 
-    extra_err_thresh = err_thresh * 0.01
+    extra_err_thresh = err_thresh * 0.001
     small_block_size = SMALL_BLOCK_SIZE
     print("Checkpoint Dir: ", checkpoint_dir, flush=True)
     print("Error Threshold: ", err_thresh, flush=True)
@@ -145,11 +145,17 @@ def get_ensemble_workflow(circ_name: str, tol: float, extra: str = "") -> Workfl
 
     ntro = NumericalTReductionPass(
         full_loops=3,
-        success_threshold=err_thresh / 20,
-        use_calculated_error=True
+        success_threshold=err_thresh / 10,
+        use_calculated_error=True,
+        only_run_default=True,
     )
 
     extra_str = "_fw"
+
+    if tol < 1.5:
+        max_ratio = 2.0
+    else:
+        max_ratio = 20.0
 
     jiggle_pass = JiggleEnsemblePass(success_threshold=err_thresh * 2, 
                                   num_circs=4000, 
@@ -172,26 +178,30 @@ def get_ensemble_workflow(circ_name: str, tol: float, extra: str = "") -> Workfl
                 IfThenElsePass(
                     ParamCountPredicate(int(tol) * 2 + 1),
                     [
-                        IfThenElsePass(
-                            CountPredicate(),
-                            synthesis_pass,
-                            DoNothingPass()
-                        ),
+                        # IfThenElsePass(
+                        #     CountPredicate(),
+                        #     synthesis_pass,
+                        #     DoNothingPass()
+                        # ),
                         FixAnglesPass(int(tol) * 2 + 2, run_scan_sols=True),
                         ConvertToZXZXZSimple(group=False),
                         ntro,
-                        FixAnglesPass(int(tol) * 2 + 1, run_scan_sols=True),
+                        FixAnglesPass(int(tol) * 2, run_scan_sols=True),
                         FixGlobalPhasePass(),
-                        FilterDistancesPass(threshold=(err_thresh * 5)),
-                        jiggle_pass,
-                        # PrintDistancesPass(load_jiggles=True),
-                        GenerateProbabilityPass(eps=(err_thresh * 5),
-                                                run_on_ensemble_0=True,
-                                                checkpoint_extra_str=extra_str),
-                        CheckEnsembleQualityPass(eps=(err_thresh * 5),
-                                                count_t=True,
-                                                checkpoint_extra_str=extra_str,
-                                zero_threshold=((err_thresh ** 2) / 10)),
+                        # FilterDistancesPass(threshold=(err_thresh * 5)),
+                        # jiggle_pass,
+                        DefaultGGEnsemblePass(success_threshold=err_thresh,
+                                              checkpoint_extra_str=extra_str),
+                        # GenerateProbabilityPass(eps=(err_thresh * 5),
+                        #                         run_on_ensemble_0=True,
+                        #                         checkpoint_extra_str=extra_str),
+                        CheckEnsembleQualityPass(
+                            success_threshold=(err_thresh ** 2),
+                            count_t=True,
+                            checkpoint_extra_str=extra_str,
+                            max_ratio=max_ratio,
+                            zero_threshold=((err_thresh ** 2) / 10)
+                        ),
 
                     ]
                 ),

@@ -18,9 +18,9 @@ from bqskit.qis import UnitaryMatrix
 import numpy as np
 import os
 
-from util import normalized_gp_frob_cost, count_params
+from .distance import normalized_gp_frob_cost
 
-from .common import load_ensemble, store_ensemble
+from .common import store_ensemble
 
 
 _logger = logging.getLogger(__name__)

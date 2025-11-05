@@ -393,14 +393,16 @@ def check_if_finished(circ_name: str,
 
 def get_file_names(large_checkpoint_dir, 
                    small_block_num: str,
-                   no_qp: bool = False) -> tuple[str, str, str, str, str]:
+                   no_qp: bool = False,
+                   ratio_text: str = "") -> tuple[str, str, str, str, str]:
     small_checkpoint_dir = os.path.join(large_checkpoint_dir, f"block_{small_block_num}")
 
     if no_qp:
         ensemble_file = os.path.join(small_checkpoint_dir, "ensemble_final_fw_no_qp.qasms")
         jiggle_file = os.path.join(small_checkpoint_dir, "ensemble_final_jiggle_fw_no_qp.npy")
         cache_file = os.path.join(small_checkpoint_dir, "ensemble_final_cache_fw_no_qp.pkl")
-        csv_file = os.path.join(large_checkpoint_dir, f"block_{small_block_num}_fw_no_qp.csv")
+        csv_file = os.path.join(large_checkpoint_dir, f"block_{small_block_num}_fw_no_qp{ratio_text}.csv")
+        final_probs_file = os.path.join(small_checkpoint_dir, "ensemble_final_probs_fw_no_qp.npy")
         return ensemble_file, jiggle_file, cache_file, final_probs_file,  csv_file
 
     # Try outputs of newest passes
@@ -409,7 +411,7 @@ def get_file_names(large_checkpoint_dir,
         ensemble_file = os.path.join(small_checkpoint_dir, "ensemble_final_fw.qasms")
         jiggle_file = os.path.join(small_checkpoint_dir, "ensemble_final_jiggle_fw.npy")
         cache_file = os.path.join(small_checkpoint_dir, "ensemble_final_cache_fw.pkl")
-        csv_file = os.path.join(large_checkpoint_dir, f"block_{small_block_num}_fw.csv")
+        csv_file = os.path.join(large_checkpoint_dir, f"block_{small_block_num}_fw{ratio_text}.csv")
         return ensemble_file, jiggle_file, cache_file, final_probs_file, csv_file
 
     # Otherwise, we do not have the newest set of files, so return the old ones

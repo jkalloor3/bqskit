@@ -162,13 +162,6 @@ class ConvertToZXZXZ(BasePass):
         tcount_approx = lambda circ: circ.num_params * 30
         counts = [tcount_approx(circ[0]) for circ in new_circs]
 
-        print("Final Dists: ", dists)
-        print("Final Counts: ", counts)
-        # print("Final Scan Sols: ", new_circs)
-
-        # for circ, _ in new_circs:
-        #     print(circ.gate_counts)
-
         data["scan_sols"] = new_circs
 
         if "checkpoint_dir" in data:
@@ -178,8 +171,10 @@ class ConvertToZXZXZ(BasePass):
 
 class ConvertToZXZXZSimple(BasePass):
 
-    def __init__(self, group: bool = False) -> None:
+    def __init__(self, group: bool = False,
+                 run_scan_sols: bool = True) -> None:
         self.group = group
+        self.run_scan_sols = run_scan_sols
 
 
     @staticmethod
@@ -203,9 +198,13 @@ class ConvertToZXZXZSimple(BasePass):
             data: PassData
     ) -> None:
         # For every circuit in data["scan_sols"], run the circuit
-        if "scan_sols" not in data:
+        if not self.run_scan_sols:
             ConvertToZXZXZSimple.run_circuit(circuit, self.group)
             return
+        
         scan_sols: list[tuple[Circuit, float]] = data["scan_sols"]
         for circ, _ in scan_sols:
+            ConvertToZXZXZSimple.run_circuit(circ, self.group)
+        
+        for circ, _ in data.get("e2_scan_sols", []):
             ConvertToZXZXZSimple.run_circuit(circ, self.group)

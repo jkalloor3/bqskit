@@ -107,17 +107,24 @@ class FixAnglesPass(BasePass):
 
     async def run(self, circuit: Circuit, data: PassData) -> None:
         if self.run_scan_sols:
-            init_dists = [x[1] for x in data["scan_sols"]]
-            orig_gate_counts = [x[0].gate_counts for x in data["scan_sols"]]
-            targets = [x[0].get_unitary() for x in data["scan_sols"]]
+            # init_dists = [x[1] for x in data["scan_sols"]]
+            # orig_gate_counts = [x[0].gate_counts for x in data["scan_sols"]]
+            # targets = [x[0].get_unitary() for x in data["scan_sols"]]
             for circ, _ in data["scan_sols"]:
                 FixAnglesPass.run_circ(circ, self.precision)
-            final_dists = np.array([normalized_gp_frob_cost(c[0].get_unitary(), target) for target, c in zip(targets, data["scan_sols"])])
-            if np.any(final_dists > 0.001):
-                print("Circ Gates: ", orig_gate_counts, 
-                      [x[0].gate_counts for x in data["scan_sols"]], flush=True)
-                print("Orig Gate Counts: ", circuit.gate_counts, flush=True)
-                print("Post-fix Angles: ", init_dists, final_dists, flush=True)
+            # final_dists = np.array([normalized_gp_frob_cost(c[0].get_unitary(), target) for target, c in zip(targets, data["scan_sols"])])
+            # if np.any(final_dists > 0.001):
+            #     print("Circ Gates: ", orig_gate_counts, 
+            #           [x[0].gate_counts for x in data["scan_sols"]], flush=True)
+            #     print("Orig Gate Counts: ", circuit.gate_counts, flush=True)
+            #     print("Post-fix Angles: ", init_dists, final_dists, flush=True)
+
+            if "e2_scan_sols" not in data:
+                data["e2_scan_sols"] = [(circuit.copy(), 0.0)]
+
+            for circ, _ in data["e2_scan_sols"]:
+                FixAnglesPass.run_circ(circ, self.precision)
+                
         else:
             FixAnglesPass.run_circ(circuit, self.precision)
 

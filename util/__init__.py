@@ -38,3 +38,4 @@ from .plot_lib import *
 from .hamiltonian import *
 from .samplers import EnsembleSampler
 from .dm_runner import DensityMatrixRunner, EnsembleDMRunner
+from .diverse_ensemble_pass import DefaultGGEnsemblePass
