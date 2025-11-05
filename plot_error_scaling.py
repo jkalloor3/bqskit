@@ -18,8 +18,10 @@ plot_circs = ["lgt_17", "mult16", "add17", "qpe_14", "qae11", "LiH_jw_long", "Fe
 base_circs += ["add17", "lgt_17", "qae13", "qpe_14", "QITE_8_0", "mult16", "draper_adder_12", "qae11", "qaoa10"]
 large_circs = ["qae33", "qaoa_148", "lgt_380"]
 
-all_circs = ["heisenberg7", "FermiHubbard2x2_jw_long", "LiH_jw_long", "qpe_14", "qaoa10", "lgt_17", "mult16", "qae13"]
-all_circs += large_circs
+# all_circs = ["heisenberg7", "FermiHubbard2x2_jw_long", "LiH_jw_long", "qaoa10", "qae13", "qpe_14", "mult16", "lgt_17"]
+# all_circs += large_circs
+# all_circs = ["qaoa10", "heisenberg7", "FermiHubbard2x2_jw_long", "LiH_jw_long", "qaoa10", "qae13", "qpe_14"]
+all_circs = ["FermiHubbard2x2_jw_long"]
 
 
 NO_QP = False
@@ -55,24 +57,28 @@ def find_tket_qasm(circ_name: str) -> str:
 
     return None
 
-def check_good(csv_file: str) -> float:
+def check_good(csv_file: str, max_ratio: float) -> float:
     """
     Check if the csv file has a good ratio for the given tolerance.
     """
     final_ratio = float("inf")
 
     if not os.path.exists(csv_file):
-        return final_ratio
+        return final_ratio, float("inf")
+    
+    best_count = float("inf")
 
     with open(csv_file, 'r') as csv_file_obj:
         reader = csv.DictReader(csv_file_obj)
         for row in reader:
             if "Ratio" in row:  # Check if the column value is not empty
-                if float(row["Ratio"]) < final_ratio:
-                    new_ratio = float(row["Ratio"])
-                    final_ratio = min(final_ratio, new_ratio)
+                new_ratio = float(row["Ratio"])
+                count = float(row.get("Count", float("inf")))
+                if new_ratio < max_ratio and count < best_count:
+                    final_ratio = new_ratio
+                    best_count = count
 
-    return final_ratio
+    return final_ratio, best_count
 
 def get_avg_count(checkpoints_dir: str,
                   circ_name: str, 
@@ -89,39 +95,30 @@ def get_avg_count(checkpoints_dir: str,
 
     large_checkpoint_dir = os.path.join(checkpoints_dir, f"{circ_name}_{block_num}_{tol}")
     qasms_file, jiggle_file, cache_file, _, csv_file = get_file_names(large_checkpoint_dir, 
-                                                                      small_block_num, no_qp=False)
-    ratio_1 = check_good(csv_file)
+                                                                      small_block_num, no_qp=False,
+                                                                      ratio_text=f"_{int(ratio_limit)}")
+    ratio_1, count_1 = check_good(csv_file, ratio_limit)
 
-    if not cliff_t:
-        # No need to read params or cache, just counting CNOT
-        jiggle_file = None
-        cache_file = None
-
-    if ratio_1 < ratio_limit:
-        count_1 = load_avg_ensemble_counts_full(
-            qasms_file, jiggle_file=jiggle_file, cache_file=cache_file,
-            target_error=(10 ** (-tol * 2)), count_t=cliff_t,
-        )
-    else:
-        count_1 = float("inf")
+    # if ratio_1 < ratio_limit:
+    #     count_1 = load_avg_ensemble_counts_full(
+    #         qasms_file, jiggle_file=jiggle_file, cache_file=cache_file,
+    #         target_error=(10 ** (-tol * 2)), count_t=cliff_t,
+    #     )
+    # else:
+    #     count_1 = float("inf")
 
     qasms_file, jiggle_file, cache_file, _, csv_file = get_file_names(large_checkpoint_dir, 
                                                                       small_block_num, 
                                                                       no_qp=True)
-    ratio_2 = check_good(csv_file)
+    ratio_2, count_2 = check_good(csv_file, default_ratio_limit)
 
-    if not cliff_t:
-        # No need to read params or cache, just counting CNOT
-        jiggle_file = None
-        cache_file = None
-
-    if ratio_2 < ratio_limit:
-        count_2 = load_avg_ensemble_counts_full(
-            qasms_file, jiggle_file=jiggle_file, cache_file=cache_file, 
-            target_error=(10 ** (-tol * 2)), count_t=cliff_t,
-        )
-    else:
-        count_2 = float("inf")
+    # if ratio_2 < ratio_limit:
+    #     count_2 = load_avg_ensemble_counts_full(
+    #         qasms_file, jiggle_file=jiggle_file, cache_file=cache_file, 
+    #         target_error=(10 ** (-tol * 2)), count_t=cliff_t,
+    #     )
+    # else:
+    #     count_2 = float("inf")
 
     return min(count_1, count_2)
 
@@ -370,11 +367,10 @@ if __name__ == '__main__':
     # print("Ratio data loaded", flush=True)
     if output_cx:
         # compiler = Compiler('localhost')
-        compiler = Compiler(num_workers=1)
+        compiler = None
         orig_counts = get_orig_counts(circs, cliff_t=cliff_t, compiler=compiler)
         # Only use orig_counts for the circs we want
         orig_counts = {circ: orig_counts[circ] for circ in circs}
-        compiler.close()
         print("Original counts loaded", flush=True)
         update_count_data(orig_counts, small_block_checkpoints_dir_1,
                                       cliff_t=cliff_t,
@@ -415,6 +411,5 @@ if __name__ == '__main__':
     # Output CX data to a csv file
     if output_cx:
         print("Outputting CX data to CSV", flush=True)
-        csv_file_name = f"count_data_final{extra}_{int(default_ratio_limit)}.csv"
-        # csv_file_name = f"orig_counts_full.csv"
+        csv_file_name = f"count_data_final{extra}_{int(default_ratio_limit)}_full.csv"
         output_csv(orig_counts, csv_file_name, cliff_t=cliff_t)
