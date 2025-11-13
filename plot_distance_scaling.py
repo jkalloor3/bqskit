@@ -24,7 +24,7 @@ if __name__ == '__main__':
         
     cliff_t = True
     cliff_t_string = "_clifft" if cliff_t else ""
-    folder_form = "ensemble_dms_{circ_name}" + cliff_t_string + "_final/"
+    folder_form = "ensemble_dms_{circ_name}" + cliff_t_string + "_final_2/"
 
     fig, axs = plt.subplots(1, 1, figsize=(10, 6))
 

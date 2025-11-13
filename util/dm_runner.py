@@ -8,7 +8,8 @@ from bqskit.ir.circuit import Circuit, CircuitPoint, CircuitGate
 from bqskit.qis import UnitaryMatrix
 from bqskit.runtime import get_runtime
 from .samplers import get_single_rho, apply_superoperator, get_superop
-from .common import get_block_names, load_jiggled_ensemble, get_file_names
+from .common import get_block_names, load_jiggled_ensemble
+from .experiment_util import get_file_names
 from .distance import frobenius_cost
 
 def create_large_block_runner(circ_name: str,

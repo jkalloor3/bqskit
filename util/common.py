@@ -1,3 +1,4 @@
+import csv
 from bqskit.ir.circuit import Circuit, CircuitPoint
 from .fix_global_phase import fix_phase
 from bqskit.qis import UnitaryMatrix
@@ -10,7 +11,7 @@ import glob
 import numpy as np
 from bqskit.ir.lang.qasm2 import OPENQASM2Language
 from .distance import frobenius_cost, normalized_frob_cost, hs_cost, get_corrected_un
-from .gg import gridsynth_gates_to_cir
+from .counter import GateCounter
 import multiprocessing as mp
 from bqskit.runtime import get_runtime
 from bqskit.utils.math import unitary_log_no_i
@@ -25,6 +26,7 @@ base_checkpoint_dir = f"{base_bqskit_dir}/block_checkpoints_final_paper"
 qlang = OPENQASM2Language(gate_defs=[("gg", gg_gate_def)])
 
 NUM_UNIQUE_CIRCS = 250
+DEFAULT_RATIO_LIMIT = 20.0
 
 def stack_padding(it: list[np.ndarray], vertical: bool = True) -> np.ndarray:
     max_width = max(a.shape[1] for a in it)
@@ -354,74 +356,3 @@ def get_circ_names(extra: str = "_tket") -> list[str]:
 
     circ_names = [extract_circ_name(file) for file in all_circ_files]
     return list(set(circ_names))
-
-
-def check_if_finished(circ_name: str, 
-                      tol: float, 
-                      cliff_t: bool = False) -> tuple[bool, bool]:
-    '''
-    Returns if all blocks have been processed for a circ_name, tol.
-
-    return_1 - True if all blocks have been processed and QP has been run
-    return_2  - True if all blocks have been processed minus QP and Check Ensemble
-    Quality
-
-    Note: If blocks do not exist, return_1 and return_2 will both be True
-    '''
-    # Get all block nums for a circ_name
-    good_circ_files = glob.glob(f"{good_block_dir}/{circ_name}_*.qasm")
-    bad_circ_files = glob.glob(f"{bad_block_dir}/{circ_name}_*.qasm")
-    all_circ_files = good_circ_files + bad_circ_files
-
-    if len(all_circ_files) == 0:
-        print("No blocks found for circ", circ_name, flush=True)
-        return True, True
-    
-    block_nums = [file.split('_')[-1].split('.')[0] for file in all_circ_files]
-    # Check if all blocks have been processed
-    ret_1 = True
-    ret_2 = True
-    for block_num in block_nums:
-        circ_dir = get_circ_dir(circ_name, block_num, tol, cliff_t)
-        full_path = f"{circ_dir}/ensemble_final_rand_ind*.npy"
-        jiggle_path = f"{circ_dir}/ensemble_0_jiggles*.npy"
-        rand_ind_files = glob.glob(full_path)
-        jiggle_files = glob.glob(jiggle_path)
-        ret_1 = ret_1 and (len(rand_ind_files) > 0)
-        ret_2 = ret_2 and (len(jiggle_files) > 0)
-    return ret_1, ret_2
-
-def get_file_names(large_checkpoint_dir, 
-                   small_block_num: str,
-                   no_qp: bool = False,
-                   ratio_text: str = "") -> tuple[str, str, str, str, str]:
-    small_checkpoint_dir = os.path.join(large_checkpoint_dir, f"block_{small_block_num}")
-
-    if no_qp:
-        ensemble_file = os.path.join(small_checkpoint_dir, "ensemble_final_fw_no_qp.qasms")
-        jiggle_file = os.path.join(small_checkpoint_dir, "ensemble_final_jiggle_fw_no_qp.npy")
-        cache_file = os.path.join(small_checkpoint_dir, "ensemble_final_cache_fw_no_qp.pkl")
-        csv_file = os.path.join(large_checkpoint_dir, f"block_{small_block_num}_fw_no_qp{ratio_text}.csv")
-        final_probs_file = os.path.join(small_checkpoint_dir, "ensemble_final_probs_fw_no_qp.npy")
-        return ensemble_file, jiggle_file, cache_file, final_probs_file,  csv_file
-
-    # Try outputs of newest passes
-    final_probs_file = os.path.join(small_checkpoint_dir, "ensemble_final_probs_fw.npy")
-    if os.path.exists(final_probs_file):
-        ensemble_file = os.path.join(small_checkpoint_dir, "ensemble_final_fw.qasms")
-        jiggle_file = os.path.join(small_checkpoint_dir, "ensemble_final_jiggle_fw.npy")
-        cache_file = os.path.join(small_checkpoint_dir, "ensemble_final_cache_fw.pkl")
-        csv_file = os.path.join(large_checkpoint_dir, f"block_{small_block_num}_fw{ratio_text}.csv")
-        return ensemble_file, jiggle_file, cache_file, final_probs_file, csv_file
-
-    # Otherwise, we do not have the newest set of files, so return the old ones
-    csv_file = os.path.join(large_checkpoint_dir,
-                             f"block_{small_block_num}_fw.csv")
-    if not os.path.exists(csv_file):
-        csv_file = os.path.join(large_checkpoint_dir, 
-                                 f"block_{small_block_num}.csv")
-    ensemble_file = os.path.join(small_checkpoint_dir, "ensemble_0__fw.qasms")
-    jiggle_file = os.path.join(small_checkpoint_dir, "ensemble_0_jiggles__fw.npy")
-    probs_file = os.path.join(small_checkpoint_dir, "ensemble_0_probs__fw.npy")
-    cache_file = os.path.join(small_checkpoint_dir, "ensemble_0_cache__fw.pkl")
-    return ensemble_file, jiggle_file, cache_file, probs_file, csv_file

@@ -47,10 +47,10 @@ class FixGlobalPhasePass(BasePass):
         target = data.target
         new_scan_sols = []
         new_scan_sols_2 = []
-        if "scan_sols" not in data:
-            new = fix_phase(circuit, target)
-            return
-        for psol in data["scan_sols"]:
+        # if "scan_sols" not in data:
+        #     new = fix_phase(circuit, target)
+        #     return
+        for psol in data.get("scan_sols", []):
             new = fix_phase(psol[0], target)
             new_scan_sols.append((psol[0], new))
         for psol in data.get("e2_scan_sols", []):

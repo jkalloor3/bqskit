@@ -12,10 +12,10 @@ import os
 import glob
 import csv
 from pathlib import Path
-from .counter import load_avg_ensemble_counts_full
+
 from .distance import trace_distance, get_density_matrix
-from .common import get_block_names, get_file_names
 from .dm_runner import generate_full_runner, DensityMatrixRunner
+from .experiment_util import get_good_blocks
 
 NUM_SAMPLES = 10
 
@@ -55,88 +55,6 @@ def trace_distances(dms1: list[np.ndarray], target_dms: list[np.ndarray]) -> lis
     '''
     return [trace_distance(dm, target_dm) for dm, target_dm in zip(dms1, target_dms)]
 
-
-def get_sub_block_nums(base_dir: str) -> list[str]:
-    sub_block_path = f"{base_dir}/block_*.data"
-    sub_block_files = glob.glob(sub_block_path)
-    sub_block_nums = set()
-    for sub_block_file in sub_block_files:
-        sub_block_num = Path(sub_block_file).name.split("_")[-1].split(".")[0]
-        sub_block_nums.add(sub_block_num)
-    sub_block_nums = sorted(list(sub_block_nums))
-    return sub_block_nums
-
-def get_sub_block_count(large_block_dir: str,
-                        small_block_num: str,
-                        tol: float,
-                        cliff_t: bool = False) -> tuple[bool, int]:
-    qasm_file, jiggle_file, cache_file, _, csv_file = get_file_names(large_block_dir,
-                                                   small_block_num)
-    # Read CSV file, if the ratio is < 20 then we can read counts
-    # print(qasm_file, csv_file, flush=True)
-    if not os.path.exists(csv_file):        # print(f"CSV file {csv_file} does not exist.", flush=True)
-        return False, 0
-
-    # Now we need to check if the ratio is less than 20
-    max_ratio = min(20, (10 ** (tol) / 4))
-
-    with open(csv_file, 'r') as f:
-        reader = csv.DictReader(f)
-        min_ratio = float("inf")
-        final_frob_cost = float("inf")
-        for row in reader:
-            if "Ratio" in row:  # Check if the column value is not empty
-                # Check if distance is less than 3* 10^(-tol)
-                max_dist = max_ratio * (10 ** (-tol))
-                dist = float(row["Epsilon"])
-                if dist > max_dist:
-                    continue
-                min_ratio = min(min_ratio, float(row["Ratio"]))
-                final_frob_cost = min(final_frob_cost, float(row["Norm. Bias"]))
-
-
-    if min_ratio > max_ratio:
-        # print(f"Skipping {small_block_num} as ratio is too high: {min_ratio}", flush=True)
-        return False, 0
-    
-    # Now we need to get the avg. number of CNOTs
-    if not cliff_t:
-        qasm_str = open(qasm_file, 'r').read()
-        count = qasm_str.count("cx ")
-        num_circs = qasm_str.count("BREAK") + 1
-        count = count / num_circs
-    else:
-        count = load_avg_ensemble_counts_full(qasm_file, jiggle_file, 
-                                              cache_file, target_error=(10 ** (-tol)),
-                                              count_t=True)
-
-    return True, count
-
-def calculate_good_blocks(circ_name: str, 
-                          checkpoint_form: str, 
-                          max_tol: float, 
-                          cliff_t: bool) -> tuple[dict[str, set[str]], int]:
-    large_block_nums = get_block_names(circ_name, extra="_tket")
-    print("Large Block Nums: ", large_block_nums)
-    good_blocks: dict[str, set[str]] = {}
-    num_good_blocks = 0
-    for large_block_num in large_block_nums:
-        good_blocks[large_block_num] = set()
-        large_block_dir = checkpoint_form.format(circ_name=circ_name,
-                                                  large_block_num=large_block_num,
-                                                  max_tol=max_tol)
-        small_block_nums = get_sub_block_nums(large_block_dir)
-        for small_block_num in small_block_nums:
-            good, _ = get_sub_block_count(large_block_dir,
-                                                small_block_num, max_tol,
-                                                cliff_t)
-            if not good:
-                continue
-            else:
-                good_blocks[large_block_num].add(small_block_num)
-                num_good_blocks += 1
-    return good_blocks, num_good_blocks
-
 def update_partitioned_data(partitioned_data: dict[str, tuple[dict[str, Circuit], Circuit]],
                             good_blocks: dict[str, set[str]]) -> dict[str, tuple[dict[str, Circuit], Circuit]]: 
     new_partitioned_data = {}
@@ -147,8 +65,6 @@ def update_partitioned_data(partitioned_data: dict[str, tuple[dict[str, Circuit]
             new_sub_partitioned_data[small_block_num] = sub_partitioned_data[small_block_num]
         new_partitioned_data[large_block_num] = (new_sub_partitioned_data, p_circ)
     return new_partitioned_data
-
-
 
 class DMEvaluator(BasePass):
 
@@ -168,8 +84,12 @@ class DMEvaluator(BasePass):
         self.checkpoint_form = checkpoint_form
         self.partitioned_circ_file = partitioned_circ_file
         self.cliff_t = cliff_t
-        self.good_blocks, self.num_good_blocks = calculate_good_blocks(
-            circ_name, checkpoint_form, max_tol, cliff_t
+        self.good_blocks, self.num_good_blocks = get_good_blocks(
+            circ_name, 
+            self.max_tol,
+            self.cliff_t,
+            checkpoint_form,
+            partitioned_data
         )
         print("Good Blocks: ", self.good_blocks)
         self.partitioned_data = update_partitioned_data(
@@ -188,7 +108,10 @@ class DMEvaluator(BasePass):
         )
 
     async def run_full_ensemble(self, svs: list[StateVector]) -> list[np.ndarray]:
-        ens_data_file = os.path.join(self.save_dir, f"{self.max_tol}_rho_outs.pkl")
+        if len(svs) == 1:
+            ens_data_file = os.path.join(self.save_dir, f"{self.max_tol}_rho_out.pkl")
+        else:
+            ens_data_file = os.path.join(self.save_dir, f"{self.max_tol}_rho_outs.pkl")
         if os.path.exists(ens_data_file):
             print(f"Ensemble data file {ens_data_file} already exists, skipping.", flush=True)
             return
@@ -209,6 +132,7 @@ class DMEvaluator(BasePass):
             return
 
         if self.ham is not None:
+            print(f"Hamiltonian shape: {self.ham.shape}", flush=True)
             rho_outs = await self.run_full_ensemble([self.init_sv])
             if rho_outs is None:
                 return
@@ -222,6 +146,8 @@ class DMEvaluator(BasePass):
                 return
             final_data = list(zip(final_rho_outs, rand_svs))
         
+        print(f"Final data length: {len(final_data)}", flush=True)
+
         # Save output rho
         if len(final_data) == 1:
             file_name = os.path.join(self.save_dir, f"{self.max_tol}_rho_out.pkl")

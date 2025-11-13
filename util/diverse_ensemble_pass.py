@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import logging
 
+from pathlib import Path
+
 from bqskit.compiler.basepass import BasePass
 from bqskit.compiler.passdata import PassData
 from bqskit.ir.circuit import Circuit
@@ -73,6 +75,8 @@ class DefaultGGEnsemblePass(BasePass):
             FixAnglesPass.run_circ(circ, 15)
             # Calculate the precision based on remaining params
             num_params = circ.num_params
+            if num_params == 0:
+                continue
             error_per_param = eps / num_params
             precision = ceil(-np.log10(error_per_param))
             print(circ.gate_counts)
@@ -90,6 +94,10 @@ class DefaultGGEnsemblePass(BasePass):
         success_threshold = self.success_threshold
         # First, fix angles to distance eps^2
         self.fix_circuits([circuit], success_threshold ** 2)
+
+        if circuit.num_params == 0:
+            print("No parameters to jiggle, skipping.", flush=True)
+            return
 
         # Print distances
         dists = [frob_cost.calc_cost(circ, target) for circ in [circuit]]
@@ -161,8 +169,9 @@ class DefaultGGEnsemblePass(BasePass):
         ens_file_0 = ensemble_file_name.format(ind="0", extra=self.checkpoint_extra_str)
 
         if not os.path.exists(ens_file_0):
-            print("Base ensemble not done, skipping Default Ensemble", flush=True)
-            return
+            # print("Base ensemble not done, skipping Default Ensemble", flush=True)
+            # return
+            Path(ens_file_0).parent.mkdir(parents=True, exist_ok=True)
 
         circuits = []
         file_names = []

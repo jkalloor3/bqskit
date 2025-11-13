@@ -4,8 +4,8 @@ import csv
 import pickle
 import matplotlib.pyplot as plt
 import glob
-from util import load_block, GateCounter, load_avg_ensemble_counts_full, get_block_names
-from util.unitary_dm_pass import get_file_names
+from util import load_block, GateCounter, check_good, get_block_names
+from util.experiment_util import get_file_names
 from bqskit.compiler import Compiler
 from bqskit.passes import ScanPartitioner, ExtendBlockSizePass
 from bqskit.ir import Circuit
@@ -14,21 +14,21 @@ from util.plot_lib import plot_all_circ_violins, benchmark_labels
 
 # List of circuits
 base_circs = ["draper_adder_12", "qae13", "qpe_14", "lgt_17"]  # Replace with your list of circuits
-plot_circs = ["lgt_17", "mult16", "add17", "qpe_14", "qae11", "LiH_jw_long", "FermiHubbard2x2_jw_long", "heisenberg7"] 
-base_circs += ["add17", "lgt_17", "qae13", "qpe_14", "QITE_8_0", "mult16", "draper_adder_12", "qae11", "qaoa10"]
+plot_circs = ["lgt_17", "qpe_14", "qae13", "LiH_jw_long", "FermiHubbard2x2_jw_long", "heisenberg7"] 
+base_circs += ["add17", "lgt_17", "qae13", "qpe_14", "mult16", "draper_adder_12", "qae11", "qaoa10"]
 large_circs = ["qae33", "qaoa_148", "lgt_380"]
 
-# all_circs = ["heisenberg7", "FermiHubbard2x2_jw_long", "LiH_jw_long", "qaoa10", "qae13", "qpe_14", "mult16", "lgt_17"]
+all_circs = ["heisenberg7", "FermiHubbard2x2_jw_long", "LiH_jw_long", "qaoa10", "qae13", "qpe_14", "mult16", "lgt_17"]
 # all_circs += large_circs
 # all_circs = ["qaoa10", "heisenberg7", "FermiHubbard2x2_jw_long", "LiH_jw_long", "qaoa10", "qae13", "qpe_14"]
-all_circs = ["FermiHubbard2x2_jw_long"]
+# all_circs = ["heisenberg7", "FermiHubbard2x2_jw_long", "qaoa10"]
 
 
 NO_QP = False
 if NO_QP:
     block_csv_form = "{circ}_*/block_*no_qp.csv"
 else:
-    block_csv_form = "{circ}_*/block_*.csv"
+    block_csv_form = "{circ}_*/block_*fw_2*.csv"
 block_qasms_form = "{circ}_*/block_*/ensemble_final_fw.qasms"
 cx_counter = GateCounter(est=True)
 
@@ -57,29 +57,6 @@ def find_tket_qasm(circ_name: str) -> str:
 
     return None
 
-def check_good(csv_file: str, max_ratio: float) -> float:
-    """
-    Check if the csv file has a good ratio for the given tolerance.
-    """
-    final_ratio = float("inf")
-
-    if not os.path.exists(csv_file):
-        return final_ratio, float("inf")
-    
-    best_count = float("inf")
-
-    with open(csv_file, 'r') as csv_file_obj:
-        reader = csv.DictReader(csv_file_obj)
-        for row in reader:
-            if "Ratio" in row:  # Check if the column value is not empty
-                new_ratio = float(row["Ratio"])
-                count = float(row.get("Count", float("inf")))
-                if new_ratio < max_ratio and count < best_count:
-                    final_ratio = new_ratio
-                    best_count = count
-
-    return final_ratio, best_count
-
 def get_avg_count(checkpoints_dir: str,
                   circ_name: str, 
                   block_num: str,
@@ -94,31 +71,13 @@ def get_avg_count(checkpoints_dir: str,
         ratio_limit = default_ratio_limit
 
     large_checkpoint_dir = os.path.join(checkpoints_dir, f"{circ_name}_{block_num}_{tol}")
-    qasms_file, jiggle_file, cache_file, _, csv_file = get_file_names(large_checkpoint_dir, 
-                                                                      small_block_num, no_qp=False,
-                                                                      ratio_text=f"_{int(ratio_limit)}")
-    ratio_1, count_1 = check_good(csv_file, ratio_limit)
+    csv_file = get_file_names(large_checkpoint_dir,small_block_num, 
+                              no_qp=False, ratio_text=f"_{int(ratio_limit)}")
+    _, count_1 = check_good(csv_file, ratio_limit)
 
-    # if ratio_1 < ratio_limit:
-    #     count_1 = load_avg_ensemble_counts_full(
-    #         qasms_file, jiggle_file=jiggle_file, cache_file=cache_file,
-    #         target_error=(10 ** (-tol * 2)), count_t=cliff_t,
-    #     )
-    # else:
-    #     count_1 = float("inf")
-
-    qasms_file, jiggle_file, cache_file, _, csv_file = get_file_names(large_checkpoint_dir, 
-                                                                      small_block_num, 
-                                                                      no_qp=True)
-    ratio_2, count_2 = check_good(csv_file, default_ratio_limit)
-
-    # if ratio_2 < ratio_limit:
-    #     count_2 = load_avg_ensemble_counts_full(
-    #         qasms_file, jiggle_file=jiggle_file, cache_file=cache_file, 
-    #         target_error=(10 ** (-tol * 2)), count_t=cliff_t,
-    #     )
-    # else:
-    #     count_2 = float("inf")
+    csv_file = get_file_names(large_checkpoint_dir, small_block_num, no_qp=True,
+                              ratio_text=f"_{int(ratio_limit)}")[-1]
+    _, count_2 = check_good(csv_file, default_ratio_limit)
 
     return min(count_1, count_2)
 
@@ -145,19 +104,26 @@ def update_count_data(orig_cx_counts, checkpoints_dir,
     return orig_counts
 
 # Function to read data.csv from each folder
-def update_data_from_folders(all_data: dict, checkpoints_dir):
+def update_ratio_data(all_data: dict, checkpoints_dir,
+                      default_ratio_limit: float, bias: bool) -> dict:
     if checkpoints_dir is None:
         return all_data
     for circ, block_data in all_data.items():
-        csv_file_form = os.path.join(checkpoints_dir, block_csv_form.format(circ=circ))
-        csv_files = glob.glob(csv_file_form)
+        csv_file = block_csv_form.format(circ=circ)
+        csv_files = glob.glob(os.path.join(checkpoints_dir, csv_file))
         for csv_file in csv_files:
             folder = os.path.dirname(csv_file).split('/')[-1]
             tol = float(folder.split("_")[-1])
             block_num = str(folder.split("_")[-2])
             small_block_num = os.path.basename(csv_file).split(".")[0].split("_")[1]
             block_ind = (block_num, small_block_num)
-            _, final_ratio = check_good(csv_file, tol)
+
+            if tol < 1.5:
+                ratio_limit = default_ratio_limit / 10
+            else:
+                ratio_limit = default_ratio_limit
+
+            final_ratio, _ = check_good(csv_file, max_ratio=ratio_limit, bias=bias)
             if final_ratio > 10000:
                 # Just set it to 10000 and we will plot it as 10000+
                 final_ratio = 10000
@@ -167,7 +133,8 @@ def update_data_from_folders(all_data: dict, checkpoints_dir):
                 block_data[block_ind][tol] = final_ratio
             else:
                 # If it already exists, take the minimum ratio
-                block_data[block_ind][tol] = min(block_data[block_ind][tol], final_ratio)
+                block_data[block_ind][tol] = min(block_data[block_ind][tol], 
+                                                 final_ratio)
             all_data[circ] = block_data
 
 def output_csv(data: dict, file_name: str, cliff_t: bool = False):
@@ -337,10 +304,13 @@ def get_orig_counts(circuits: list[str], cliff_t: bool = False,
         pickle.dump(orig_cx_counts, f)
     return orig_cx_counts
 
+
+
 if __name__ == '__main__':
     # Collect data from all folders
-    plot = False
+    plot = True
     cliff_t = True
+    bias = True
 
     default_ratio_limit = float(argv[1])
 
@@ -394,18 +364,30 @@ if __name__ == '__main__':
 
     if plot:
         # Plot ratio data
+        update_ratio_data(ratio_data, small_block_checkpoints_dir_1, 
+                          default_ratio_limit=default_ratio_limit, bias=bias)
+        update_ratio_data(ratio_data, small_block_checkpoints_dir_2, 
+                          default_ratio_limit=default_ratio_limit, bias=bias)
+        print("Ratio data loaded", flush=True)
+
+
         fig, axes = plt.subplots(1, 1, figsize=(12, 6))
 
-        if cliff_t:
-            title = "Error Scaling (FT)"
+        if bias:
+            scale_text = "Bias"
         else:
-            title = "Error Scaling (NISQ)"
+            scale_text = "Error"
+
+        if cliff_t:
+            title = f"{scale_text} Scaling (FT)"
+        else:
+            title = f"{scale_text} Scaling (NISQ)"
 
         plot_all_circ_violins(ratio_data, axes, plot_title=title)
 
         # Save the figure
         fig.tight_layout()
-        fig.savefig(f"error_scaling_final{extra}.png", dpi=300)
+        fig.savefig(f"{scale_text}_scaling_final{extra}_{int(default_ratio_limit)}.png", dpi=300)
 
 
     # Output CX data to a csv file

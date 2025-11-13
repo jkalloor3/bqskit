@@ -201,8 +201,8 @@ class ConvertToZXZXZSimple(BasePass):
         if not self.run_scan_sols:
             ConvertToZXZXZSimple.run_circuit(circuit, self.group)
             return
-        
-        scan_sols: list[tuple[Circuit, float]] = data["scan_sols"]
+
+        scan_sols: list[tuple[Circuit, float]] = data.get("scan_sols", [])
         for circ, _ in scan_sols:
             ConvertToZXZXZSimple.run_circuit(circ, self.group)
         

@@ -260,6 +260,7 @@ def plot_dm_data(circ_names: list[str],
                 else:
                     rho_out, _ = all_data[0]
                     y = get_obs(rho_out, ham)
+                    print(f"Observed value for tol {tol} : {y}")
                     # Plot Difference from true value
                     y_vals.append(np.abs(true_val - y))
         axs.scatter(x_vals, y_vals, label=benchmark_labels.get(circ_name, circ_name),

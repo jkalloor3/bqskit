@@ -563,9 +563,9 @@ class  JiggleEnsemblePass(BasePass):
         Path(jiggle_file).parent.mkdir(parents=True, exist_ok=True)
         
         if "ntro_scan_sols" in data:
-            scan_sols = data["ntro_scan_sols"]
+            scan_sols = data.get("ntro_scan_sols", [])
         else:
-            scan_sols = data["scan_sols"]
+            scan_sols = data.get("scan_sols", [])
 
         circuits = [c for c, _ in scan_sols]
         if len(circuits) == 0:

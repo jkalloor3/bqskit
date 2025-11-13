@@ -160,6 +160,10 @@ class CheckEnsembleQualityPass(BasePass):
 
         probs_titles = ["Uniform", "FW Outer", "FW Seeded", "Default Jiggle", "NTRO Default"]
 
+        if os.path.exists(final_qasms_file):
+            print("Check Ensemble Pass has finished, finishing")
+            return
+
         if os.path.exists(ntro_probs_file):
             ensemble.append((ntro_ens_file, 
                              ntro_jiggle_file, 

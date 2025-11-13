@@ -253,8 +253,8 @@ def get_shortest_circuits(circ_data: list[tuple[str, str, float]], extra: str = 
     ]
 
     # num_workers = min(os.cpu_count(), 200)
-    compiler = Compiler(num_workers=128)
-    # compiler = Compiler('localhost')
+    # compiler = Compiler(num_workers=128)
+    compiler = Compiler('localhost')
     
     workflow_ind = 0
     ids: list[int] = []
