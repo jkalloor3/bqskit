@@ -1,11 +1,13 @@
 # Constans, colors, and utility functions for plotting
 import matplotlib.pyplot as plt
+from matplotlib.patches import FancyBboxPatch, Rectangle
 from matplotlib.patches import Patch
 import numpy as np
 import glob
 import os
 import pickle 
 from bqskit.ir.circuit import Circuit
+from scipy.optimize import curve_fit
 
 from .hamiltonian import generate_hamiltonian, get_obs, generate_init_state
 from .common import load_circuit
@@ -292,7 +294,16 @@ def plot_dm_data(circ_names: list[str],
         label.set_fontsize(14)
 
 
-    # axs.grid(True, which='both', linestyle='--', linewidth=0.5)
+
+def exp_decay_func(tol: float):
+    def exp_decay(num_samples: int, A, lam: float) -> float:
+        '''
+        Assume y = A * exp(-lam * x) + C
+        '''
+        return A * (num_samples ** -lam) + 0.1 * 10 ** (-2 * tol)
+    return exp_decay
+
+
 
 
 def plot_td_convergence(circ_name: str,
@@ -327,6 +338,14 @@ def plot_td_convergence(circ_name: str,
 
     # Now plot each tol data in a separate line
     colors = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd', '#8c564b']
+    all_crossing_indices = []
+    insert_ax_data = []
+
+    x0 = 0.1
+    y0 = 0.1
+    width = 0.35
+    height = 0.35
+
     for tol, data in all_data.items():
         sample_sizes = sorted(data.keys())
         y_vals = [np.mean(data[size]) for size in sample_sizes]
@@ -336,19 +355,89 @@ def plot_td_convergence(circ_name: str,
         color =  colors[int(tol) % len(colors)]
 
         exponent = -int(tol)
-        label = f"Eps: $10^{{{exponent}}}$"
+        label = f"$\epsilon$: $10^{{{exponent}}}$"
         axs.plot(sample_sizes, y_vals, label=label,color=color)
         axs.fill_between(sample_sizes, min_vals, max_vals,
                          color=color, alpha=0.2)
         # Plot a horizontal dotted line at 10 ** (-2 * tol)
         axs.axhline(y=10 ** (-2 * tol), color=color, linestyle='--', linewidth=2)
 
-    axs.set_xlabel("Number of Samples")
-    axs.set_ylabel("Trace Distance")
+        # See where the y_vals cross the line 10 ** (-2 * tol)
+        interpolated_data = np.interp(np.arange(min(sample_sizes), 1e6), sample_sizes, y_vals)
+
+        crossing_indices = np.where(interpolated_data <= 10 ** (-2 * tol))[0]
+        if len(crossing_indices) > 0:
+            crossing_index = crossing_indices[0]
+            all_crossing_indices.append(crossing_index)
+            crossing_sample_size = min(sample_sizes) + crossing_index
+            crossing_y = interpolated_data[crossing_index]
+            print("Plotting: ", tol, crossing_index, flush=True)
+            # inset_ax.scatter([int(tol)], [crossing_sample_size], c=color)
+            insert_ax_data.append((int(tol), crossing_sample_size, color, 'o'))
+            # print(f"For circuit {circ_name}, tol {tol}, crossing at sample size {crossing_sample_size}, y value {crossing_y}")
+        else:
+            # print(f"For circuit {circ_name}, tol {tol}, no crossing found, estimating ...")
+            # Try to estimate crossing point by fitting a line to the last 2 points
+            initial_guess = [y_vals[0], 1/ tol]
+            min_err = 0.1 * 10 ** (-2 * tol)
+            params, _ = curve_fit(exp_decay_func(tol), sample_sizes, y_vals, p0=initial_guess)
+            A_fit, lam = params
+            # print(f"Fitted parameters: A={A_fit}, lam={lam}, min_err={min_err}")
+            crossing_y = 10 ** (-2 * tol)
+            # print(exp_decay(1e8, A_fit, lam, min_err))
+            crossing_sample_size = int(((crossing_y - min_err) / A_fit) ** (-1 / lam))
+            all_crossing_indices.append(crossing_sample_size)
+            # inset_ax.scatter([int(tol)], [crossing_sample_size], color=color)
+            print("Plotting estimated: ", tol, crossing_sample_size, flush=True)
+            insert_ax_data.append((int(tol), crossing_sample_size, color, 'x'))
+
+    # Set x and y bounds
+    axs.set_xbound(0, 128000)
+    axs.set_ybound(1e-14, 1e-1)
+    axs.hlines(y=1e-12, xmin=0, xmax=128000, colors='black', linestyles='dotted', linewidth=1, alpha=0)
+    axs.set_xlabel("Number of Samples", fontdict={"size": 16})
+    axs.set_ylabel("Trace Distance", fontdict={"size": 16})
     axs.set_yscale('log')
-    # axs.set_xscale('log')
-    axs.legend()
-    axs.grid(True, which='both', linestyle='--', linewidth=0.5)
+
+    # Add padding
+    padding = 0.03
+    background = Rectangle(
+        (x0 - 3.3*padding, y0 - 3.3*padding),
+        width + 3.5*padding,
+        height + 4*padding,
+        facecolor="#ffffff",
+        transform=axs.transAxes,
+        alpha=0.8,
+        zorder=10
+    )
+    # axs.figure.add_artist(background)
+    axs.add_patch(background)
+
+    inset_ax = axs.inset_axes([x0, y0, width, height], zorder=11)  # [x, y, width, height]
+    inset_ax.set_xlabel("$\epsilon$", fontdict={"size": 12})
+    inset_ax.set_ylabel("Samples to reach $\epsilon^2$", fontdict={"size": 12})
+    inset_ax.set_xbound(0, 6)
+    inset_ax.set_xticks([1, 2, 3, 4, 5])
+    inset_ax.set_xticklabels(["$10^{-1}$", "$10^{-2}$", "$10^{-3}$", "$10^{-4}$", "$10^{-5}$"])
+    inset_ax.set_ybound(1, 1e10)
+    inset_ax.set_yscale('log')
+
+    axs.legend(fontsize=14, loc='upper right')
+
+    # print("Insert ax data: ", insert_ax_data)
+
+    for tol, crossing_sample_size, color, marker in insert_ax_data:
+        inset_ax.scatter([tol], [crossing_sample_size], c=color, marker=marker)
+
+    # Print inset figure of crossing indices
+    log_tols = list(range(1, 6))
+    inset_ax.plot(log_tols, [10 ** (2 * tol) for tol in log_tols], '--', 
+                  color='blue')
+
+
+    print(all_crossing_indices)
+    print([10 ** (2*tol) for tol in range(1, 6)])
+    # axs.grid(True, which='both', linestyle='--', linewidth=0.5)
 
 def plot_tvd_convergence(all_data: dict,
                           total_shots: int,

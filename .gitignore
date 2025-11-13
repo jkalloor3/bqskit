@@ -40,3 +40,5 @@ slurm_logs/*
 
 *.tar.gz
 su2_gauge/*
+draper_adder_12_pngs/*
+qpe_14_pngs/*

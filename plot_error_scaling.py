@@ -57,6 +57,31 @@ def find_tket_qasm(circ_name: str) -> str:
 
     return None
 
+def check_good(csv_file: str, max_ratio: float) -> float:
+    """
+    Check if the csv file has a good ratio for the given tolerance.
+    """
+    final_ratio = float("inf")
+
+    print(f"Checking file: {csv_file}", flush=True)
+
+    if not os.path.exists(csv_file):
+        return final_ratio, float("inf")
+    
+    best_count = float("inf")
+
+    with open(csv_file, 'r') as csv_file_obj:
+        reader = csv.DictReader(csv_file_obj)
+        for row in reader:
+            if "Ratio" in row:  # Check if the column value is not empty
+                new_ratio = float(row["Ratio"])
+                count = float(row.get("Count", float("inf")))
+                if new_ratio < max_ratio and count < best_count:
+                    final_ratio = new_ratio
+                    best_count = count
+
+    return final_ratio, best_count
+
 def get_avg_count(checkpoints_dir: str,
                   circ_name: str, 
                   block_num: str,
@@ -67,8 +92,10 @@ def get_avg_count(checkpoints_dir: str,
     
     if tol == 1.0:
         ratio_limit = default_ratio_limit / 10
+        ratio_text = "_2"
     else:
         ratio_limit = default_ratio_limit
+        ratio_text = "_20"
 
     large_checkpoint_dir = os.path.join(checkpoints_dir, f"{circ_name}_{block_num}_{tol}")
     csv_file = get_file_names(large_checkpoint_dir,small_block_num, 
@@ -78,6 +105,8 @@ def get_avg_count(checkpoints_dir: str,
     csv_file = get_file_names(large_checkpoint_dir, small_block_num, no_qp=True,
                               ratio_text=f"_{int(ratio_limit)}")[-1]
     _, count_2 = check_good(csv_file, default_ratio_limit)
+
+    print(count_1, count_2, flush=True)
 
     return min(count_1, count_2)
 
@@ -215,7 +244,7 @@ def get_orig_counts(circuits: list[str], cliff_t: bool = False,
     orig_cx_counts = {}
 
     cliff_t_text = "_cliff_t" if cliff_t else ""
-    save_file = f"orig_counts{cliff_t_text}_full.pickle"
+    save_file = f"orig_counts{cliff_t_text}.pickle"
 
     if os.path.exists(save_file):
         with open(save_file, 'rb') as f:
@@ -230,7 +259,7 @@ def get_orig_counts(circuits: list[str], cliff_t: bool = False,
 
     workflow = [
         ScanPartitioner(4),
-        # ExtendBlockSizePass(4)
+        ExtendBlockSizePass(4)
     ]
 
     id_data = {}
@@ -337,8 +366,9 @@ if __name__ == '__main__':
     # print("Ratio data loaded", flush=True)
     if output_cx:
         # compiler = Compiler('localhost')
-        compiler = None
+        compiler = Compiler()
         orig_counts = get_orig_counts(circs, cliff_t=cliff_t, compiler=compiler)
+        compiler.close()
         # Only use orig_counts for the circs we want
         orig_counts = {circ: orig_counts[circ] for circ in circs}
         print("Original counts loaded", flush=True)

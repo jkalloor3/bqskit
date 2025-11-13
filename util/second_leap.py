@@ -169,14 +169,13 @@ class SecondLEAPSynthesisPass(BasePass):
         if self.maximize_diversity:
             self.max_layer_factor = 2.0
 
-    async def synthesize(self, data: PassData, target: UnitaryMatrix, default_circuit: Circuit) -> Circuit:
+    async def synthesize(self, 
+                         data: PassData, 
+                         target: UnitaryMatrix, 
+                         default_circuit: Circuit) -> Circuit:
         # Synthesize every circuit in the ensemble
         circs: list[Circuit] = [d[0] for d in data['scan_sols'][:-1]]
-        block_id = f"Block {data.get('super_block_num', -1)}_{data.get('block_num', -1)}:"
-        factor = data.get("error_percentage_allocated", 1)
-        partial_success_threshold = self.partial_success_threshold * factor
-        # print(f"{block_id} Partial Success Threshold: ", partial_success_threshold, flush=True)
-        # print(f"{block_id} After Leap 1 distances: ", [d[1] for d in data['scan_sols']], flush=True)
+        full_success_threshold = self.success_threshold
         if len(circs) > 0:
             for c in circs:
                 assert(isinstance(c, Circuit))
@@ -207,41 +206,23 @@ class SecondLEAPSynthesisPass(BasePass):
         else:
             new_circs = []
 
-        # Randomly choose up to 8 circuits
+        if len(new_circs) > self.max_psols:
+            counts = np.array([1 / (c[0].count(CNOTGate()) ** 2 + 1) for c in new_circs])
+            counts = counts / np.sum(counts)
+            # print("Probabilities: ", counts, flush=True)
+            inds = np.random.choice(len(new_circs), self.max_psols, replace=False, p=counts)
+            new_circs = [new_circs[i] for i in inds]
 
-        if self.maximize_diversity:
-            # Run mini QP on unitaries to select
-            non_zero_circs: list[Circuit] = [c for c,d in new_circs if d != 0]
-            non_zero_dists = [d for c,d in new_circs if d != 0]
-            uns = np.array([c.get_unitary() for c in non_zero_circs])
-            if len(uns) > 0:
-                probs = GenerateProbabilityPass.calculate_probs(uns, data.target)
-                # Choose according to probability but add zero-dist circs
-                new_circs = [(c,d) for c,d in new_circs if d == 0]
-                size = min(8, len(probs))
-                rand_ens_inds = np.random.choice(len(probs), size=size, p=probs, replace=False)
-                new_circs = [(non_zero_circs[i].copy(), non_zero_dists[i]) for i in rand_ens_inds] + new_circs
-        else:
-            if len(new_circs) > 8:
-                # Weight by count, less gates is more likely
-                # print(f"{block_id} Subselecting 8 circuits", flush=True)
-                # print(f"{block_id} Original Distances: ", [c[1] for c in new_circs], flush=True)
-                # print(f"{block_id} Original Counts: ", [c[0].count(CNOTGate()) for c in new_circs], flush=True)
-                counts = np.array([1 / (c[0].count(CNOTGate()) ** 2 + 1) for c in new_circs])
-                counts = counts / np.sum(counts)
-                # print("Probabilities: ", counts, flush=True)
-                inds = np.random.choice(len(new_circs), 8, replace=False, p=counts)
-                new_circs = [new_circs[i] for i in inds]
-
-        new_circs.append((default_circuit, 0))
+        # Add default circuit if no circuits are less than eps^2
+        if all(x[1] >= full_success_threshold for x in new_circs):
+            new_circs.append((default_circuit, 0))
 
         assert(isinstance(new_circs[0][0], Circuit))
 
         assert(len(new_circs) > 0)
         # print("Return Scan Sols")
         data['scan_sols'] = new_circs
-
-        return new_circs[0][0]
+        return default_circuit
 
     async def synthesize_circ(
         self,
@@ -250,12 +231,7 @@ class SecondLEAPSynthesisPass(BasePass):
         default_count: int
     ) -> list[Circuit]:
         """Synthesize `utry`, see :class:`SynthesisPass` for more."""
-        if self.use_calculated_error:
-            # use sqrt
-            factor = data["error_percentage_allocated"]
-            partial_success_threshold = self.partial_success_threshold * factor
-        else:
-            partial_success_threshold = self.partial_success_threshold
+        partial_success_threshold = self.partial_success_threshold
 
         # Initialize run-dependent options
         instantiate_options = self.instantiate_options.copy()
@@ -436,7 +412,9 @@ class SecondLEAPSynthesisPass(BasePass):
 
     async def run(self, circuit: Circuit, data: PassData) -> None:
         """Perform the pass's operation, see :class:`BasePass` for more."""
-        print(f"Starting Second LEAP for block {data.get('super_block_num', -1)} : {data.get('block_num', -1)}", flush=True)
+        print("Starting Second LEAP for block" +
+               f"{data.get('super_block_num', -1)} : {data.get('block_num', -1)}", flush=True)
+        
         save_file: str = data.get("checkpoint_data_file", None)
         if "finished_second_leap" in data:
             print("Already finished second leap!", flush=True)
@@ -449,7 +427,9 @@ class SecondLEAPSynthesisPass(BasePass):
                 pickle.dump(data, open(save_file, "wb"))
             return
 
-        await self.synthesize(data, target=data.target, default_circuit=circuit)
+        await self.synthesize(data, 
+                              target=data.target, 
+                              default_circuit=circuit)
 
         data["finished_second_leap"] = True
         if save_file:

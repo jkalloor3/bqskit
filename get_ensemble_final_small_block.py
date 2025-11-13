@@ -9,40 +9,51 @@ from bqskit.compiler.compiler import Compiler, WorkflowLike
 from bqskit.ir.gates import CNOTGate
 # Generate a super ensemble for some error bounds
 from bqskit.passes import CheckpointRestartPass, NOOPPass
-from bqskit.passes import ForEachBlockPass, ScanPartitioner, IfThenElsePass, PassPredicate
+from bqskit.passes import ForEachBlockPass, ScanPartitioner, IfThenElsePass, PassPredicate, ExtendBlockSizePass
 from util import JiggleEnsemblePass, CleanupBlockFiles
 from util import  LEAPSynthesisPass2, SecondLEAPSynthesisPass, EnsScanningGateRemovalPass
 from util import CheckEnsembleQualityPass, FixGlobalPhasePass
 from util import GenerateProbabilityPass
 from util import CreateEnsemblePass
 from util import get_block_names, load_block
+from util.diverse_ensemble_pass import DefaultGGEnsemblePass
 
 
 class CountPredicate(PassPredicate):
-    def __init__(self, count_scan_sols: bool = False) -> None:
+    def __init__(self, 
+                 count_scan_sols: bool = False,
+                 count_scan_sols_2: bool = False) -> None:
         super().__init__()
         self.count_scan_sols = count_scan_sols
+        self.count_scan_sols_2 = count_scan_sols_2
 
 
     def get_truth_value(self, circuit, data):
+        circs_to_check = []
         if self.count_scan_sols:
+            circs_to_check = [c for c, _ in data["scan_sols"]]
+        if self.count_scan_sols_2:
+            assert "e2_scan_sols" in data
+            circs_to_check += data["e2_scan_sols"]
+
+        if len(circs_to_check) > 0:
+            all_counts = [c.count(CNOTGate()) for c in circs_to_check]
             # Check if any of the ensemble circuits have a count < circuit
             base_count = circuit.count(CNOTGate())
-            for c, _ in data["scan_sols"]:
-                if c.count(CNOTGate()) < base_count:
+            for count in all_counts:
+                if count < base_count:
                     return True
             return False
 
         return circuit.count(CNOTGate()) < 30
 
 good_instantiation_options = {
-    'multistarts': 8,
+    'multistarts': 4,
     'ftol': 5e-16,
     'gtol': 1e-15,
     'diff_tol_r': 1e-6,
     'max_iters': 100000,
     'min_iters': 1000,
-    'method': 'minimization'
 }
 
 SMALL_BLOCK_SIZE = 4
@@ -55,9 +66,8 @@ def get_ensemble_workflow(circ_name: str, tol: float, extra: str = "") -> Workfl
     base_checkpoint_dir = base_checkpoint_dir_form.format(block_size=SMALL_BLOCK_SIZE, 
                                                           extra=ckpt_extra)
     checkpoint_dir = f"{base_checkpoint_dir}/{circ_name}_{tol}/"
-    err_thresh = 10 ** (-1 * tol)
-
-    extra_err_thresh = err_thresh * 0.1
+    err_thresh = 10 ** (-1 * tol) / 5
+    extra_err_thresh = 10 ** (-2 * tol) / 5
     small_block_size = SMALL_BLOCK_SIZE
     print("Checkpoint Dir: ", checkpoint_dir, flush=True)
     print("Error Threshold: ", err_thresh, flush=True)
@@ -65,27 +75,33 @@ def get_ensemble_workflow(circ_name: str, tol: float, extra: str = "") -> Workfl
     has_qft = False
     slow_partitioner_passes = [
         ScanPartitioner(block_size=small_block_size, ignore_qft=has_qft),
+        ExtendBlockSizePass(small_block_size),
     ]
     partitioner_passes = slow_partitioner_passes
     instantiation_options = good_instantiation_options
     
     synthesis_pass = LEAPSynthesisPass2(
         store_partial_solutions=True,
-        success_threshold = extra_err_thresh / 2,
+        success_threshold = extra_err_thresh,
         partial_success_threshold=err_thresh / 2,
         max_layer_factor=1.01,
         instantiate_options=instantiation_options,
         max_layer=14,
-        max_psols=10
+        max_psols=20,
+        append=False,
+        add_default=False,
     )
 
-    second_synthesis_pass = SecondLEAPSynthesisPass(
-        success_threshold = extra_err_thresh / 2,
-        partial_success_threshold=err_thresh / 2,
+    synthesis_pass_tigher = LEAPSynthesisPass2(
+        store_partial_solutions=True,
+        success_threshold = extra_err_thresh,
+        partial_success_threshold=extra_err_thresh,
         max_layer_factor=1.01,
         instantiate_options=instantiation_options,
         max_layer=14,
-        max_psols=20
+        max_psols=10,
+        append=True,
+        add_default=True,
     )
 
     deletion_pass = EnsScanningGateRemovalPass(
@@ -96,8 +112,13 @@ def get_ensemble_workflow(circ_name: str, tol: float, extra: str = "") -> Workfl
 
     extra_str = "_fw"
 
+    if tol < 1.5:
+        max_ratio = 2.0
+    else:
+        max_ratio = 20.0
+
     jiggle_pass = JiggleEnsemblePass(success_threshold=err_thresh, 
-                                  num_circs=2000, 
+                                  num_circs=100, 
                                   use_scan_sols=True,
                                   use_ensemble=False,
                                   use_calculated_error=False,
@@ -112,28 +133,32 @@ def get_ensemble_workflow(circ_name: str, tol: float, extra: str = "") -> Workfl
                                 default_passes=partitioner_passes),
         ForEachBlockPass(
             [
-                IfThenElsePass(
-                    CountPredicate(),
-                    synthesis_pass,
-                    deletion_pass
-                ),
+                # IfThenElsePass(
+                #     CountPredicate(),
+                synthesis_pass,
+                synthesis_pass_tigher,
+                # deletion_pass
+                # ),
                 # Apply a second round of synthesis if count is bad still
-                IfThenElsePass(
-                    CountPredicate(count_scan_sols=True),
-                    NOOPPass(),
-                    second_synthesis_pass,
-                ),
-                # If counts are OK, then create ensemble and jiggle
+                # IfThenElsePass(
+                #     CountPredicate(count_scan_sols=True),
+                #     NOOPPass(),
+                # second_synthesis_pass,
+                # ),
                 IfThenElsePass(
                     CountPredicate(count_scan_sols=True),
                     [
                         jiggle_pass,
-                        GenerateProbabilityPass(eps=err_thresh,
+                        GenerateProbabilityPass(eps= 10 ** (-1 * tol) * 2,
                             run_on_ensemble_0=True,
                             checkpoint_extra_str=extra_str),
-                        CheckEnsembleQualityPass(False,
+                        CheckEnsembleQualityPass(
+                            success_threshold=(err_thresh ** 2),
+                            count_t=False,
                             checkpoint_extra_str=extra_str,
-                            zero_threshold=(err_thresh ** 2) / 10),
+                            max_ratio=max_ratio,
+                            zero_threshold=(err_thresh ** 2) / 10
+                        ),
                     ]
                 )
             ]
@@ -181,9 +206,9 @@ def get_shortest_circuits(circ_data: list[tuple[str, str, float]], extra: str = 
         for circ_name, _, tol in circ_data
     ]
 
-    # num_workers = min(os.cpu_count() - 3, 250)
-    # compiler = Compiler(num_workers=num_workers)
-    compiler = Compiler('localhost')
+    num_workers = os.cpu_count()
+    compiler = Compiler(num_workers=num_workers)
+    # compiler = Compiler('localhost')
     
     workflow_ind = 0
     ids: list[int] = []

@@ -4,7 +4,7 @@ from bqskit.ir.lang.qasm2 import OPENQASM2Language
 from bqskit.ir import Circuit
 # from util.gg import gg_gate_def, GridSynthGate
 
-base_bqskit_dir = "/home/jkalloor/bqskit"
+base_bqskit_dir = "/pscratch/sd/j/jkalloor/ensemble_paper/bqskit"
 good_block_dir = f"{base_bqskit_dir}/good_blocks"
 bad_block_dir = f"{base_bqskit_dir}/bad_blocks"
 base_checkpoint_dir = f"{base_bqskit_dir}/block_checkpoints_final_paper"

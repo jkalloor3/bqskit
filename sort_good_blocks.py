@@ -15,7 +15,7 @@ import shutil
 
 # enable_logging(True)
 # input_folder = f"/pscratch/sd/j/jkalloor/bqskit/QITE_8"
-input_folder = "qce23_qfactor_benchmarks"
+input_folder = "ensemble_benchmarks_tket"
 good_output_folder = 'good_blocks'
 bad_output_folder = 'bad_blocks'
 block_save_dir = "block_qasms_{circ_name}/"
@@ -87,7 +87,7 @@ def sort_blocks(circ_name: str, good_output_folder, bad_output_folder):
 
 if __name__ == '__main__':
     compiler = Compiler(num_workers=1)
-    circ_types = ["*long"]
+    circ_types = ["lgt_380"]
     job_ids = []
     for circ_type in circ_types:
         circ_files = glob.glob(os.path.join(input_folder, f"{circ_type}.qasm"))

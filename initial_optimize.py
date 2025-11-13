@@ -16,7 +16,7 @@ import os
 import time
 from sys import argv
 
-base_dir = "/pscratch/sd/j/jkalloor/bqskit"
+base_dir = "/pscratch/sd/j/jkalloor/ensemble_paper/bqskit"
 
 temp_file = "temp.qasm"
 
@@ -28,12 +28,12 @@ def full_optimization(circ_file: str, new_circ_file: str) -> bool:
     unitary distance is not far, then write the optimized circuit
     '''
     print(f"Optimizing {circ_file}", flush=True)
+    bqskit_circ = BQCircuit.from_file(circ_file)
     try:
-        circ = circuit_from_qasm(circ_file, maxwidth=64)
+        circ = circuit_from_qasm(circ_file, maxwidth=bqskit_circ.num_qudits)
     except Exception as e:
         print(f"Error reading circuit from {circ_file}: {e}", flush=True)
         return True
-    bqskit_circ = BQCircuit.from_file(circ_file)
     print("Original Gate Counts: ", bqskit_circ.gate_counts, flush=True)
     if bqskit_circ.num_operations > 20000:
         print(f"{circ_file} has too many operations, skipping", flush=True)
@@ -47,11 +47,11 @@ def full_optimization(circ_file: str, new_circ_file: str) -> bool:
     print("Optimized CX Count: ", circ.n_gates_of_type(OpType.CX), flush=True)
     gate_counts = Counter(command.op.type for command in circ.get_commands())
     print("Gate Counts: ", gate_counts, flush=True)
-    circuit_to_qasm(circ, temp_file, maxwidth=64)
+    circuit_to_qasm(circ, temp_file, maxwidth=bqskit_circ.num_qudits)
     # opt_circ = lang.decode(circuit_to_qasm_str(circ))
     time.sleep(2)
     # opt_circ = BQCircuit.from_file(temp_file)
-    opt_tket_circ = circuit_from_qasm(temp_file, maxwidth=64)
+    opt_tket_circ = circuit_from_qasm(temp_file, maxwidth=bqskit_circ.num_qudits)
     # print(opt_circ.gate_counts)
     # opt_un = opt_circ.get_unitary()
     print(opt_tket_circ.n_gates)
@@ -63,7 +63,8 @@ def full_optimization(circ_file: str, new_circ_file: str) -> bool:
     # if dist < 1e-8:
     file_name = Path(circ_file).name
     new_circ_file = os.path.join(output_dir, file_name)
-    circuit_to_qasm(circ, new_circ_file, maxwidth=64)
+    print("Writing to ", new_circ_file, flush=True)
+    circuit_to_qasm(circ, new_circ_file, maxwidth=bqskit_circ.num_qudits)
     print(f"Optimized {circ_file}", flush=True)
     return True
     # else:
@@ -107,7 +108,7 @@ if __name__ == '__main__':
 
     Path(output_dir).mkdir(parents=True, exist_ok=True)
 
-    circ_types = ["*jw*long"]
+    circ_types = ["*lgt_380*"]
     unoptimized_circ_files = []
     for circ_type in circ_types:
         unoptimized_circ_files.extend(glob.glob(f"{input_dir}/{circ_type}*.qasm"))

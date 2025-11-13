@@ -18,7 +18,7 @@ from bqskit.utils.math import unitary_log_no_i
 
 from .gg import gg_gate_def, GridSynthGate
 
-base_bqskit_dir = "/home/jkalloor/bqskit"
+base_bqskit_dir = "/pscratch/sd/j/jkalloor/ensemble_paper/bqskit"
 good_block_dir = f"{base_bqskit_dir}/good_blocks"
 bad_block_dir = f"{base_bqskit_dir}/bad_blocks"
 base_checkpoint_dir = f"{base_bqskit_dir}/block_checkpoints_final_paper"
@@ -131,7 +131,6 @@ def create_avg_utry(circ_params: tuple[Circuit, np.ndarray, np.ndarray, dict],
 
     avg_utry = np.zeros_like(circ.get_unitary())
     avg_dist = 0
-    avg_hs = 0
     assert params.shape[0] == probs.shape[0], \
         f"Params shape {params.shape} does not match probs shape {probs.shape}"
     if np.sum(probs) == 0:
@@ -143,9 +142,8 @@ def create_avg_utry(circ_params: tuple[Circuit, np.ndarray, np.ndarray, dict],
         avg_utry += p * un
         if add_cost:
             avg_dist += p * normalized_frob_cost(un, target)
-            avg_hs += p * hs_cost(un, target)
     if add_cost:
-        return (avg_utry, avg_dist, avg_hs)
+        return (avg_utry, avg_dist)
     else:
         return avg_utry
 
