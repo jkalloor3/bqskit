@@ -17,7 +17,7 @@ from bqskit.utils.math import unitary_log_no_i
 
 from .gg import gg_gate_def, GridSynthGate
 
-base_bqskit_dir = "/home/jkalloor/bqskit"
+base_bqskit_dir = "/pscratch/sd/j/jkalloor/ensemble_paper/bqskit"
 good_block_dir = f"{base_bqskit_dir}/good_blocks"
 bad_block_dir = f"{base_bqskit_dir}/bad_blocks"
 base_checkpoint_dir = f"{base_bqskit_dir}/block_checkpoints_final_paper"
@@ -129,7 +129,6 @@ def create_avg_utry(circ_params: tuple[Circuit, np.ndarray, np.ndarray, dict],
 
     avg_utry = np.zeros_like(circ.get_unitary())
     avg_dist = 0
-    avg_hs = 0
     assert params.shape[0] == probs.shape[0], \
         f"Params shape {params.shape} does not match probs shape {probs.shape}"
     if np.sum(probs) == 0:
@@ -141,9 +140,8 @@ def create_avg_utry(circ_params: tuple[Circuit, np.ndarray, np.ndarray, dict],
         avg_utry += p * un
         if add_cost:
             avg_dist += p * normalized_frob_cost(un, target)
-            avg_hs += p * hs_cost(un, target)
     if add_cost:
-        return (avg_utry, avg_dist, avg_hs)
+        return (avg_utry, avg_dist)
     else:
         return avg_utry
 
@@ -398,20 +396,17 @@ def get_file_names(large_checkpoint_dir,
     small_checkpoint_dir = os.path.join(large_checkpoint_dir, f"block_{small_block_num}")
 
     if no_qp:
-        ensemble_file = os.path.join(small_checkpoint_dir, "ensemble_final_fw_no_qp.qasms")
-        jiggle_file = os.path.join(small_checkpoint_dir, "ensemble_final_jiggle_fw_no_qp.npy")
-        cache_file = os.path.join(small_checkpoint_dir, "ensemble_final_cache_fw_no_qp.pkl")
-        csv_file = os.path.join(large_checkpoint_dir, f"block_{small_block_num}_fw_no_qp{ratio_text}.csv")
-        final_probs_file = os.path.join(small_checkpoint_dir, "ensemble_final_probs_fw_no_qp.npy")
-        return ensemble_file, jiggle_file, cache_file, final_probs_file,  csv_file
+        extra_str = "_no_qp"
+    else:
+        extra_str = "_FINAL"
 
     # Try outputs of newest passes
-    final_probs_file = os.path.join(small_checkpoint_dir, "ensemble_final_probs_fw.npy")
-    if os.path.exists(final_probs_file):
-        ensemble_file = os.path.join(small_checkpoint_dir, "ensemble_final_fw.qasms")
-        jiggle_file = os.path.join(small_checkpoint_dir, "ensemble_final_jiggle_fw.npy")
-        cache_file = os.path.join(small_checkpoint_dir, "ensemble_final_cache_fw.pkl")
-        csv_file = os.path.join(large_checkpoint_dir, f"block_{small_block_num}_fw{ratio_text}.csv")
+    csv_file = os.path.join(large_checkpoint_dir, f"block_{small_block_num}_fw{ratio_text}.csv")
+    if os.path.exists(csv_file):
+        ensemble_file = os.path.join(small_checkpoint_dir, f"ensemble_final_fw{extra_str}.qasms")
+        jiggle_file = os.path.join(small_checkpoint_dir, f"ensemble_final_jiggle_fw{extra_str}.npy")
+        cache_file = os.path.join(small_checkpoint_dir, f"ensemble_final_cache_fw{extra_str}.pkl")
+        final_probs_file = os.path.join(small_checkpoint_dir, f"ensemble_final_probs_fw{extra_str}.npy")
         return ensemble_file, jiggle_file, cache_file, final_probs_file, csv_file
 
     # Otherwise, we do not have the newest set of files, so return the old ones

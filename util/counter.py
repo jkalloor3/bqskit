@@ -219,17 +219,19 @@ def load_avg_ensemble_counts_est(ensemble_file: str, jiggle_file: str, target_er
     return np.mean(counts)
     
 def load_ensemble_counts_full(ensemble_file: str, jiggle_file: str, 
-                              cache_file: str, target_error: float, 
+                              cache_file: str, probs_file: str, 
+                              target_error: float, 
                               count_t: bool = False, count_rz: bool = False) -> float:
     with open(ensemble_file, "r") as f:
         qasms = f.read().split("\nBREAK\n")
 
     if jiggle_file is None:
         gate_counter_full = GateCounter(est=False, cache_file=None)
+        probs = np.sum(np.load(probs_file), axis=1)
         counts = [gate_counter_full.count_qasm(q, target_error, 
                                                count_rz=count_rz, 
                                                count_t=count_t) for q in qasms]
-        return np.mean(counts)
+        return np.average(counts, weights=probs)
     else:
         params = np.load(jiggle_file)
 
@@ -250,14 +252,15 @@ def load_ensemble_counts_full(ensemble_file: str, jiggle_file: str,
     return np.mean(counts)
 
 def load_avg_ensemble_counts_full(ensemble_file: str, jiggle_file: str, 
-                                  cache_file: str,target_error: float, 
+                                  cache_file: str, probs_file: str,
+                                  target_error: float, 
                                   count_t: bool = False, 
                                   count_rz: bool = False) -> float:
 
     if os.path.exists(ensemble_file):
         counts = load_ensemble_counts_full(ensemble_file, jiggle_file, 
-                                           cache_file, target_error, 
-                                           count_t, count_rz)
+                                           cache_file, probs_file, 
+                                           target_error, count_t, count_rz)
         return np.mean(counts)
     
     return float("inf")

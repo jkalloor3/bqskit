@@ -31,8 +31,9 @@ from bqskit.utils.math import dot_product
 from bqskit.runtime import get_runtime
 
 import os
-from .common import (store_params, load_ensemble_strs, store_ensemble_strs, 
-                     calc_num_circs, store_probs)
+
+from util.distance import get_corrected_un, normalized_gp_frob_cost
+from .common import (store_params, load_ensemble_strs, store_ensemble_strs, store_probs)
 from .counter import count_params_str
 from .gg import GridSynthGate, gg_gate_def, MIN_EPSILON, get_rz_perturbations, get_approx_t_str
 
@@ -65,7 +66,7 @@ class  JiggleEnsemblePass(BasePass):
     finished_pass_str = "finished_jiggle"
 
     def __init__(self, success_threshold = 1e-4, 
-                 num_circs = 1000,
+                 num_circs = 100,
                  cost: CostFunctionGenerator = GPNormalizedFrobeniusCostGenerator(),
                  use_ensemble: bool = True,
                  use_scan_sols: bool = False,
@@ -136,10 +137,13 @@ class  JiggleEnsemblePass(BasePass):
         perturbations = JiggleEnsemblePass.get_perturbations(dist, num_options)
         final_matrices = [u3_utry @ perturbation for perturbation in perturbations]
         final_params = [U3Gate().calc_params(mat) for mat in final_matrices]
-        del final_matrices
-        del perturbations
-        del u3_utry
-        return final_params
+        # corrected_uns = [get_corrected_un(mat, u3_utry) for mat in final_matrices]
+        # avg_un = np.mean(corrected_uns, axis=0)
+        # bias_cost = normalized_gp_frob_cost(avg_un, u3_utry)
+        # eps = np.mean([normalized_gp_frob_cost(mat, u3_utry) for mat in final_matrices])
+        # print("Local Bias Cost: ", bias_cost, "Epsilon: ", eps, flush=True)
+        avg_dist = np.mean([normalized_gp_frob_cost(final_mat, u3_utry) for final_mat in final_matrices])
+        return final_params, avg_dist
 
 
     @staticmethod
@@ -293,8 +297,10 @@ class  JiggleEnsemblePass(BasePass):
         return final_params, final_probs
     
     @staticmethod
-    def single_jiggle_ham(circ_str: str, target: UnitaryMatrix, 
-                          num: int, success_threshold: float) -> np.ndarray[float]:
+    def single_jiggle_ham(circ_str: str, 
+                          target: UnitaryMatrix, 
+                          num: int, 
+                          success_threshold: float) -> np.ndarray[float]:
         '''
         Apply Hamiltonian perturbations to the U3 gates in the circuit.
 
@@ -318,86 +324,253 @@ class  JiggleEnsemblePass(BasePass):
         of parameters in the circuit
         '''
         circ = lang.decode(circ_str)
+        circ_id = hash(circ_str) % 100
         dist = frob_cost.calc_cost(circ, target)
         # For each U3 gate, calculate do a Hamiltonian perturbation
         num_u3s = circ.count(U3Gate())
-        num_ggs = circ.count(GridSynthGate())
-        num_rzs = circ.count(RZGate())
-        assert num_ggs == 0
         # print("Init Dist: ", dist, flush=True)
-        if (num_u3s + num_rzs) == 0:
-            print("No U3s or RZs", circ.gate_counts, flush=True)
+        if (num_u3s) == 0:
+            print("No U3s", circ.gate_counts, flush=True)
             # Repeat circ params num*2 times
             empty_params = np.vstack([circ.params] * (num * 2))
             return empty_params
-        if dist > success_threshold:
-            dist = success_threshold / 2 # Still do perturbations
-
-        # For each u3, come up with 16 param perturbations
-        num_options = 16
-        # Map U3 params to perturbed params
-        u3_param_options: dict[tuple[float, float, float], 
-                               list[list[float]]] = {}
         
-        # Map RZ angle to potential perturbed angles
-        rz_param_options: dict[float, list[float]] = {}
+        if dist > 2 * success_threshold:
+            return None
 
+        # For each u3, come up with 4 perturbations
         orig_perturb_dist = success_threshold - dist
-        perturb_dist = orig_perturb_dist / (num_u3s + num_rzs + 1)
-        # Round log of dist to nearest int
-        # Add 2 because epsilon != frob_cost
-        int_perturb_dist = ceil(-1 * np.log10(perturb_dist))
-        # start_time = time.process_time()
-        for op in circ.operations():
+        perturb_dist = (orig_perturb_dist / (MAX_GGS_TO_JIGGLE))
+        perturb_dist = JiggleEnsemblePass.calculate_perturb_dist(perturb_dist,
+                                                                 circ_str,
+                                                                 target,
+                                                                 success_threshold)
+
+        print(f"{circ_id}: Using Perturb Dist: ", perturb_dist, flush=True)
+        num_options = 2
+
+        # Generate param options
+        u3_param_options: dict[tuple[float, float, float], 
+                            list[list[float]]] = {}
+        
+        for cycle, op in circ.operations_with_cycles():
             if isinstance(op.gate, U3Gate):
                 # Round params to int_perturb_dist
-                key = tuple(np.round(op.params, int_perturb_dist + 1))
-                if key not in u3_param_options:
-                    u3_param_options[key] = JiggleEnsemblePass.get_ham_perturbations(op.get_unitary(), perturb_dist, num_options * 2)
-            elif isinstance(op.gate, RZGate):
-                angle = op.params[0]
-                if angle not in rz_param_options:
-                    z_perturbs = np.array([np.pi/ 2, -np.pi/2, np.pi, -np.pi]) * perturb_dist
-                    rz_param_options[angle] = z_perturbs + angle
+                key = (tuple(np.round(op.params)), cycle, op.location[0])
+                options, avg_dist = JiggleEnsemblePass.get_ham_perturbations(op.get_unitary(), perturb_dist, num_options * 2)
+                u3_param_options[key] = options
 
-        final_params = []
+            if len(u3_param_options) >= MAX_GGS_TO_JIGGLE:
+                break
+
+        # Now sample over all possible combinations
+        all_inds = list(product(*[range(len(options)) for options in u3_param_options.values()]))
+        final_params = np.zeros((len(all_inds), circ.num_params))
+        avg_dist = 0.0
+        avg_un = np.zeros_like(target.numpy)
+        for i, selections in enumerate(all_inds):
+            new_circ = circ.copy()
+            ind = 0
+            for op in new_circ.operations():
+                if ind >= len(selections):
+                    continue
+                if isinstance(op.gate, U3Gate):
+                    key = (tuple(np.round(op.params)), cycle, op.location[0])
+                    if key in u3_param_options:
+                        new_u3_param = u3_param_options[key][selections[ind]]
+                        op.params = new_u3_param
+                        ind += 1
+            
+            final_params[i, :] = new_circ.params
+            avg_dist += (frob_cost.calc_cost(new_circ, target) / len(all_inds))
+            avg_un += (get_corrected_un(new_circ.get_unitary(), circ.get_unitary()) / len(all_inds))
+
+        bias = normalized_gp_frob_cost(avg_un, target)
+        print(f"{circ_id}: Avg Dist: ", avg_dist, "Bias: ", bias, "Init Dist: ", dist, flush=True)
+
+        # avg_dist = total_dist / (num * 2)
+        # avg_un /= (num * 2)
+        # bias_cost = normalized_gp_frob_cost(avg_un, target)
+        # print(f"{circ_id}: Bias Cost: ", bias_cost, "Eps: ", avg_dist, flush=True)
+        # if avg_dist > 2 * success_threshold:   
+        #     print(f"{circ_id}: Avg Dist too high: ", avg_dist, flush=True)
+        #     return JiggleEnsemblePass.slow_jiggle_ham_outer(circ_str, 
+        #                                               target, 
+        #                                               num, 
+        #                                               success_threshold,
+        #                                               perturb_dist / 2)
+        # elif avg_dist < 0.25 * success_threshold:
+        #     print(f"{circ_id}: Avg Dist very low: ", avg_dist, flush=True)
+        #     return JiggleEnsemblePass.slow_jiggle_ham_outer(circ_str,
+        #                                                 target, 
+        #                                                 num, 
+        #                                                 success_threshold,
+        #                                                 perturb_dist * 1.5)
+        # else:
+        #     print(f"{circ_id}: Final Avg Dist: ", avg_dist, flush=True)
+
+        return final_params
+    
+
+    @staticmethod
+    def calculate_perturb_dist(perturb_dist: float,
+                               circ_str: str,
+                                 target: UnitaryMatrix,
+                                 success_threshold: float) -> float:
+        ''' Calculate appropriate perturbation distance '''
+
+        circ = lang.decode(circ_str)
+
+        while True:
+            out_distance = JiggleEnsemblePass.get_perturbation_distance(circ,
+                                                                        target,
+                                                                        perturb_dist)
+            if out_distance > 2 * success_threshold:
+                perturb_dist /= 2
+            elif out_distance < success_threshold:
+                perturb_dist *= 1.5
+            else:
+                return perturb_dist
+            
+        
+
+    @staticmethod
+    def get_perturbation_distance(circ: Circuit,
+                                  target: UnitaryMatrix,
+                                    perturb_dist: float) -> float:
+        ''' Get single shot perturbation distance '''
         new_circ = circ.copy()
-        for _ in range(num):
-            new_circ.set_params(circ.params)
-            u3_ind = 0
-            z_ind = 0
-            rand_u3_inds = np.random.choice(num_options, num_u3s, replace=True)
-            rand_rz_inds = np.random.choice(2, num_rzs, replace=True)
-            for op in new_circ.operations():
-                if isinstance(op.gate, U3Gate):
-                    key = tuple(np.round(op.params, int_perturb_dist + 1))
-                    op.params = u3_param_options[key][rand_u3_inds[u3_ind] * 2]
-                    u3_ind += 1
-                if isinstance(op.gate, RZGate):
-                    op.params = [rz_param_options[op.params[0]][rand_rz_inds[z_ind] * 2]]
-                    z_ind += 1
+        num_jiggles_left = MAX_GGS_TO_JIGGLE
+        for op in new_circ.operations():
+            if isinstance(op.gate, U3Gate):
+                p_param = JiggleEnsemblePass.get_ham_perturbations(op.get_unitary(),
+                                                                   perturb_dist, 
+                                                                   2, )[0][0]
+                op.params = p_param
+                num_jiggles_left -= 1
+            if num_jiggles_left <= 0:
+                break
 
-            full_params_1 = new_circ.params
-            u3_ind = 0
-            z_ind = 0
-            new_circ.set_params(circ.params)
-            for op in new_circ.operations():
-                if isinstance(op.gate, U3Gate):
-                    key = tuple(np.round(op.params, int_perturb_dist + 1))
-                    op.params = u3_param_options[key][rand_u3_inds[u3_ind] * 2 + 1]
-                    u3_ind += 1
-                if isinstance(op.gate, RZGate):
-                    op.params = [rz_param_options[op.params[0]][rand_rz_inds[z_ind] * 2 + 1]]
-                    z_ind += 1
-            full_params_2 = new_circ.params
-            final_params.append(full_params_1)
-            final_params.append(full_params_2)
+        dist = frob_cost.calc_cost(new_circ, target)
+        return dist
+            
+    '''
+    # def slow_jiggle_ham_outer(circ_str: str,
+    #                           target: str,
+    #                           num: int,
+    #                           success_threshold: float,
+    #                           perturb_dist: float) -> np.ndarray[float]:
+    #     
+    #     Keep calling slow jiggle ham with increasing perturb dist until
+    #     we can get a good set of jiggled circuits.
+    #     
+    #     max_tries = 20
+    #     circ_id = hash(circ_str) % 100
 
-        return np.vstack(final_params)
+    #     while max_tries > 0:
+    #         final_params, avg_dist = JiggleEnsemblePass.slow_jiggle_ham(circ_str, 
+    #                                                                     target, 
+    #                                                                     num, 
+    #                                                                     success_threshold, 
+    #                                                                     perturb_dist)
+    #         if avg_dist > 2 *success_threshold:
+    #             perturb_dist /= 2
+    #         elif avg_dist < 0.25 * success_threshold:
+    #             perturb_dist *= 1.5
+    #         else:
+    #             print(f"{circ_id}: Final Avg Dist after slow jiggle: ", avg_dist, flush=True)
+    #             return final_params
+    #         max_tries -= 1
+    #     return final_params
 
+    # @staticmethod
+    # def slow_jiggle_ham(circ_str: str, 
+    #                     target: str, 
+    #                     num: int, 
+    #                     success_threshold: float,
+    #                     perturb_dist: float) -> np.ndarray[float]:
+    #     
+    #     If the previous jiggle failed, then slowly add perturbations until
+    #     we can get a good set of jiggled circuits.
+    #     
+
+    #     circ = lang.decode(circ_str)
+    #     circ_id = hash(circ_str) % 100
+    
+    #     # Start with smaller this perturb dist
+    #     # Generate param options
+    #     u3_param_options: dict[tuple[float, float, float], np.ndarray[float]] = {}
+    #     num_options = 4
+    #     sample_circ = circ.copy()
+    #     for cycle, op in circ.operations_with_cycles():
+    #         pt = (cycle, op.location[0])
+    #         if isinstance(op.gate, U3Gate):
+    #             # Round params to int_perturb_dist
+    #             key = (tuple(np.round(op.params)), pt)
+    #             if key not in u3_param_options:
+    #                 options, _ = JiggleEnsemblePass.get_ham_perturbations(op.get_unitary(), perturb_dist, num_options * 2)
+    #                 u3_param_options[key] = options
+    #             else:
+    #                 options = u3_param_options[key]
+    #             sample_un = ConstantUnitaryGate(U3Gate().get_unitary(options[0]))
+    #             sample_circ.replace_gate(CircuitPoint(pt), sample_un, op.location)
+                
+    #             # Check if dist < threshold still
+    #             new_dist = frob_cost.calc_cost(sample_circ, target)
+    #             if new_dist > success_threshold:
+    #                 # Break out of while loop if too large
+    #                 print(f"{circ_id}: Final Dist, ending at: ", new_dist, len(u3_param_options), flush=True)
+    #                 break
+    #             # else:
+    #             #     print("New Dist: ", new_dist, len(u3_param_options), flush=True)
+
+    #     final_params = []
+    #     new_circ = circ.copy()
+    #     total_dist = 0.0
+    #     num_u3s = circ.count(U3Gate())
+    #     for _ in range(num):
+    #         new_circ.set_params(circ.params)
+    #         u3_ind = 0
+    #         z_ind = 0
+    #         rand_u3_inds = np.random.choice(num_options, num_u3s, replace=True)
+    #         for cycle, op in new_circ.operations_with_cycles():
+    #             pt = (cycle, op.location[0])
+    #             if isinstance(op.gate, U3Gate):
+    #                 key = (tuple(np.round(op.params)), pt)
+    #                 if key in u3_param_options:
+    #                     op.params = u3_param_options[key][rand_u3_inds[u3_ind] * 2]
+    #                     u3_ind += 1
+
+
+    #         full_params_1 = new_circ.params
+    #         u3_ind = 0
+    #         new_circ.set_params(circ.params)
+    #         for cycle, op in new_circ.operations_with_cycles():
+    #             pt = (cycle, op.location[0])
+    #             if isinstance(op.gate, U3Gate):
+    #                 key = (tuple(np.round(op.params)), pt)
+    #                 if key in u3_param_options:
+    #                     op.params = u3_param_options[key][rand_u3_inds[u3_ind] * 2 + 1]
+    #                     u3_ind += 1
+
+    #         full_params_2 = new_circ.params
+    #         final_params.append(full_params_1)
+    #         final_params.append(full_params_2)
+    #         total_dist += frob_cost.calc_cost(new_circ, target)
+
+    #     avg_dist = total_dist / (num)
+    #     return np.vstack(final_params), avg_dist
+
+
+    '''
+    
     @staticmethod
     def flood_circ(circ_str: str) -> str:
         circ = lang.decode(circ_str)
+        if circ.count(U3Gate()) > MAX_GGS_TO_JIGGLE:
+            print("Already enough U3s, not flooding", flush=True)
+            return circ_str
+        num_u3s_needed = MAX_GGS_TO_JIGGLE - circ.count(U3Gate())
         flooded_cnot = Circuit(2)
         flooded_cnot.append_gate(CNOTGate(), (0, 1))
         flooded_cnot.append_gate(U3Gate(), (0,), [0, 0, 0])
@@ -406,12 +579,17 @@ class  JiggleEnsemblePass(BasePass):
         for i in range(circ.num_qudits):
             init_u3_circ.append_gate(U3Gate(), (i,), [0, 0, 0])
         circ.insert_circuit(0, init_u3_circ, tuple(range(circ.num_qudits)))
-        for cycle, op in circ.operations_with_cycles():
-            if isinstance(op.gate, CNOTGate):
-                op_pt = CircuitPoint(cycle, op.location[0])
-                circ.replace_with_circuit(op_pt, flooded_cnot.copy(), as_circuit_gate=True)
-        circ.unfold_all()
-        ToU3Pass.run_group_circ(circ)
+        num_u3s_needed -= circ.num_qudits
+        if num_u3s_needed > 0:
+            for cycle, op in circ.operations_with_cycles():
+                if isinstance(op.gate, CNOTGate):
+                    op_pt = CircuitPoint(cycle, op.location[0])
+                    circ.replace_with_circuit(op_pt, flooded_cnot.copy(), as_circuit_gate=True)
+                    num_u3s_needed -= 2
+                    if num_u3s_needed <= 0:
+                        break
+            circ.unfold_all()
+            ToU3Pass.run_group_circ(circ)
         new_circ_str = lang.encode(circ)
         del circ
         del flooded_cnot
@@ -524,7 +702,7 @@ class  JiggleEnsemblePass(BasePass):
             all_params_caches = await get_runtime().map(JiggleEnsemblePass.single_jiggle_ham, 
                                           circuit_strs, 
                                           target=data.target,
-                                          num = ceil(self.num_circs / len(circuit_strs)), 
+                                          num = self.num_circs, 
                                           success_threshold=success_threshold)
             all_params = [p[0] for p in all_params_caches]
             all_caches = [p[1] for p in all_params_caches]
@@ -551,13 +729,28 @@ class  JiggleEnsemblePass(BasePass):
         probs_file_name = os.path.join(checkpoint_dir, "ensemble_{ind}_probs_{extra}.npy")
         cache_file_name = os.path.join(checkpoint_dir, "ensemble_{ind}_cache_{extra}.pkl")
 
+
+        # Ensemble 0 is only circuits that epsilon < err_thresh
         ens_file = ensemble_file_name.format(ind=0, extra=self.checkpoint_extra_str)
         jiggle_file = jiggle_file_name.format(ind=0, extra=self.checkpoint_extra_str)
         probs_file = probs_file_name.format(ind=0, extra=self.checkpoint_extra_str)
         cache_file = cache_file_name.format(ind=0, extra=self.checkpoint_extra_str)
 
-        if os.path.exists(cache_file):
-            return
+
+        # Ensemble 1 is all circuits with fewer CNOTs
+        ens_file_1 = ensemble_file_name.format(ind=1, extra=self.checkpoint_extra_str)
+        jiggle_file_1 = jiggle_file_name.format(ind=1, extra=self.checkpoint_extra_str)
+        probs_file_1 = probs_file_name.format(ind=1, extra=self.checkpoint_extra_str)
+        cache_file_1 = cache_file_name.format(ind=1, extra=self.checkpoint_extra_str)
+
+        # Ensemble 2 is all circuits
+        ens_file_2 = ensemble_file_name.format(ind=2, extra=self.checkpoint_extra_str)
+        jiggle_file_2 = jiggle_file_name.format(ind=2, extra=self.checkpoint_extra_str)
+        probs_file_2 = probs_file_name.format(ind=2, extra=self.checkpoint_extra_str)
+        cache_file_2 = cache_file_name.format(ind=2, extra=self.checkpoint_extra_str)
+
+        # if os.path.exists(jiggle_file) and os.path.exists(jiggle_file_1) and os.path.exists(jiggle_file_2):
+        #     return
                 
         Path(ens_file).parent.mkdir(parents=True, exist_ok=True)
         Path(jiggle_file).parent.mkdir(parents=True, exist_ok=True)
@@ -567,15 +760,29 @@ class  JiggleEnsemblePass(BasePass):
         else:
             scan_sols = data["scan_sols"]
 
-        circuits = [c for c, _ in scan_sols]
+        circuits: list[Circuit] = [c for c, _ in scan_sols]
+        distances: list[float] = [d for _, d in scan_sols]
         if len(circuits) == 0:
             print("No circuits to jiggle, skipping Jiggle Ensemble Pass", flush=True)
             return
-        # Jiggle the rest of the ensembles
-        if self.use_calculated_error:
-            success_threshold = self.success_threshold * data.get("error_percentage_allocated", 1)
-        else:
-            success_threshold = self.success_threshold
+        
+        eps_circ_inds = []
+        for i, d in enumerate(distances):
+            if d < self.success_threshold and d > (self.success_threshold ** 2):
+                eps_circ_inds.append(i)
+
+        
+        less_cnot_circs_inds = []
+        orig_count = circuit.count(CNOTGate())
+        for i, c in enumerate(circuits):
+            cnot_count = c.count(CNOTGate())
+            if cnot_count < orig_count:
+                less_cnot_circs_inds.append(i)
+
+        print("Eps Circ Inds: ", eps_circ_inds, flush=True)
+        print("Less CNOT Circ Inds: ", less_cnot_circs_inds, flush=True)
+
+        success_threshold = self.success_threshold
 
         circuit_strs = [lang.encode(c) for c in circuits]
         circuit_strs = await get_runtime().map(JiggleEnsemblePass.get_final_circ, 
@@ -610,22 +817,49 @@ class  JiggleEnsemblePass(BasePass):
             all_params = await get_runtime().map(JiggleEnsemblePass.single_jiggle_ham, 
                                             circuit_strs, 
                                             target=data.target,
-                                            num = ceil(self.num_circs / len(circuit_strs)), 
+                                            num =self.num_circs, 
                                             success_threshold=success_threshold)
+            
+            # Remove all circuit strs that failed
+            bad_inds = [i for i, p in enumerate(all_params) if p is None]
+            for ind in reversed(bad_inds):
+                del circuit_strs[ind]
+                del all_params[ind]
+                if ind in less_cnot_circs_inds:
+                    less_cnot_circs_inds.remove(ind)
+                if ind in eps_circ_inds:
+                    eps_circ_inds.remove(ind)
+
             all_probs = [np.ones((p.shape[0], )) / p.shape[0] for p in all_params]
         
-        
-        if len(all_params[0]) > 0:
-            store_params(all_params, jiggle_file)
-        store_ensemble_strs(circuit_strs, ens_file)
-        store_probs(all_probs, probs_file)
+        # Now, only choose circuits with epsilon < err_thresh**2 for ensemble 0
+        circuit_strs_eps = [circuit_strs[i] for i in eps_circ_inds]
+        all_params_eps = [all_params[i] for i in eps_circ_inds]
+        all_probs_eps = [all_probs[i] for i in eps_circ_inds]
+        if len(eps_circ_inds) > 0:
+            # Store ensemble 0
+            if len(all_params_eps[0]) > 0:
+                store_params(all_params_eps, jiggle_file)
+            store_ensemble_strs(circuit_strs_eps, ens_file)
+            store_probs(all_probs_eps, probs_file)
 
-        if self.pass_ensemble:
-            # Calculate ensemble
-            data['ensemble_circs'] = circuit_strs
-            data['ensemble_jiggles'] = all_params
-            data["ensemble_cache"] = all_caches
-            data['ensemble_probs'] = all_probs
+        # Now, only choose circuits with fewer CNOTs for ensemble 1
+        circuit_strs_1 = [circuit_strs[i] for i in less_cnot_circs_inds]
+        all_params_1 = [all_params[i] for i in less_cnot_circs_inds]
+        all_probs_1 = [all_probs[i] for i in less_cnot_circs_inds]
+
+        if len(less_cnot_circs_inds) > 0:
+            # Store ensemble 1
+            if len(all_params_1[0]) > 0:
+                store_params(all_params_1, jiggle_file_1)
+            store_ensemble_strs(circuit_strs_1, ens_file_1)
+            store_probs(all_probs_1, probs_file_1)
+
+        # Store full ensemble as ensemble 2
+        if len(all_params[0]) > 0:
+            store_params(all_params, jiggle_file_2)
+        store_ensemble_strs(circuit_strs, ens_file_2)
+        store_probs(all_probs, probs_file_2)
 
     async def run(self, circuit: Circuit, data: PassData) -> None:
         if self.use_ensemble:

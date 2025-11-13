@@ -361,9 +361,13 @@ class FullCircTDPass(BasePass):
 
 if __name__ == "__main__":
     circ_name = argv[1]
-    # tol = float(argv[2])
-    tols = [1.0, 2.0, 3.0, 4.0, 5.0]
-    small_ens = bool(int(argv[2])) if len(argv) > 2 else False
+    tol = float(argv[2])
+    # if tol >= 1:
+    #     tols = [4.0, 5.0]
+    # else:
+    #     tols = [1.0, 2.0, 3.0]
+    tols = [tol]
+    small_ens = bool(int(argv[3])) if len(argv) > 3 else False
     # run_td = bool(int(argv[4])) if len(argv) > 4 else True
     run_td = True
     compiler = Compiler(num_workers=256)

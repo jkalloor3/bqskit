@@ -60,6 +60,8 @@ class LEAPSynthesisPass2(BasePass):
         use_calculated_error: bool = False,
         max_psols: int = 10,
         maximize_diversity: bool = False,
+        append: bool = False,
+        add_default: bool = True,
     ) -> None:
         """
         Construct a search-based synthesis pass.
@@ -176,6 +178,8 @@ class LEAPSynthesisPass2(BasePass):
             # self.max_layer_factor = 2.0
             self.max_psols *= 2
         self.maximize_diversity = maximize_diversity
+        self.append = append
+        self.add_default = add_default
 
 
     async def synthesize_circ(
@@ -190,16 +194,8 @@ class LEAPSynthesisPass2(BasePass):
         # Initialize run-dependent options
         instantiate_options = self.instantiate_options.copy()
 
-        if self.use_calculated_error:
-            # use sqrt
-            factor = data["error_percentage_allocated"]
-            # factor = data
-            success_threshold = self.success_threshold * factor
-            partial_success_threshold = self.partial_success_threshold * factor
-            # print("New Success Threshold", success_threshold, "New Partial Success Threshold", partial_success_threshold)
-        else:
-            success_threshold = self.success_threshold
-            partial_success_threshold = self.partial_success_threshold
+        success_threshold = self.success_threshold
+        partial_success_threshold = self.partial_success_threshold
        
        # Seed the PRNG
         instantiate_options['ftol'] = partial_success_threshold
@@ -208,6 +204,9 @@ class LEAPSynthesisPass2(BasePass):
 
         block_id = f"Block {data.get('super_block_num', -1)}_{data.get('block_num', -1)}:"
         layer_gen = self._get_layer_gen(data)
+
+        # Track partial solutions
+        scan_sols: list[tuple[Circuit, float]] = []
 
         if frontier is None:
             # Begin the search with an initial layer
@@ -225,22 +224,18 @@ class LEAPSynthesisPass2(BasePass):
             best_layers = [0]
             last_prefix_layer = 0
 
-            # Track partial solutions
-            scan_sols: list[tuple[Circuit, float]] = []
-
             _logger.debug(f'Search started, initial layer has cost: {best_dist}.')
 
             # Evalute initial layer
-            if best_dist < success_threshold:
+            if best_dist < partial_success_threshold:
                 _logger.debug('Successful synthesis.')
                 scan_sols.append((initial_layer.copy(), best_dist))
-                scan_sols.append((default_circuit.copy(), 0))
-                data['scan_sols'] = scan_sols
-                if save_data_file is not None:
-                    # Dump data and circuit with empty Frontier
-                    data["leap_finished"] = True
-                    pickle.dump(data, open(save_data_file, "wb"))
-                return
+                if best_dist < success_threshold:
+                    data['scan_sols'] += scan_sols
+                    if save_data_file is not None:
+                        pickle.dump(data, open(save_data_file, "wb"))
+                    return
+                
             
         else:
             best_dist = data['best_dist']
@@ -249,17 +244,13 @@ class LEAPSynthesisPass2(BasePass):
             best_dists = data['best_dists']
             best_layers = data['best_layers']
             last_prefix_layer = data['last_prefix_layer']
-            scan_sols = data['scan_sols']
 
         default_count = default_circuit.count(CNOTGate())
-        max_layer = max(default_count + 2, int(default_count * self.max_layer_factor))
+        max_layer = default_count
         max_layer = min(self.max_layer, max_layer)
 
         # Main loop
         step = 0
-
-        cur_bias = 0
-        cur_avg_un = None
 
         while not frontier.empty():
             # print("CHECKPOINTING!", best_layer, data["block_num"])
@@ -271,7 +262,6 @@ class LEAPSynthesisPass2(BasePass):
             data["best_layer"] = best_layer
             data["best_layers"] = best_layers
             data["last_prefix_layer"] = last_prefix_layer
-            data["scan_sols"] = scan_sols
             step += 1
             if save_data_file is not None and step % 20 == 0:
                 # Dump data and circuit
@@ -301,17 +291,10 @@ class LEAPSynthesisPass2(BasePass):
                 dist = self.cost.calc_cost(circuit, utry)
                 if dist < partial_success_threshold:
                     scan_sols.append((circuit.copy(), dist))
-                    data['scan_sols'] = scan_sols
                     if len(scan_sols) >= self.max_psols:
-                        if self.maximize_diversity:
-                            # Remove half of the solutions
-                            scan_sols = scan_sols[::2]
-                        scan_sols.append((default_circuit.copy(), 0))
-                        data['scan_sols'] = scan_sols
+                        # We can return early
+                        data['scan_sols'] += scan_sols
                         # Save data and circuit
-                        if save_data_file is not None:
-                            data["leap_finished"] = True
-                            pickle.dump(data, open(save_data_file, "wb"))
                         return
 
                 if self.check_new_best(layer + 1, dist, best_layer, best_dist, partial_success_threshold):
@@ -341,12 +324,16 @@ class LEAPSynthesisPass2(BasePass):
                     frontier.add(circuit, layer + 1)
 
         if self.store_partial_solutions:
-            scan_sols.append((default_circuit.copy(), 0))
-            data['scan_sols'] = scan_sols
+            # Only add default circuit if since no circuits are less than eps^2
+            # Trim to len max_psols
+            scan_sols = sorted(scan_sols, key=lambda x: x[0].count(CNOTGate()))
+            # scan_sols = scan_sols[:self.max_psols]
+            if len(scan_sols) == 0:
+                scan_sols.append((default_circuit.copy(), 0))
+            data['scan_sols'] += scan_sols
 
         # Save data and circuit
         if save_data_file is not None:
-            data["leap_finished"] = True
             pickle.dump(data, open(save_data_file, "wb"))
 
     def check_new_best(
@@ -454,50 +441,64 @@ class LEAPSynthesisPass2(BasePass):
 
     async def run(self, circuit: Circuit, data: PassData) -> None:
         """Perform the pass's operation, see :class:`BasePass` for more."""
-        # print(f"Starting LEAP for block {data.get('super_block_num', -1)} : {data.get('block_num', -1)}", flush=True)
-        orig_num_params = circuit.num_params
+        # Initialize scan sols
+        if 'scan_sols' not in data:
+            data['scan_sols'] = []
+
+        orig_num_dists = len(data['scan_sols'])
+
+        if self.append:
+            print("Starting LEAP append Synthesis Pass", self.append, flush=True)
+            print(len(data['scan_sols']), "solutions already in data", flush=True)
 
         if circuit.num_qudits <= 1:
             print("Skipping LEAP for circuit with qudits <= 1", flush=True)
-            data['scan_sols'] = [(circuit.copy(), 0)]
+            data['scan_sols'] += [(circuit.copy(), 0)]
             return
 
-        if orig_num_params == 0:
+        if circuit.count(CNOTGate()) <= 1:
             block_id = f"Block {data.get('super_block_num', -1)}_{data.get('block_num', -1)}:"
-            print(f"No Params to optimize for {block_id}!", flush=True)
-            data['scan_sols'] = [(circuit.copy(), 0)]
+            print(f"No CNOTs to optimize for {block_id}!", flush=True)
+            data['scan_sols'] += [(circuit.copy(), 0)]
             return
 
-        # print(f"LEAP 1: Initial Number of Params for block {data.get('block_num', -1)}: ",   circuit.num_params, flush=True)
-        if "leap_finished" in data and data["leap_finished"]:
-            # print("LEAP is already finished!", flush=True)
+        if self.append:
+            check_str = "leap_finished_append"
+        else:
+            check_str = "leap_finished"
+
+        if check_str in data and data[check_str]:
+            print("LEAP is already finished!", check_str, flush=True)
+            scan_sols = data['scan_sols']
+            final_dists = [x[1] for x in scan_sols]
+            print("Thresholds: ", self.success_threshold, self.partial_success_threshold, flush=True)
+            print("Final Distances: ", final_dists, flush=True)
             return
 
-        frontier = None
         save_data_file = None
         save_data_file = data.get("checkpoint_data_file", None)
-        if save_data_file:
-            assert(exists(save_data_file))
-            frontier: Frontier | None = data.get('frontier', None)
-            leap_finished = data.get('leap_finished', False)
-            _logger.debug(f'Loading data from {save_data_file}')
-            if frontier is not None:
-                _logger.debug(f'Frontier is empty: {frontier.empty()}')
-            if leap_finished:
-                _logger.debug('Block is already finished!')
-                return
-            data['leap_finished'] = False
+        # if save_data_file:
+        #     assert(exists(save_data_file))
+        #     leap_finished = data.get('leap_finished', False)
+        #     _logger.debug(f'Loading data from {save_data_file}')
+        #     if frontier is not None:
+        #         _logger.debug(f'Frontier is empty: {frontier.empty()}')
+        #     if leap_finished:
+        #         _logger.debug('Block is already finished!')
+        #         return
+        #     data[check_str] = False
 
+        await self.synthesize_circ(data.target, data, default_circuit=circuit, 
+                                   frontier=None, save_data_file=save_data_file)
+        
+        data[check_str] = True
 
-        await self.synthesize_circ(data.target, data, default_circuit=circuit, frontier=frontier, save_data_file=save_data_file)
-
-        scan_sols: list[tuple[Circuit, float]] = data['scan_sols']
-
-        # Remove large increases
-        scan_sols = [x for x in scan_sols if x[0].num_params <= (orig_num_params * 2)]
-        data['scan_sols'] = scan_sols
-        final_dists = [x[1] for x in scan_sols]
-        print("Final Distances: ", final_dists, flush=True)
+        final_dists = [x[1] for x in data['scan_sols']]
+        # print("Thresholds: ", self.success_threshold, self.partial_success_threshold, flush=True)
+        if self.append:
+            print("LEAP Append Final Distances: ", len(final_dists), orig_num_dists, np.max(final_dists), np.min(final_dists), flush=True)
+        # else:
+        #     print("LEAP Final Distances: ", len(final_dists), orig_num_dists, np.max(final_dists), np.min(final_dists), flush=True)
 
 
         if save_data_file is not None:
