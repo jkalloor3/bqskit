@@ -13,8 +13,8 @@ from bqskit.ir.gates import CircuitGate, CNOTGate
 from util.plot_lib import plot_all_circ_violins, benchmark_labels
 
 # List of circuits
-base_circs = ["draper_adder_12", "qae13", "qpe_14", "lgt_17"]  # Replace with your list of circuits
-plot_circs = ["lgt_17", "qpe_14", "qae13", "LiH_jw_long", "FermiHubbard2x2_jw_long", "heisenberg7"] 
+base_circs = ["qae13", "qpe_14", "lgt_17"]  # Replace with your list of circuits
+plot_circs = ["lgt_17", "qaoa10", "LiH_jw_long", "FermiHubbard2x2_jw_long", "heisenberg7"] 
 base_circs += ["add17", "lgt_17", "qae13", "qpe_14", "mult16", "draper_adder_12", "qae11", "qaoa10"]
 large_circs = ["qae33", "qaoa_148", "lgt_380"]
 
@@ -74,14 +74,13 @@ def get_avg_count(checkpoints_dir: str,
 
     large_checkpoint_dir = os.path.join(checkpoints_dir, f"{circ_name}_{block_num}_{tol}")
     csv_file = get_file_names(large_checkpoint_dir,small_block_num, 
-                              no_qp=False, ratio_text=f"_{int(ratio_limit)}")
+                              no_qp=False, ratio_text=f"_{int(ratio_limit)}")[-1]
+
     _, count_1 = check_good(csv_file, ratio_limit)
 
     csv_file = get_file_names(large_checkpoint_dir, small_block_num, no_qp=True,
                               ratio_text=f"_{int(ratio_limit)}")[-1]
     _, count_2 = check_good(csv_file, default_ratio_limit)
-
-    print(count_1, count_2, flush=True)
 
     return min(count_1, count_2)
 
@@ -130,9 +129,9 @@ def update_ratio_data(all_data: dict, checkpoints_dir,
             final_ratio, _ = check_good(csv_file, max_ratio=ratio_limit, bias=bias)
             if final_ratio > 20:
                 print(csv_file, final_ratio, flush=True)
-            if final_ratio > 10000:
-                # Just set it to 10000 and we will plot it as 10000+
-                final_ratio = 10000
+            if final_ratio > 1000:
+                # Just set it to 1000 and we will plot it as 1000+
+                final_ratio = 1000
             if block_ind not in block_data:
                 block_data[block_ind] = {}
             if tol not in block_data[block_ind]:
@@ -315,7 +314,7 @@ def get_orig_counts(circuits: list[str], cliff_t: bool = False,
 if __name__ == '__main__':
     # Collect data from all folders
     plot = True
-    cliff_t = True
+    cliff_t = False
     bias = False
 
     default_ratio_limit = float(argv[1])

@@ -127,7 +127,6 @@ def plot_all_circ_violins(plot_data: dict,
             10: "10",
             100: "100",
             1000: "1000+",
-            10000: "10000+"
         }
     if x_tick_labels is None:
         x_tick_labels = {
