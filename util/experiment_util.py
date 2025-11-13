@@ -59,6 +59,8 @@ def check_good(csv_file: str, max_ratio: float, bias: bool = False) -> float:
 
     bias_methods = ["Uniform", "NTRO Default", "Default Jiggle"]
 
+    smallest_ratio = float("inf")
+
     with open(csv_file, 'r') as csv_file_obj:
         reader = csv.DictReader(csv_file_obj)
         for row in reader:
@@ -70,8 +72,13 @@ def check_good(csv_file: str, max_ratio: float, bias: bool = False) -> float:
                 new_ratio = float(row["Ratio"])
                 count = float(row.get("Count", float("inf")))
                 if new_ratio < max_ratio and count < best_count:
-                    final_ratio = new_ratio
                     best_count = count
+                    final_ratio = new_ratio
+                smallest_ratio = min(smallest_ratio, new_ratio)
+
+    if final_ratio == float("inf"):
+        assert best_count == float("inf")
+        final_ratio = smallest_ratio
 
     return final_ratio, best_count
 
@@ -137,7 +144,8 @@ def get_good_blocks(circ_name: str,
             # print(f"Small Block: {small_block_num} in {large_block_num}", flush=True)
             csv_file = get_file_names(large_block_dir, small_block_num, 
                                       ratio_text=ratio_str)[-1]
-            good, count = check_good(csv_file, ratio_limit)
+            ratio, count = check_good(csv_file, ratio_limit)
+            good = ratio < ratio_limit
             if cliff_t:
                 original_count = counter.count_t(small_circ, target_error=(10 ** (- 2 * tol)))
             else:

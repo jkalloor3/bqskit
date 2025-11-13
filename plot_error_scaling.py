@@ -57,31 +57,6 @@ def find_tket_qasm(circ_name: str) -> str:
 
     return None
 
-def check_good(csv_file: str, max_ratio: float) -> float:
-    """
-    Check if the csv file has a good ratio for the given tolerance.
-    """
-    final_ratio = float("inf")
-
-    print(f"Checking file: {csv_file}", flush=True)
-
-    if not os.path.exists(csv_file):
-        return final_ratio, float("inf")
-    
-    best_count = float("inf")
-
-    with open(csv_file, 'r') as csv_file_obj:
-        reader = csv.DictReader(csv_file_obj)
-        for row in reader:
-            if "Ratio" in row:  # Check if the column value is not empty
-                new_ratio = float(row["Ratio"])
-                count = float(row.get("Count", float("inf")))
-                if new_ratio < max_ratio and count < best_count:
-                    final_ratio = new_ratio
-                    best_count = count
-
-    return final_ratio, best_count
-
 def get_avg_count(checkpoints_dir: str,
                   circ_name: str, 
                   block_num: str,
@@ -153,6 +128,8 @@ def update_ratio_data(all_data: dict, checkpoints_dir,
                 ratio_limit = default_ratio_limit
 
             final_ratio, _ = check_good(csv_file, max_ratio=ratio_limit, bias=bias)
+            if final_ratio > 20:
+                print(csv_file, final_ratio, flush=True)
             if final_ratio > 10000:
                 # Just set it to 10000 and we will plot it as 10000+
                 final_ratio = 10000
@@ -339,7 +316,7 @@ if __name__ == '__main__':
     # Collect data from all folders
     plot = True
     cliff_t = True
-    bias = True
+    bias = False
 
     default_ratio_limit = float(argv[1])
 
