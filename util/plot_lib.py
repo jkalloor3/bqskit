@@ -120,26 +120,26 @@ def plot_all_circ_violins(plot_data: dict,
         ax.set_yscale("log")
 
     # Set y tick label of 1000 to 1000+
-    if y_tick_labels is None:
-        y_tick_labels = {
-            0.1: "0.1",
-            1: "1",
-            10: "10",
-            100: "100",
-            1000: "1000+",
-        }
-    if x_tick_labels is None:
-        x_tick_labels = {
-            1.0: "$10^{-1}$",
-            2.0: "$10^{-2}$",
-            3.0: "$10^{-3}$",
-            4.0: "$10^{-4}$",
-            5.0: "$10^{-5}$"
-        }
+    # if y_tick_labels is None:
+    y_tick_labels = {
+        0.1: "0.1",
+        1: "1",
+        10: "10",
+        100: "100",
+        1000: "1000+",
+    }
+    # if x_tick_labels is None:
+    x_tick_labels = {
+        1.0: "$10^{-1}$",
+        2.0: "$10^{-2}$",
+        3.0: "$10^{-3}$",
+        4.0: "$10^{-4}$",
+        5.0: "$10^{-5}$"
+    }
 
     ax.set_yticks(list(y_tick_labels.keys()))
     ax.set_yticklabels(list(y_tick_labels.values()), fontdict={"size": 16})
-    ax.set_yticklabels(ax.get_yticks(), fontdict={"size": 16})
+    # ax.set_yticklabels(ax.get_yticks(), fontdict={"size": 16})
     ax.set_xticks(list(x_tick_labels.keys()))
     ax.set_xticklabels(list(x_tick_labels.values()), fontdict={"size": 16})
     ax.legend(handles=handles, loc='upper left', fontsize=12)
