@@ -18,6 +18,7 @@ from .distance import get_density_matrix, tvd_dict, trace_distance
 benchmark_labels = {
     "lgt_11": "Lattice Gauge Sim - 11q",
     "lgt_17": "Lattice Gauge Sim - 17q",
+    "lgt_380": "Lattice Gauge Sim - 380q",
     "qae13": "QAE - 13q",
     "qpe_14": "QPE - 14q",
     "LiH": "Li-H Sim - 8q",
@@ -55,6 +56,7 @@ benchmarks = list(benchmark_labels.keys())
 benchmark_colors = {
     "lgt_11": "#5cb9fb",
     "lgt_17": "#5cb9fb",
+    "lgt_380": "#5cb9fb",
     "qae13": "#86f386",
     "qpe_14": "#ff7070",
     "LiH": "#c98eff",
@@ -316,7 +318,7 @@ def plot_td_convergence(circ_name: str,
     y_label: Label for the y-axis.
     x_label: Label for the x-axis.
     """
-    base_dir = "ensemble_td_convergences_final"
+    base_dir = "ensemble_td_convergences_final_2"
     full_form = os.path.join(base_dir, f"{circ_name}_*_*.pkl")
 
     all_files = glob.glob(full_form)

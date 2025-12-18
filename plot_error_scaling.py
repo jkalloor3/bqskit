@@ -15,7 +15,7 @@ from util.plot_lib import plot_all_circ_violins, benchmark_labels
 
 # List of circuits
 base_circs = ["qae13", "qpe_14", "lgt_17"]  # Replace with your list of circuits
-plot_circs = ["lgt_17", "qaoa10", "LiH_jw_long", "FermiHubbard2x2_jw_long", "heisenberg7"] 
+plot_circs = ["heisenberg7", "qaoa10", "LiH_jw_long", "qae33", "lgt_380"] 
 base_circs += ["add17", "lgt_17", "qae13", "qpe_14", "mult16", "draper_adder_12", "qae11", "qaoa10"]
 large_circs = ["qae33", "qaoa_148", "lgt_380"]
 
@@ -74,14 +74,20 @@ def get_avg_count(checkpoints_dir: str,
     csv_file = get_file_names(large_checkpoint_dir,small_block_num, 
                               no_qp=False, ratio_text=ratio_text)[-1]
 
-    _, count_1 = check_good(csv_file, ratio_limit)
+    ratio_1, count_1 = check_good(csv_file, ratio_limit)
 
-    csv_file = get_file_names(large_checkpoint_dir, small_block_num, no_qp=True,
-                              ratio_text=ratio_text)[-1]
-    _, count_2 = check_good(csv_file, default_ratio_limit)
+    # csv_file = get_file_names(large_checkpoint_dir, small_block_num, no_qp=True,
+    #                           ratio_text=ratio_text)[-1]
+    # ratio_2, count_2 = check_good(csv_file, default_ratio_limit)
 
-    # print(count_1, count_2, flush=True)
+    count_2 = float("inf")
 
+
+    # if count_1 < 40:
+    #     print(csv_file)
+    #     print(ratio_1, count_1, flush=True)
+    if not os.path.exists(csv_file):
+        print(csv_file)
     return min(count_1, count_2)
 
 # Function to read data.csv from each folder
@@ -315,9 +321,9 @@ def get_orig_counts(circuits: list[str], cliff_t: bool = False,
 
 if __name__ == '__main__':
     # Collect data from all folders
-    plot = False
+    plot = True
     cliff_t = True
-    bias = False
+    bias = True
 
     default_ratio_limit = float(argv[1])
 
@@ -334,7 +340,7 @@ if __name__ == '__main__':
 
     if not cliff_t:
         small_block_checkpoints_dir_1 = f"small_block_checkpoints_final_paper_4_more_cx_tket"
-        small_block_checkpoints_dir_2 = f"small_block_checkpoints_final_paper_4_tket"
+        # small_block_checkpoints_dir_2 = f"small_block_checkpoints_final_paper_4_tket"
     else:
         small_block_checkpoints_dir_1 = f"small_block_checkpoints_final_paper_4_clifft_tket"
         small_block_checkpoints_dir_2 = f"small_block_checkpoints_final_paper_4_clifft_tket_final"
@@ -355,9 +361,9 @@ if __name__ == '__main__':
                                       cliff_t=cliff_t,
                                       default_ratio_limit=default_ratio_limit)
 
-        update_count_data(orig_counts, small_block_checkpoints_dir_2,
-                                                  cliff_t=cliff_t,
-                                                  default_ratio_limit=default_ratio_limit)
+        # update_count_data(orig_counts, small_block_checkpoints_dir_2,
+        #                                           cliff_t=cliff_t,
+        #                                           default_ratio_limit=default_ratio_limit)
         print("CX data loaded", flush=True)
         print("CX data more cx:", list(orig_counts.keys()), flush=True)
 
@@ -371,8 +377,8 @@ if __name__ == '__main__':
         # Plot ratio data
         update_ratio_data(ratio_data, small_block_checkpoints_dir_1, 
                           default_ratio_limit=default_ratio_limit, bias=bias)
-        update_ratio_data(ratio_data, small_block_checkpoints_dir_2, 
-                          default_ratio_limit=default_ratio_limit, bias=bias)
+        # update_ratio_data(ratio_data, small_block_checkpoints_dir_2, 
+        #                   default_ratio_limit=default_ratio_limit, bias=bias)
         print("Ratio data loaded", flush=True)
 
 
