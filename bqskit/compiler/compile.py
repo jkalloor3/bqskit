@@ -1577,7 +1577,7 @@ def _opt3_workflow(
 
 def _opt4_workflow(
     model: MachineModel,
-    synthesis_epsilon: float = 1e-8,
+    synthesis_epsilon: float = 1e-8, # 1e-10 (to start)
     max_synthesis_size: int = 3,
     error_threshold: float | None = None,
     error_sim_size: int = 8,
@@ -1589,49 +1589,54 @@ def _opt4_workflow(
             ' for optimization level 4. This may change in the future.',
         )
 
+    # print("Running opt level 4 workflow. This may take a while...", flush=True)
+    _logger.info('Running opt level 4 workflow. This may take a while...')
+
     return [
         SetModelPass(model),
 
         build_seqpam_mapping_optimization_workflow(
-            4,
+            3,
             synthesis_epsilon,
-            block_size=max_synthesis_size,
+            block_size=3, # Fix to 3
             error_sim_size=None if error_threshold is None else error_sim_size,
         ),
 
         build_multi_qudit_retarget_workflow(
             4,
             synthesis_epsilon,
-            max_synthesis_size,
+            4, # Fix to 4
             error_threshold,
             error_sim_size,
         ),
 
         build_resynthesis_optimization_workflow(
-            4,
+            3,
             synthesis_epsilon,
-            max_synthesis_size,
+            4, # Fix to 4
             error_threshold,
             error_sim_size,
-            True,
+            False,
         ),
 
         build_single_qudit_retarget_workflow(
             4,
             synthesis_epsilon,
-            max_synthesis_size,
+            4, # Fix to 4
             error_threshold,
             error_sim_size,
         ),
 
-        build_gate_deletion_optimization_workflow(
-            4,
-            synthesis_epsilon,
-            max_synthesis_size,
-            error_threshold,
-            error_sim_size,
-            True,
-        ),
+        # Run Alon's workflow in separate job
+
+        # build_gate_deletion_optimization_workflow(
+        #     4,
+        #     synthesis_epsilon,
+        #     max_synthesis_size,
+        #     error_threshold,
+        #     error_sim_size,
+        #     True,
+        # ),
 
         # Finalizing
         LogErrorPass(),
