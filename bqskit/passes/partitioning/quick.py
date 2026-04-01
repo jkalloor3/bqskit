@@ -8,7 +8,7 @@ from typing import Sequence
 from bqskit.compiler.basepass import BasePass
 from bqskit.compiler.passdata import PassData
 from bqskit.ir.circuit import Circuit
-from bqskit.ir.gates import MeasurementPlaceholder
+from bqskit.ir.gates import MeasurementPlaceholder, MidCircuitMeasurement
 from bqskit.ir.gates import Reset
 from bqskit.ir.gates.barrier import BarrierPlaceholder
 from bqskit.ir.gates.circuitgate import CircuitGate
@@ -124,6 +124,7 @@ class QuickPartitioner(BasePass):
                                         BarrierPlaceholder,
                                         MeasurementPlaceholder,
                                         Reset,
+                                        MidCircuitMeasurement,
                                     ),
                                 ):
                                     # Don't merge through barriers,
@@ -193,6 +194,7 @@ class QuickPartitioner(BasePass):
                     BarrierPlaceholder,
                     MeasurementPlaceholder,
                     Reset,
+                    MidCircuitMeasurement
                 ),
             ):
                 for bin in overlapping_bins:

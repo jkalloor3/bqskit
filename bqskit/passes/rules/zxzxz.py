@@ -8,6 +8,8 @@ import numpy as np
 from bqskit.compiler.basepass import BasePass
 from bqskit.compiler.passdata import PassData
 from bqskit.ir.circuit import Circuit
+from bqskit.ir.gates.constant.h import HGate
+from bqskit.ir.gates.constant.s import SGate
 from bqskit.ir.gates.constant.sx import SqrtXGate
 from bqskit.ir.gates.parameterized.rx import RXGate
 from bqskit.ir.gates.parameterized.rz import RZGate
@@ -94,7 +96,10 @@ class ZXZXZDecomposition(BasePass):
         if use_rx:
             new_circuit.append_gate(RXGate(), 0, [np.pi / 2])
         else:
-            new_circuit.append_gate(SqrtXGate(), 0)
+            # new_circuit.append_gate(SqrtXGate(), 0)
+            new_circuit.append_gate(HGate(), 0)
+            new_circuit.append_gate(SGate(), 0)
+            new_circuit.append_gate(HGate(), 0)
 
         if use_u1:
             new_circuit.append_gate(U1Gate(), 0, [t])
@@ -104,7 +109,10 @@ class ZXZXZDecomposition(BasePass):
         if use_rx:
             new_circuit.append_gate(RXGate(), 0, [np.pi / 2])
         else:
-            new_circuit.append_gate(SqrtXGate(), 0)
+            # new_circuit.append_gate(SqrtXGate(), 0)
+            new_circuit.append_gate(HGate(), 0)
+            new_circuit.append_gate(SGate(), 0)
+            new_circuit.append_gate(HGate(), 0)
 
         if use_u1:
             new_circuit.append_gate(U1Gate(), 0, [p])

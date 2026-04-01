@@ -9,6 +9,7 @@ from bqskit.passes.rules.cy2cnot import CYToCNOTPass
 from bqskit.passes.rules.swap2cnot import SwapToCNOTPass
 from bqskit.passes.rules.u3 import U3Decomposition
 from bqskit.passes.rules.zxzxz import ZXZXZDecomposition
+from bqskit.passes.rules.u12rz import U1ToRZPass
 
 __all__ = [
     'CHToCNOTPass',
@@ -19,4 +20,5 @@ __all__ = [
     'SwapToCNOTPass',
     'U3Decomposition',
     'ZXZXZDecomposition',
+    'U1ToRZPass',
 ]

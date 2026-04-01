@@ -51,6 +51,7 @@ from bqskit.ir.gates.constant.yy import YYGate
 from bqskit.ir.gates.constant.z import ZGate
 from bqskit.ir.gates.constant.zz import ZZGate
 from bqskit.ir.gates.measure import MeasurementPlaceholder
+from bqskit.ir.gates.measure import MidCircuitMeasurement
 from bqskit.ir.gates.parameterized.ccp import CCPGate
 from bqskit.ir.gates.parameterized.cp import CPGate
 from bqskit.ir.gates.parameterized.crx import CRXGate

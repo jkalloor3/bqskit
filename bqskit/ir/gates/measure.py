@@ -64,3 +64,56 @@ class MeasurementPlaceholder(Gate):
 
     def __hash__(self) -> int:
         return hash(tuple(self.classical_regs))
+
+class MidCircuitMeasurement(Gate):
+    """Pseudogate to hold mid-circuit measurement information."""
+
+    def __init__(
+        self,
+        classical_reg: str,
+    ) -> None:
+        """
+        Construct a Mid-Circuit Measurement.
+
+        Args:
+            classical_regs (list[tuple[str, int]]): A list of classical
+                register descriptors. Each one is given as a tuple containing
+                its name and size.
+
+            measurements (dict[int, tuple[str, int]]): A list of measurements
+                made. Measurements are given as a map of qudit index to
+                a tuple containing the classical register's name and index.
+        """
+        self._name = 'mid_circuit_measurement'
+        self._qasm_name = 'measure'
+        self._num_qudits = 1
+        self._radixes = tuple([2] * self._num_qudits)
+        self._num_params = 0
+        self.classical_reg = classical_reg
+
+    def get_unitary(self, params: RealVector = []) -> UnitaryMatrix:
+        raise RuntimeError(
+            'Cannot compute unitary for a measurement placeholder.'
+            ' Consider removing measurements either by calling'
+            ' `circuit.remove_measurements()` or by using the'
+            ' ExtractMeasurements and RestoreMeasurements passes.',
+        )
+
+    def get_qasm_gate_def(self) -> str:
+        """Declares the classical registers."""
+        ret = f'creg {self.classical_reg}[{self._num_qudits}];\n'
+        return ret
+
+    def get_qasm(self, params: RealVector, location: CircuitLocation) -> str:
+        assert len(location) == 1, 'Mid-circuit measurement can only be applied to one qudit.'
+        ret = f'measure q[{location[0]}] -> {self.classical_reg}[0];\n'
+        return ret
+
+    def __eq__(self, other: object) -> bool:
+        return (
+            isinstance(other, MidCircuitMeasurement)
+            and other.classical_reg == self.classical_reg
+        )
+
+    def __hash__(self) -> int:
+        return hash(self.classical_reg)
