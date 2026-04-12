@@ -40,3 +40,4 @@ from .samplers import EnsembleSampler
 from .dm_runner import DensityMatrixRunner, EnsembleDMRunner
 from .diverse_ensemble_pass import DefaultGGEnsemblePass
 from .experiment_util import *
+from .noisy_dm_pass import *

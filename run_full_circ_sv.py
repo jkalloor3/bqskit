@@ -1,3 +1,5 @@
+import glob
+from pathlib import Path
 from bqskit.ir.circuit import Circuit
 from bqskit.ir.gates import CircuitGate
 from sys import argv
@@ -15,6 +17,17 @@ from util.common import load_circuit
 from util.unitary_dm_pass import DMEvaluator
 from util.hamiltonian import generate_hamiltonian, generate_init_state
 
+def get_sub_block_nums(block_num: str,
+                       checkpoint_folder: str) -> list[str]:
+    sub_block_path = f"{checkpoint_folder}_{block_num}_*/block_*.data"
+    sub_block_files = glob.glob(sub_block_path)
+    sub_block_nums = set()
+    for sub_block_file in sub_block_files:
+        sub_block_num = Path(sub_block_file).name.split("_")[-1].split(".")[0]
+        sub_block_nums.add(sub_block_num)
+    sub_block_nums = sorted(list(sub_block_nums))
+    return sub_block_nums
+
 # Get partitioned circuits for all 8-qubit blocks
 def partition_circs(compiler: Compiler,
                     circ_name, 
@@ -27,6 +40,31 @@ def partition_circs(compiler: Compiler,
     circ = Circuit.from_file(circ_file)
     return compiler.submit(circ, workflow=workflow)
 
+
+def get_new_partitioned_data(missing_circ_names: list[str],
+                             base_checkpoint_dir: str) -> dict[str, tuple[dict[str, Circuit], Circuit]]:
+    new_partitioned_data = {}
+    for circ_name in missing_circ_names:
+        all_partitioned_ids[circ_name] = {}
+        for large_block_num in get_block_names(circ_name, extra="_tket"):
+            id = partition_circs(compiler, circ_name, large_block_num)
+            
+            all_partitioned_ids[circ_name][large_block_num] = id
+        
+        new_partitioned_data[circ_name] = {}
+        checkpoint_folder_form = f"{base_checkpoint_dir}/{circ_name}" + "_{large_block_num}_" + f"*/"
+        for large_block_num in get_block_names(circ_name, extra="_tket"):
+            out_circ = compiler.result(all_partitioned_ids[circ_name][large_block_num])
+            base_dir = checkpoint_folder_form.format(large_block_num=large_block_num)
+            sub_block_names = get_sub_block_nums(base_dir)
+            assert out_circ.num_operations == len(sub_block_names), f"Number of operations in circuit {circ_name} does not match number of sub-blocks: {out_circ.num_operations} != {len(sub_block_names)}"
+            sub_block_circs = {}
+            for i, op in enumerate(out_circ.operations()):
+                assert isinstance(op.gate, CircuitGate)
+                block_name = sub_block_names[i]
+                sub_block_circs[block_name] = op.gate._circuit
+            new_partitioned_data[circ_name][large_block_num] = (sub_block_circs, 
+                                                                out_circ)
 
 if __name__ == "__main__":
     # circ_names = ["heisenberg7", "qaoa10"]
@@ -57,26 +95,12 @@ if __name__ == "__main__":
         missing_circ_names = [name for name in circ_names if name not in all_partitioned_data]
     
     print(f"Missing circ names: {missing_circ_names}", flush=True)
-    for circ_name in missing_circ_names:
-        all_partitioned_ids[circ_name] = {}
-        for large_block_num in get_block_names(circ_name, extra="_tket"):
-            id = partition_circs(compiler, circ_name, large_block_num)
-            
-            all_partitioned_ids[circ_name][large_block_num] = id
-        
-        all_partitioned_data[circ_name] = {}
-        checkpoint_folder_form = f"{base_checkpoint_dir}/{circ_name}" + "_{large_block_num}_" + f"*/"
-        for large_block_num in get_block_names(circ_name, extra="_tket"):
-            out_circ = compiler.result(all_partitioned_ids[circ_name][large_block_num])
-            base_dir = checkpoint_folder_form.format(large_block_num=large_block_num)
-            sub_block_names = get_sub_block_nums(base_dir)
-            assert out_circ.num_operations == len(sub_block_names), f"Number of operations in circuit {circ_name} does not match number of sub-blocks: {out_circ.num_operations} != {len(sub_block_names)}"
-            sub_block_circs = {}
-            for i, op in enumerate(out_circ.operations()):
-                assert isinstance(op.gate, CircuitGate)
-                block_name = sub_block_names[i]
-                sub_block_circs[block_name] = op.gate._circuit
-            all_partitioned_data[circ_name][large_block_num] = (sub_block_circs, out_circ)
+    new_partitioned_data = get_new_partitioned_data(
+        missing_circ_names,
+        base_checkpoint_dir
+    )
+
+    all_partitioned_data.update(new_partitioned_data)
     
     with open(partitioned_data_file, "wb") as f:
         pickle.dump(all_partitioned_data, f)
@@ -88,10 +112,10 @@ if __name__ == "__main__":
     for circ_name in circ_names:
         full_circ = load_circuit(circ_name)
         full_circ.remove_all_measurements()
-        ham = None
-        init_sv = None
-        # ham = generate_hamiltonian(circ_name, full_circ.num_qudits)
-        # init_sv = generate_init_state(circ_name, full_circ.num_qudits)
+        # ham = None
+        # init_sv = None
+        ham = generate_hamiltonian(circ_name, full_circ.num_qudits)
+        init_sv = generate_init_state(circ_name, full_circ.num_qudits)
         # print(ham.shape, init_sv.shape, flush=True)
         for tol in [1.0, 2.0, 3.0, 4.0, 5.0]:
             checkpoint_folder_form = (base_checkpoint_dir +  
