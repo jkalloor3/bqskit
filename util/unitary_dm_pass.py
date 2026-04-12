@@ -75,7 +75,8 @@ class DMEvaluator(BasePass):
                  partitioned_circ_file: str = "",
                  save_dir = "",
                  cliff_t: bool = False,
-                 init_sv: StateVector = None) -> None:
+                 init_sv: StateVector = None,
+                 run_td_also: bool = False) -> None:
         self.circ_name = circ_name
         self.ham = ham
         self.max_tol = max_tol
@@ -91,21 +92,30 @@ class DMEvaluator(BasePass):
             checkpoint_form,
             partitioned_data
         )
-        print("Good Blocks: ", self.good_blocks)
         self.partitioned_data = update_partitioned_data(
             partitioned_data, self.good_blocks
         )
 
         self.block_runners: dict[tuple, tuple[DensityMatrixRunner, int]] = {}
         # Initialize a full circuit runner
-        self.full_circ_runner = generate_full_runner(
-            circ_name=self.circ_name,
-            max_tol=self.max_tol,
-            partitioned_data=self.partitioned_data,
-            checkpoint_form=self.checkpoint_form,
-            partitioned_circ_file=self.partitioned_circ_file,
-            cliff_t=self.cliff_t
-        )
+        if self.num_good_blocks > 0:
+            print("Good Blocks: ", self.good_blocks)
+            print(list(partitioned_data.keys()), flush=True)
+            self.full_circ_runner = generate_full_runner(
+                circ_name=self.circ_name,
+                max_tol=self.max_tol,
+                partitioned_data=self.partitioned_data,
+                checkpoint_form=self.checkpoint_form,
+                partitioned_circ_file=self.partitioned_circ_file,
+                cliff_t=self.cliff_t
+            )
+        self.run_td_also = run_td_also
+
+
+    async def initialize(self) -> None:
+        save_file = os.path.join(self.save_dir, f"{self.max_tol}_superop")
+        await self.full_circ_runner.initialize(save_file)
+        self.full_circ_runner.save(save_file)
 
     async def run_full_ensemble(self, svs: list[StateVector]) -> list[np.ndarray]:
         if len(svs) == 1:
@@ -115,11 +125,6 @@ class DMEvaluator(BasePass):
         if os.path.exists(ens_data_file):
             print(f"Ensemble data file {ens_data_file} already exists, skipping.", flush=True)
             return
-        
-        save_file = os.path.join(self.save_dir, f"{self.max_tol}_superop")
-        await self.full_circ_runner.initialize(save_file)
-
-        self.full_circ_runner.save(save_file)
 
         num_qubits = svs[0].num_qudits
         rho_ins = [get_density_matrix(sv.numpy) for sv in svs]
@@ -131,27 +136,26 @@ class DMEvaluator(BasePass):
             print(f"No good blocks found for {self.circ_name} at tol {self.max_tol}, skipping.", flush=True)
             return
 
+        await self.initialize()
+
         if self.ham is not None:
             print(f"Hamiltonian shape: {self.ham.shape}", flush=True)
             rho_outs = await self.run_full_ensemble([self.init_sv])
-            if rho_outs is None:
-                return
-            rho = rho_outs[0]
-            final_data = [(rho, self.init_sv)]
-        else:
+            if rho_outs is not None:
+                rho = rho_outs[0]
+                final_data = [(rho, self.init_sv)]
+                file_name = os.path.join(self.save_dir, f"{self.max_tol}_rho_out.pkl")
+                Path(file_name).parent.mkdir(parents=True, exist_ok=True)
+                pickle.dump(final_data, open(file_name, "wb"))
+
+        if (self.ham is None) or self.run_td_also:
             # Otherwise, run full circuit with ensemble
             rand_svs = [StateVector.random(circ.num_qudits) for _ in range(NUM_SAMPLES)]
             final_rho_outs = await self.run_full_ensemble(rand_svs)
             if final_rho_outs is None:
                 return
             final_data = list(zip(final_rho_outs, rand_svs))
-        
-        print(f"Final data length: {len(final_data)}", flush=True)
-
-        # Save output rho
-        if len(final_data) == 1:
-            file_name = os.path.join(self.save_dir, f"{self.max_tol}_rho_out.pkl")
-        else:
+            print(f"Final data length: {len(final_data)}", flush=True)
             file_name = os.path.join(self.save_dir, f"{self.max_tol}_rho_outs.pkl")
-        Path(file_name).parent.mkdir(parents=True, exist_ok=True)
-        pickle.dump(final_data, open(file_name, "wb"))
+            Path(file_name).parent.mkdir(parents=True, exist_ok=True)
+            pickle.dump(final_data, open(file_name, "wb"))

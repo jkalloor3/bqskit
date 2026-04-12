@@ -92,6 +92,18 @@ def generate_tfim_hamiltonian(num_qubits: int) -> np.ndarray:
     op = SparsePauliOp.from_list(He + Hb)
     return op.to_matrix()
 
+def generate_heisenberg_particle_num_hamiltonian(n_qubits: int) -> np.ndarray:
+    # --- Total Sz = (1/2) * sum_i Z_i ---
+    sz_terms = []
+    for i in range(n_qubits):
+        pauli = ['I'] * n_qubits
+        pauli[i] = 'Z'
+        sz_terms.append((''.join(pauli[::-1]), 0.5))
+
+    Sz = SparsePauliOp.from_list(sz_terms).simplify()
+    Sz_mat = Sz.to_matrix()
+    return Sz_mat
+
 def generate_heisenberg_hamiltonian(num_qubits: int) -> np.ndarray:
     '''
     Heisenberg Hamiltonian:
@@ -115,10 +127,15 @@ def generate_heisenberg_hamiltonian(num_qubits: int) -> np.ndarray:
     op = SparsePauliOp.from_list(He)
     return op.to_matrix()
 
-def generate_hamiltonian(circ_name: str, num_qubits: int) -> np.ndarray:
+def generate_hamiltonian(circ_name: str, num_qubits: int,
+                         particle_number: bool = False,
+                         spin_projection: bool = False) -> np.ndarray:
     '''
     Generate the Hamiltonian for a given circuit name.
     '''
+    # Assert only one of particle_number and spin_projection can be true
+    assert not (particle_number and spin_projection), "Only one of particle_number and spin_projection can be set"
+
     if circ_name.startswith('lgt'):
         return generate_lgt_hamiltonian(num_qubits, 2)
     elif circ_name.startswith('QITE'):
@@ -128,7 +145,13 @@ def generate_hamiltonian(circ_name: str, num_qubits: int) -> np.ndarray:
     elif ("Fermi" in circ_name or "H_" in circ_name):
         # Remove _long from circ_name if it exists
         circ_name = circ_name.replace("_long", "")
-        return pickle.load(open(f"out_hamiltonians/{circ_name}.pkl", "rb"))
+        if spin_projection:
+            extra = "_Sz"
+        elif particle_number:
+            extra = "_N"
+        else:
+            extra = ""
+        return pickle.load(open(f"out_hamiltonians/{circ_name}{extra}.pkl", "rb"))
     else:
         return None
 

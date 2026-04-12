@@ -13,8 +13,8 @@ from bqskit.compiler import Compiler
 
 from util.counter import GateCounter
 from util.distance import trace_distance, get_density_matrix, get_corrected_un
-from util.common import (get_block_names, get_file_names, load_circuit, 
-                         load_jiggled_ensemble, check_good, DEFAULT_RATIO_LIMIT)
+from util.common import load_circuit, load_jiggled_ensemble
+from util.experiment_util import get_good_blocks, get_file_names
 from util.samplers import EnsembleSampler
 
 
@@ -31,11 +31,12 @@ NUM_RANDOM_SEEDS = 10
 if cliff_t:
     # print("Using cliff-t circuits", flush=True)
     base_checkpoint_dir = "small_block_checkpoints_final_paper_4_clifft_tket"
-    partitioned_data_file = "partitioned_data_all_clifft_circs.pickle"
+    # partitioned_data_file = "partitioned_data_all_clifft_circs.pickle"
 else:
     # print("Using non-cliff-t circuits", flush=True)
     base_checkpoint_dir = "small_block_checkpoints_final_paper_4_more_cx_tket"
-    partitioned_data_file = "partitioned_data_all_circs.pickle"
+
+partitioned_data_file = "partitioned_data_all_circs.pickle"
 
 base_dir_form = os.path.join(base_checkpoint_dir, "{circ_name}_{large_block_num}_" + "{tol}/")
 # Get partitioned circuits for all 8-qubit blocks
@@ -65,8 +66,8 @@ def generate_large_block_circ(circ_name: str,
         files = get_file_names(
             base_dir_form.format(circ_name=circ_name, large_block_num=large_block_num, tol=tol),
             good_block
-        )
-        all_circ_params = load_jiggled_ensemble(*files[:-1])
+        )[:-1]  # Exclude csv file
+        all_circ_params = load_jiggled_ensemble(*files)
         circ_samplers[good_block] = EnsembleSampler(all_circ_params, 
                                                     cliff_t=cliff_t)
     
@@ -95,7 +96,7 @@ def generate_large_block_circ(circ_name: str,
             # print("Sampling small block:", small_block_num, flush=True)
             small_circ = next(circ_samplers[small_block_num])
             block_un.apply_right(small_circ.get_unitary(), op.location)
-        yield get_corrected_un(block_un.get_unitary(), target)
+        yield block_un.get_unitary()
 
 def generate_full_circ(circ_name: str, 
                        big_partitioned_circ: Circuit,
@@ -185,7 +186,7 @@ class FullCircTDPass(BasePass):
         self.num_qudits = num_qudits
         self.rand_svs = [StateVector.random(num_qudits) for _ in range(NUM_RANDOM_SEEDS)]
         self.partitioned_circ = partitioned_circ
-        self.good_blocks = get_good_blocks(circ_name=circ_name,
+        self.good_blocks, _ = get_good_blocks(circ_name=circ_name,
                                            tol=tol,
                                            cliff_t=cliff_t,
                                            checkpoint_folder_form=checkpoint_folder_form,
@@ -250,16 +251,17 @@ class FullCircTDPass(BasePass):
 
         un_futs = {}
         for ens_size in self.ens_sizes:
-            output_file = f"ensemble_td_convergences_final/{self.circ_name}_{ens_size}_{self.tol}.pkl"
+            output_file = f"ensemble_td_convergences_final_3/{self.circ_name}_{ens_size}_{self.tol}.pkl"
             if os.path.exists(output_file):
+                print(f"Data for ensemble size {ens_size} already exists, skipping...", flush=True)
                 continue
             print(f"Calculating Data for ensemble size {ens_size}", flush=True)
-            tds_fut = get_runtime().map(self.get_trial_td, [ens_size] * self.num_trials)
-            un_futs[ens_size] = tds_fut
-
-        for ens_size in un_futs:
             sampler_start = time.time()
-            all_data = await un_futs[ens_size]
+            all_data = await get_runtime().map(self.get_trial_td, [ens_size] * self.num_trials)
+            # un_futs[ens_size] = tds_fut
+        # for ens_size in un_futs:
+            # sampler_start = time.time()
+            # all_data = await un_futs[ens_size]
             # tds is a list of arrays of shape (ens_size, )
             sample_time = time.time() - sampler_start
             print(f"Sampled average unitaries for ensemble size {ens_size} in {sample_time:.2f} seconds", flush=True)
@@ -268,7 +270,7 @@ class FullCircTDPass(BasePass):
             
             td_time = time.time() - sampler_start
             print(f"Calculated data for ensemble size {ens_size} in {td_time:.2f} seconds", flush=True)
-            output_file = f"ensemble_td_convergences_final/{self.circ_name}_{ens_size}_{self.tol}.pkl"
+            output_file = f"ensemble_td_convergences_final_3/{self.circ_name}_{ens_size}_{self.tol}.pkl"
             Path(output_file).parent.mkdir(parents=True, exist_ok=True)
             with open(output_file, 'wb') as f:
                 pickle.dump(all_data, f)
@@ -277,15 +279,11 @@ class FullCircTDPass(BasePass):
 if __name__ == "__main__":
     circ_name = argv[1]
     tol = float(argv[2])
-    # if tol >= 1:
-    #     tols = [4.0, 5.0]
-    # else:
-    #     tols = [1.0, 2.0, 3.0]
     tols = [tol]
     small_ens = bool(int(argv[3])) if len(argv) > 3 else False
     # run_td = bool(int(argv[4])) if len(argv) > 4 else True
     run_td = True
-    compiler = Compiler(num_workers=256)
+    compiler = Compiler(num_workers=-1)
     cliff_t = False
 
     all_partitioned_data = pickle.load(open(partitioned_data_file, "rb"))
@@ -318,11 +316,13 @@ if __name__ == "__main__":
             cliff_t=cliff_t
         )
     
-        id = compiler.submit(full_circ, [ens_pass])
-        ids.append(id)
+        # id = compiler.submit(full_circ, [ens_pass])
+        # ids.append(id)
+        compiler.compile(full_circ, [ens_pass])
     
-    for id in ids:
-        compiler.result(id)
+    # for id in ids:
+    #     print(f"Waiting for result of job id {id}", flush=True)
+    #     compiler.result(id)
     compiler.close()
 
     

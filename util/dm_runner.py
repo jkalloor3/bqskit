@@ -54,13 +54,12 @@ def generate_full_runner(circ_name: str,
     """Generate a DensityMatrixRunner for the full circuit."""
 
     # First create all of the large block runners
-    large_block_nums = get_block_names(circ_name=circ_name, extra="_tket")
+    large_block_nums = list(partitioned_data.keys())
 
     # Now get the corresponding CircuitPoints
     full_circ: Circuit = pickle.load(open(partitioned_circ_file, "rb"))
     num_digits = len(str(full_circ.num_operations))
     block_runners = {}
-
     for i, (cycle, op) in enumerate(full_circ.operations_with_cycles()):
         block_num = str(i).zfill(num_digits)
         if block_num in large_block_nums:
