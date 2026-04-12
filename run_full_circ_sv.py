@@ -1,3 +1,5 @@
+from pathlib import Path
+
 from bqskit.ir.circuit import Circuit
 from bqskit.ir.gates import CircuitGate
 from sys import argv
@@ -89,16 +91,29 @@ if __name__ == "__main__":
 
     print("Circ names to process:", circ_names, flush=True)
 
+    particle_number = True
+    spin_projection = False
+
     for circ_name in circ_names:
         full_circ = load_circuit(circ_name)
         full_circ.remove_all_measurements()
-        ham = generate_hamiltonian(circ_name, full_circ.num_qudits)
+        ham = generate_hamiltonian(circ_name, full_circ.num_qudits,
+                                   particle_number=particle_number,
+                                   spin_projection=spin_projection)
         init_sv = generate_init_state(circ_name, full_circ.num_qudits)
         for tol in [1.0, 2.0, 3.0, 4.0, 5.0]:
             checkpoint_folder_form = (base_checkpoint_dir +  
                                     f"/{circ_name}_" + 
                                     "{large_block_num}" +
                                     f"_{tol}/")
+            
+            save_dir=f"ensemble_dms_{circ_name}{cliff_t_string}_final",
+            if particle_number:
+                save_dir += "_N"
+            elif spin_projection:
+                save_dir += "_Sz"
+
+            Path(save_dir).mkdir(exist_ok=True)
             workflow = [
                 DMEvaluator(
                     circ_name=circ_name,
@@ -107,10 +122,10 @@ if __name__ == "__main__":
                     checkpoint_form=checkpoint_folder_form,
                     ham=ham,
                     partitioned_circ_file=f"partitioned_circs/{circ_name}.pickle",
-                    save_dir=f"ensemble_dms_{circ_name}{cliff_t_string}_final_2/",
+                    save_dir=save_dir,
                     cliff_t=cliff_t,
                     init_sv=init_sv,
-                    run_td_also=True,
+                    run_td_also=False,
                 )
             ]
             # Await the result before starting a new one
