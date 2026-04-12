@@ -14,6 +14,8 @@ from common.io import (load_block, get_block_names)
 from util.common import load_circuit
 from util.unitary_dm_pass import DMEvaluator
 from util.hamiltonian import generate_hamiltonian, generate_init_state
+from util.experiment_util import get_block_names, get_sub_block_nums
+
 
 # Get partitioned circuits for all 8-qubit blocks
 def partition_circs(compiler: Compiler,
@@ -21,7 +23,7 @@ def partition_circs(compiler: Compiler,
                     block_num: str) -> tuple[dict[str, Circuit], Circuit]:
     workflow = [
         ScanPartitioner(4),
-        # ExtendBlockSizePass(4),
+        ExtendBlockSizePass(4),
     ]
     circ_file = load_block(circ_name, block_num, extra="_tket")
     circ = Circuit.from_file(circ_file)
@@ -32,12 +34,12 @@ if __name__ == "__main__":
     # circ_names = ["heisenberg7", "qaoa10"]
     circ_name = argv[1]
     circ_names = [circ_name]
-    compiler = Compiler('localhost')
+    compiler = Compiler(num_workers=-1)
 
     all_partitioned_ids = {}
     all_partitioned_data = {}
 
-    cliff_t = True
+    cliff_t = False
     cliff_t_string = "_clifft" if cliff_t else ""
     if cliff_t:
         print("Using cliff-t circuits", flush=True)
@@ -70,12 +72,14 @@ if __name__ == "__main__":
             out_circ = compiler.result(all_partitioned_ids[circ_name][large_block_num])
             base_dir = checkpoint_folder_form.format(large_block_num=large_block_num)
             sub_block_names = get_sub_block_nums(base_dir)
-            assert out_circ.num_operations == len(sub_block_names), f"Number of operations in circuit {circ_name} does not match number of sub-blocks: {out_circ.num_operations} != {len(sub_block_names)}"
+            print(f"Large block {large_block_num} has sub-blocks: {sub_block_names}", flush=True)
+            assert out_circ.num_operations >= len(sub_block_names), f"Number of operations in circuit {circ_name} does not match number of sub-blocks: {out_circ.num_operations} != {len(sub_block_names)}"
             sub_block_circs = {}
             for i, op in enumerate(out_circ.operations()):
                 assert isinstance(op.gate, CircuitGate)
-                block_name = sub_block_names[i]
-                sub_block_circs[block_name] = op.gate._circuit
+                if i in sub_block_names:
+                    block_name = sub_block_names[i]
+                    sub_block_circs[block_name] = op.gate._circuit
             all_partitioned_data[circ_name][large_block_num] = (sub_block_circs, out_circ)
     
     with open(partitioned_data_file, "wb") as f:
@@ -88,16 +92,13 @@ if __name__ == "__main__":
     for circ_name in circ_names:
         full_circ = load_circuit(circ_name)
         full_circ.remove_all_measurements()
-        ham = None
-        init_sv = None
-        # ham = generate_hamiltonian(circ_name, full_circ.num_qudits)
-        # init_sv = generate_init_state(circ_name, full_circ.num_qudits)
-        # print(ham.shape, init_sv.shape, flush=True)
+        ham = generate_hamiltonian(circ_name, full_circ.num_qudits)
+        init_sv = generate_init_state(circ_name, full_circ.num_qudits)
         for tol in [1.0, 2.0, 3.0, 4.0, 5.0]:
             checkpoint_folder_form = (base_checkpoint_dir +  
-                                      f"/{circ_name}_" + 
-                                      "{large_block_num}" +
-                                      f"_{tol}/")
+                                    f"/{circ_name}_" + 
+                                    "{large_block_num}" +
+                                    f"_{tol}/")
             workflow = [
                 DMEvaluator(
                     circ_name=circ_name,
@@ -106,15 +107,17 @@ if __name__ == "__main__":
                     checkpoint_form=checkpoint_folder_form,
                     ham=ham,
                     partitioned_circ_file=f"partitioned_circs/{circ_name}.pickle",
-                    save_dir=f"ensemble_dms_{circ_name}{cliff_t_string}_final_40/",
+                    save_dir=f"ensemble_dms_{circ_name}{cliff_t_string}_final_2/",
                     cliff_t=cliff_t,
                     init_sv=init_sv,
+                    run_td_also=True,
                 )
             ]
             # Await the result before starting a new one
-            compiler.compile(full_circ, workflow=workflow)
+            id = compiler.submit(full_circ, workflow=workflow)
+            compiler_ids.append(id)
 
-    # for id in compiler_ids:
-    #     compiler.result(id)
+    for id in compiler_ids:
+        compiler.result(id)
 
-    # compiler.close()
+    compiler.close()

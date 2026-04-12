@@ -11,9 +11,9 @@ from typing import Generator
 
 from bqskit.compiler import Compiler
 
-from util.counter import GateCounter, load_avg_ensemble_counts_full
-from util.distance import trace_distance, get_density_matrix, get_corrected_un, operator_norm
-from util.common import get_block_names, get_file_names, load_circuit, load_jiggled_ensemble
+from util.experiment_util import get_good_blocks, get_file_names
+from util.distance import trace_distance, get_density_matrix, operator_norm
+from util.common import  load_jiggled_ensemble
 from util.samplers import EnsembleUnitarySampler
 
 
@@ -39,53 +39,6 @@ else:
 base_dir_form = os.path.join(base_checkpoint_dir, "{circ_name}_{large_block_num}_" + "{tol}/")
 # Get partitioned circuits for all 8-qubit blocks
 
-def get_sub_block_count(large_block_dir: str,
-                        small_block_num: str,
-                        tol: float,
-                        cliff_t: bool = False) -> tuple[bool, int]:
-    qasm_file, jiggle_file, cache_file, _, csv_file = get_file_names(large_block_dir,
-                                                   small_block_num)
-    # Read CSV file, if the ratio is < 20 then we can read counts
-    # print(qasm_file, csv_file, flush=True)
-    if not os.path.exists(csv_file):        # print(f"CSV file {csv_file} does not exist.", flush=True)
-        return False, 0
-
-    # Now we need to check if the ratio is less than 20
-    max_ratio = min(20, (10 ** (tol) / 4))
-
-    with open(csv_file, 'r') as f:
-        reader = csv.DictReader(f)
-        min_ratio = float("inf")
-        final_frob_cost = float("inf")
-        for row in reader:
-            if "Ratio" in row:  # Check if the column value is not empty
-                # Check if distance is less than 3* 10^(-tol)
-                max_dist = max_ratio * (10 ** (-tol))
-                dist = float(row["Epsilon"])
-                if dist > max_dist:
-                    continue
-                min_ratio = min(min_ratio, float(row["Ratio"]))
-                final_frob_cost = min(final_frob_cost, float(row["Norm. Bias"]))
-
-
-    if min_ratio > max_ratio:
-        # print(f"Skipping {small_block_num} as ratio is too high: {min_ratio}", flush=True)
-        return False, 0
-    
-    # Now we need to get the avg. number of CNOTs
-    if not cliff_t:
-        qasm_str = open(qasm_file, 'r').read()
-        count = qasm_str.count("cx ")
-        num_circs = qasm_str.count("BREAK") + 1
-        count = count / num_circs
-    else:
-        print("Cliff-t count", cliff_t, flush=True)
-        count = load_avg_ensemble_counts_full(qasm_file, jiggle_file, 
-                                              cache_file, target_error=(10 ** (-tol)),
-                                              count_t=True)
-
-    return True, count
-
 
 def get_final_dm(circs: list[Circuit], sv: StateVector) -> np.ndarray:
     '''
@@ -100,7 +53,7 @@ def get_final_dm(circs: list[Circuit], sv: StateVector) -> np.ndarray:
     avg_dm /= len(circs)
     return avg_dm
 
-def get_good_blocks(circ_name, tol, cliff_t,
+def get_good_block_sizes(circ_name, tol, cliff_t,
                     checkpoint_folder_form: str,
                     partitioned_data: dict) -> dict[tuple[str, str], int]:
     '''
@@ -108,29 +61,18 @@ def get_good_blocks(circ_name, tol, cliff_t,
     
     checkpoint_folder_form: The form of the checkpoint folder path.
     '''
-    good_blocks = {}
-    counter = GateCounter(est=False, cache_file=None)
-    max_ratio = min(20, (10 ** (tol) / 4))
-    for large_block_num in get_block_names(circ_name, extra="_tket"):
+    good_blocks, _ = get_good_blocks(circ_name=circ_name,
+                                  tol=tol,
+                                  cliff_t=cliff_t,
+                                  checkpoint_folder_form=checkpoint_folder_form,
+                                  partitioned_data=partitioned_data)
+    good_blocks_sizes = {}
+    for large_block_num in good_blocks:
         small_block_circs, _ = partitioned_data[large_block_num]
-        large_block_dir = checkpoint_folder_form.format(large_block_num=large_block_num)
-        for small_block_num, small_circ in small_block_circs.items():
-            # print(f"Small Block: {small_block_num} in {large_block_num}", flush=True)
-            good, count = get_sub_block_count(large_block_dir, 
-                                                small_block_num, tol, cliff_t)
-            if cliff_t:
-                original_count = counter.count_t(small_circ, target_error=(10 ** (- 2 * tol) * max_ratio))
-            else:
-                # Count CNOTs in the circuit
-                original_count = counter.count_cx(small_circ)
-            if not good:
-                continue
-            elif count > original_count:
-                continue
-            else:
-                # Use block
-                good_blocks[(large_block_num, small_block_num)] = small_circ.num_qudits
-    return good_blocks
+        for small_block_num in good_blocks[large_block_num]:
+            small_circ: Circuit = small_block_circs[small_block_num]
+            good_blocks_sizes[(large_block_num, small_block_num)] = small_circ.num_qudits
+    return good_blocks_sizes
 
 
 def get_ens_td(un: np.ndarray, rand_sv: np.ndarray, true_dm: np.ndarray) -> float:
@@ -156,7 +98,7 @@ class FullCircvRPass(BasePass):
         super().__init__()
         self.circ_name = circ_name
         self.tol = tol
-        self.good_blocks = get_good_blocks(circ_name=circ_name,
+        self.good_blocks_sizes = get_good_block_sizes(circ_name=circ_name,
                                            tol=tol,
                                            cliff_t=cliff_t,
                                            checkpoint_folder_form=checkpoint_folder_form,
@@ -233,12 +175,12 @@ class FullCircvRPass(BasePass):
 
     async def run(self, circ: Circuit, data: PassData) -> None:
 
-        output_file = f"ensemble_vRs_final/{self.circ_name}_{self.tol}.pkl"
+        output_file = f"ensemble_vRs_final_2/{self.circ_name}_{self.tol}.pkl"
         if os.path.exists(output_file):
             print(f"File {output_file} already exists. Skipping.", flush=True)
             return
         
-        block_nums = list(self.good_blocks.keys())
+        block_nums = list(self.good_blocks_sizes.keys())
 
         if len(block_nums) == 0:
             print(f"No good blocks found for {self.circ_name} with tol {self.tol}. Skipping.", flush=True)
@@ -248,7 +190,7 @@ class FullCircvRPass(BasePass):
         svs = []
 
         for block_num in block_nums:
-            sv = StateVector.random(self.good_blocks[block_num])
+            sv = StateVector.random(self.good_blocks_sizes[block_num])
             svs.append(sv)
             rho_bars_fut.append(self.get_rho_bar_block(block_num, sv))
 
@@ -292,7 +234,6 @@ if __name__ == "__main__":
                 cliff_t=cliff_t
             )
             
-            # compiler.compile(Circuit(2), [ens_pass])
             id = compiler.submit(circuit=Circuit(7), workflow=[ens_pass])
             ids.append(id)
 
