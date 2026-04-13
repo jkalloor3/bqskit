@@ -1,3 +1,4 @@
+import json
 from sys import argv
 import os
 import csv
@@ -18,18 +19,14 @@ plot_circs = ["heisenberg7", "qaoa10", "LiH_jw_long", "qae33", "lgt_380"]
 base_circs += ["add17", "lgt_17", "qae13", "qpe_14", "mult16", "draper_adder_12", "qae11", "qaoa10"]
 large_circs = ["qae33", "qaoa_148", "lgt_380"]
 
-all_circs = ["heisenberg7", "FermiHubbard2x2_jw_long", "LiH_jw_long", "qaoa10", "qae13", "qpe_14", "mult16", "lgt_17"]
-# all_circs = ["qae13"]
+# all_circs = ["draper_adder_12"]
+all_circs = ["heisenberg7", "FermiHubbard2x2_jw_long", "LiH_jw_long", "draper_adder_12", "qaoa10", "qae13", "qpe_14", "mult16", "lgt_17"]
 all_circs += large_circs
 # all_circs = ["qaoa10", "heisenberg7", "FermiHubbard2x2_jw_long", "LiH_jw_long", "qaoa10", "qae13", "qpe_14"]
 # all_circs = ["heisenberg7", "FermiHubbard2x2_jw_long", "qaoa10"]
 
 
-NO_QP = False
-if NO_QP:
-    block_csv_form = "{circ}_*/block_*no_qp.csv"
-else:
-    block_csv_form = "{circ}_*/block_*fw_2*.csv"
+block_csv_form = "{circ}_*/block_*fw_2*.csv"
 block_qasms_form = "{circ}_*/block_*/ensemble_final_fw.qasms"
 cx_counter = GateCounter(est=True)
 
@@ -96,6 +93,7 @@ def get_avg_count(checkpoints_dir: str,
 # Function to read data.csv from each folder
 def update_count_data(orig_cx_counts, checkpoints_dir, 
                       cliff_t: bool, default_ratio_limit: float) -> dict:
+    print("Updating count data from", checkpoints_dir, flush=True)
     for circ_name, block_data in orig_cx_counts.items():
         for (large_block_num, small_block_num) in block_data.keys():
             for tol in block_data[(large_block_num, small_block_num)].keys():
@@ -229,7 +227,7 @@ def get_orig_counts(circuits: list[str], cliff_t: bool = False,
     orig_cx_counts = {}
 
     cliff_t_text = "_cliff_t" if cliff_t else ""
-    save_file = f"orig_counts{cliff_t_text}.pickle"
+    save_file = f"orig_counts{cliff_t_text}_full.pickle"
 
     if os.path.exists(save_file):
         with open(save_file, 'rb') as f:
@@ -238,6 +236,8 @@ def get_orig_counts(circuits: list[str], cliff_t: bool = False,
         missing_circuits = [circ for circ in circuits if circ not in orig_cx_counts]
         if len(missing_circuits) == 0:
             print(f"Loaded original counts from {save_file}")
+            # Dump to JSON
+            # json.dump(orig_cx_counts, open(f"orig_counts{cliff_t_text}.json", 'w'), indent=4)
             return orig_cx_counts
         print(f"Missing circuits: {missing_circuits}, compiling those only")
         circuits = missing_circuits
@@ -319,12 +319,11 @@ def get_orig_counts(circuits: list[str], cliff_t: bool = False,
     return orig_cx_counts
 
 
-
 if __name__ == '__main__':
     # Collect data from all folders
     plot = True
-    cliff_t = False
-    bias = False
+    cliff_t = True
+    bias = True
 
     default_ratio_limit = float(argv[1])
 
@@ -351,20 +350,10 @@ if __name__ == '__main__':
     # print("Ratio data loaded", flush=True)
     if output_cx:
         # compiler = Compiler('localhost')
-        compiler = Compiler()
+        # compiler = Compiler()
+        compiler = None
         orig_counts = get_orig_counts(circs, cliff_t=cliff_t, compiler=compiler)
-
-        # for circ in circs:
-        #     for block_ind in orig_counts[circ].keys():
-        #         for tol in [1.0]:
-        #             if tol not in orig_counts[circ][block_ind]:
-        #                 print("Missing:", circ, block_ind, tol)
-        #             else:
-        #                 print("Found:", circ, block_ind, tol, orig_counts[circ][block_ind][tol])
-        # exit()
-
-
-        compiler.close()
+        # compiler.close()
         # Only use orig_counts for the circs we want
         orig_counts = {circ: orig_counts[circ] for circ in circs}
         print("Original counts loaded", flush=True)
@@ -378,15 +367,11 @@ if __name__ == '__main__':
         print("CX data loaded", flush=True)
         print("CX data more cx:", list(orig_counts.keys()), flush=True)
 
-    if NO_QP:
-        extra = "_no_qp"
-    else:
-        extra = ""
 
     if cliff_t:
-        extra += "_cliff"
+        extra = "_cliff"
     else:
-        extra += "_nisq"
+        extra = "_nisq"
 
     if plot:
         # Plot ratio data

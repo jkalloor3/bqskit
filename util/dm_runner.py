@@ -6,11 +6,14 @@ from pathlib import Path
 
 from bqskit.ir.circuit import Circuit, CircuitPoint, CircuitGate
 from bqskit.qis import UnitaryMatrix
+from bqskit.ir.gates import (TGate, TdgGate, ConstantGate, IdentityGate,
+                             XGate, YGate, ZGate)
 from bqskit.runtime import get_runtime
 from .samplers import get_single_rho, apply_superoperator, get_superop
 from .common import get_block_names, load_jiggled_ensemble
 from .experiment_util import get_file_names
 from .distance import frobenius_cost
+from .gg import GridSynthGate, get_t_gates_from_string
 
 def create_large_block_runner(circ_name: str,
                               large_block_num: str,
@@ -20,27 +23,17 @@ def create_large_block_runner(circ_name: str,
                               cliff_t: bool = False) -> "DensityMatrixRunner":
         """Create a DensityMatrixRunner for a large block."""
     
-        large_checkpoint = checkpoint_form.format(circ_name=circ_name,
-                                                  large_block_num=large_block_num,
-                                                  max_tol=max_tol)
     
-        sub_circs, large_block_circ = partitioned_data
+        _, large_block_circ = partitioned_data
 
-        small_block_runners = {}
-        num_digits = len(str(large_block_circ.num_operations))
-        for i, (cycle, op) in enumerate(large_block_circ.operations_with_cycles()):
-            block_num = str(i).zfill(num_digits)
-            if block_num in sub_circs:
-                pt = CircuitPoint(cycle, op.location[0])
-                # Get file names
-                file_names = get_file_names(large_checkpoint_dir=large_checkpoint,
-                                            small_block_num=block_num)[:-1]
-                small_block_runners[pt] = DensityMatrixRunner(
-                    ensemble_file_names=file_names,
-                    target=op.get_unitary(),
-                    cliff_t=cliff_t,
-                    label = f"Large {large_block_num} Small {block_num}"
-                )
+        small_block_runners = generate_small_block_runners(
+            circ_name=circ_name,
+            large_block_num=large_block_num,
+            max_tol=max_tol,
+            partitioned_data=partitioned_data,
+            checkpoint_form=checkpoint_form,
+            cliff_t=cliff_t
+        )
     
         # Create the DensityMatrixRunner for this large block
         runner = DensityMatrixRunner(partitioned_circ=large_block_circ,
@@ -86,17 +79,132 @@ def generate_full_runner(circ_name: str,
                                cliff_t=cliff_t)
 
 
+def generate_all_block_runners(circ_name: str,
+                               max_tol: float,
+                               partitioned_data: dict[str, tuple[dict[str, Circuit], Circuit]],
+                               checkpoint_form: str = "",
+                               cliff_t: bool = False) -> dict[tuple[str, str], 
+                                                               "DensityMatrixRunner"]:
+    """Generate DensityMatrixRunners for all large blocks."""
+    large_block_nums = get_block_names(circ_name=circ_name, extra="_tket")
+    block_runners = {}
+    for large_block_num in large_block_nums:
+        small_block_runners = generate_small_block_runners(
+            circ_name=circ_name,
+            large_block_num=large_block_num,
+            max_tol=max_tol,
+            partitioned_data=partitioned_data[large_block_num],
+            checkpoint_form=checkpoint_form,
+            cliff_t=cliff_t,
+            use_pt=False
+        )
+        for small_block_num, runner in small_block_runners.items():
+            block_runners[(large_block_num, small_block_num)] = runner
+    return block_runners
+
+
+def generate_small_block_runners(circ_name: str,
+                                 large_block_num: str,
+                                 max_tol: float,
+                                 partitioned_data: tuple[dict[str, Circuit], Circuit],
+                                 checkpoint_form: str = "",
+                                 cliff_t: bool = False,
+                                 use_pt: bool = True) -> dict[str, 
+                                                                 "DensityMatrixRunner"]:  
+    
+    """Generate DensityMatrixRunners for all small blocks in a large block."""
+
+    large_checkpoint = checkpoint_form.format(circ_name=circ_name,
+                                                large_block_num=large_block_num,
+                                                max_tol=max_tol)
+
+    sub_circs, large_block_circ = partitioned_data
+
+    small_block_runners = {}
+    num_digits = len(str(large_block_circ.num_operations))
+    for i, (cycle, op) in enumerate(large_block_circ.operations_with_cycles()):
+        block_num = str(i).zfill(num_digits)
+        if block_num in sub_circs:
+            pt = CircuitPoint(cycle, op.location[0])
+            if use_pt:
+                key = pt
+            else:
+                key = block_num
+            # Get file names
+            file_names = get_file_names(large_checkpoint_dir=large_checkpoint,
+                                        small_block_num=block_num)[:-1]
+            small_block_runners[key] = DensityMatrixRunner(
+                ensemble_file_names=file_names,
+                target=op.get_unitary(),
+                cliff_t=cliff_t,
+                label = f"Large {large_block_num} Small {block_num}"
+            )
+
+    return small_block_runners
+
+def apply_depolarizing_channel(rho: np.ndarray,
+                               qubits: list[int],
+                               noise_level: float) -> np.ndarray:
+    ''' Apply a depolarizing channel to the given qubits in the density matrix.'''
+    d = 2 ** len(qubits)
+    probs = [1 - noise_level, noise_level / 3, noise_level / 3, noise_level / 3]
+    uns = [IdentityGate().get_unitary(), 
+           XGate().get_unitary(), 
+           YGate().get_unitary(), 
+           ZGate().get_unitary()]
+    
+    rho_out = np.zeros_like(rho, dtype=np.complex128)
+    for p, un in zip(probs, uns):
+        single_rho = get_single_rho(un, rho, qubits)
+        rho_out += p * single_rho
+    return rho_out
+
+def get_noisy_rho(circ: Circuit,
+                  params: np.ndarray,
+                  cache: dict,
+                  rho_in: np.ndarray,
+                  noise_level: float = 0) -> np.ndarray:
+    ''' Get the output density matrix after applying noisy circuit.'''
+    # un = circ.get_unitary(params=params, cache=cache)
+    circ_copy = circ.copy()
+    circ_copy.set_params(params)
+
+    # Calculate the output density matrix from each operation
+    for op in circ_copy.operations():
+        qubits = op.location
+        if isinstance(op.gate, GridSynthGate):
+            t_str = cache[(op.params[0], op.params[1])]
+            if op.params[2] == 1:
+                t_str = "Z" + t_str + "Z"
+            t_gates: list[ConstantGate] = get_t_gates_from_string(t_str)
+            for tg in t_gates:
+                U = tg.get_unitary()
+                rho_in = get_single_rho(U, rho_in, qubits)
+                if isinstance(tg, TGate) or isinstance(tg, TdgGate):
+                    # Apply noise channel
+                    rho_in = apply_depolarizing_channel(rho_in, 
+                                                        qubits, noise_level)
+        else:      
+            # Get the unitary matrix for this operation
+            U = op.get_unitary()
+            # Apply U rho U^\dagger
+            rho_in = get_single_rho(U, rho_in, qubits)
+
+    return rho_in
+
 class EnsembleDMRunner:
     def __init__(self, 
                  all_circ_params: list[tuple[Circuit, np.ndarray, np.ndarray, dict]],
                  target: UnitaryMatrix,
-                 cliff_t: bool = False):
+                 target_circ: Circuit = None,
+                 cliff_t: bool = False) -> None:
         self.all_probs = [probs.flatten() for _, _, probs, _ in all_circ_params]
         self.params = [params for _, params, _, _ in all_circ_params]
         self.circs = [circ for circ, _, _, _ in all_circ_params]
         self.caches = [cache for _, _, _, cache in all_circ_params]
         self.cliff_t = cliff_t
         self.target = target
+        self.target_circ = target_circ
         self.superoperator = None
 
     async def initialize(self, file_name: str = "") -> None:
@@ -138,16 +246,28 @@ class EnsembleDMRunner:
         else:
             self.superoperator = None
 
-    def run(self, rho_in: np.ndarray, qubits: int) -> np.ndarray:
-        ''' Run the entire ensemble superoperator on the input density matrix.'''
+    def apply_noisy_circuits(self, rho_in: np.ndarray, noise_level: float) -> np.ndarray:
+        ''' Apply all noisy circuits in the ensemble to the input density matrix.'''
+        avg_rho = np.zeros_like(rho_in, dtype=np.complex128)
+        for i, circ in enumerate(self.circs):
+            cache = self.caches[i]
+            for j, param in enumerate(self.params[i]):
+                prob = self.all_probs[i][j]
+
+                rho_out = get_noisy_rho(circ, param, cache, rho_in, noise_level)
+
+                avg_rho += prob * rho_out
+        return avg_rho
+        
+    def run_noisy(self, rho_in: np.ndarray, noise_level: float) -> np.ndarray:
+        ''' Run the entire ensemble superoperator on the input density matrix with noise.'''
         # rho_in should be a 2^n x 2^n matrix
-        num_qubits = np.log2(rho_in.shape[0]).astype(int)
         if self.superoperator is None:
             # Just apply target unitary onto rho_in
-            return get_single_rho(self.target, rho_in, qubits)
+            return None
         else:
-            return apply_superoperator(rho_in, self.superoperator, 
-                                       num_qubits, qubits)
+            noisy_rho = self.apply_noisy_circuits(rho_in, noise_level)
+            return noisy_rho
 
 class DensityMatrixRunner:
     """A class for running density matrix evaluations on ensembles of
@@ -160,7 +280,7 @@ class DensityMatrixRunner:
                  target: UnitaryMatrix = None,
                  cliff_t: bool = True,
                  label: str = ""
-                 ) -> None:
+                ) -> None:
         """Initialize the DensityMatrixRunner."""
         # If we are given ensemble file names, then we should not be given
         # partitioned circuits or block runners.
@@ -223,7 +343,6 @@ class DensityMatrixRunner:
                 runner.save(file_name + f"_{pt.cycle}_{pt.qudit}")
 
 
-    
     def run(self, init_rho: np.ndarray, qubits: np.ndarray[int]) -> np.ndarray:
         """Apply the channel onto the density matrix at the qubits specified"""
         # print("Running on qubits: ", self.qubits, flush=True)
@@ -244,4 +363,8 @@ class DensityMatrixRunner:
                     actual_qubits = qubits[op.location]
                     rho = get_single_rho(op.get_unitary(), rho, actual_qubits)
             return rho
-                    
+        
+    def run_noisy(self, init_rho: np.ndarray, noise_level: float) -> np.ndarray:
+        """Apply the noisy channel onto the density matrix at the qubits specified"""
+        assert self.runner is not None, "No ensemble runner available for noisy run."
+        return self.runner.run_noisy(init_rho, noise_level)

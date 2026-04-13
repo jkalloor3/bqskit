@@ -122,26 +122,26 @@ def plot_all_circ_violins(plot_data: dict,
         ax.set_yscale("log")
 
     # Set y tick label of 1000 to 1000+
-    if y_tick_labels is None:
-        y_tick_labels = {
-            0.1: "0.1",
-            1: "1",
-            10: "10",
-            100: "100",
-            1000: "1000+",
-        }
-    if x_tick_labels is None:
-        x_tick_labels = {
-            1.0: "$10^{-1}$",
-            2.0: "$10^{-2}$",
-            3.0: "$10^{-3}$",
-            4.0: "$10^{-4}$",
-            5.0: "$10^{-5}$"
-        }
+    # if y_tick_labels is None:
+    y_tick_labels = {
+        0.1: "0.1",
+        1: "1",
+        10: "10",
+        100: "100",
+        1000: "1000+",
+    }
+    # if x_tick_labels is None:
+    x_tick_labels = {
+        1.0: "$10^{-1}$",
+        2.0: "$10^{-2}$",
+        3.0: "$10^{-3}$",
+        4.0: "$10^{-4}$",
+        5.0: "$10^{-5}$"
+    }
 
     ax.set_yticks(list(y_tick_labels.keys()))
     ax.set_yticklabels(list(y_tick_labels.values()), fontdict={"size": 16})
-    ax.set_yticklabels(ax.get_yticks(), fontdict={"size": 16})
+    # ax.set_yticklabels(ax.get_yticks(), fontdict={"size": 16})
     ax.set_xticks(list(x_tick_labels.keys()))
     ax.set_xticklabels(list(x_tick_labels.values()), fontdict={"size": 16})
     ax.legend(handles=handles, loc='upper left', fontsize=12)
@@ -181,13 +181,56 @@ def plot_error_violins(circ_data: dict, axs: plt.Axes, color: str,
     legend_patch = Patch(facecolor=color, edgecolor=color, alpha=0.4, label=label)
     return legend_patch
 
-
 def plot_dm_data(circ_names: list[str],
                  axs: plt.Axes, 
                  folder_form="ensemble_dms_{circ_name}",
                  y_label: str = "Trace Distance of Channel",
                  calc_obs: bool = False,
-                 cliff_t: bool = False):
+                 cliff_t: bool = False,
+                 extras: list[str] = [""]):
+    
+    symbols = ['o', 's', '^', 'D', 'x', '*']
+    for i, extra in enumerate(extras):
+        new_folder_form = folder_form.format(circ_name="{circ_name}", extra=extra)
+        symbol = symbols[i % len(symbols)]
+        if calc_obs:
+            ham_svs = {}
+            for circ_name in circ_names:
+                full_circ = load_circuit(circ_name)
+                init_sv = generate_init_state(circ_name, full_circ.num_qudits)
+                if extra == "_N":
+                    ham = generate_hamiltonian(circ_name, full_circ.num_qudits, 
+                                               particle_number=True)
+                    ham_svs[circ_name] = (ham, init_sv)
+                    extra_label = " Particle Number"
+                elif extra == "_Sz":
+                    ham = generate_hamiltonian(circ_name, full_circ.num_qudits, 
+                                               spin_projection=True)
+                    ham_svs[circ_name] = (ham, init_sv)
+                    extra_label = " Spin Projection"
+                else:
+                    ham = generate_hamiltonian(circ_name, full_circ.num_qudits)
+                    ham_svs[circ_name] = (ham, init_sv)
+                    extra_label = ""
+        else:
+            ham_svs = None
+            extra_label = ""
+
+        _plot_dm_data(circ_names, axs, folder_form=new_folder_form, 
+                      y_label=y_label, ham_svs=ham_svs, 
+                      cliff_t=cliff_t, symbol=symbol, extra_label=extra_label)
+
+
+
+
+def _plot_dm_data(circ_names: list[str],
+                 axs: plt.Axes, 
+                 folder_form="ensemble_dms_{circ_name}",
+                 y_label: str = "Trace Distance of Channel",
+                 ham_svs: tuple[np.ndarray, np.ndarray] = None,
+                 cliff_t: bool = False,
+                 symbol: str = 'o',
+                 extra_label: str = ""):
     """
     Plot density matrix data for a list of circuits.
 
@@ -204,7 +247,7 @@ def plot_dm_data(circ_names: list[str],
     x_vals = []
     y_vals = []
 
-    if calc_obs:
+    if ham_svs is not None:
         file_name = "*rho_out.pkl"
     else:
         file_name = "*rho_outs.pkl"
@@ -233,10 +276,11 @@ def plot_dm_data(circ_names: list[str],
         y_vals = []
         full_circ = load_circuit(circ_name)
         full_circ.remove_all_measurements()
-        ham = None
-        if calc_obs:
-            ham = generate_hamiltonian(circ_name, full_circ.num_qudits)
-            init_sv = generate_init_state(circ_name, full_circ.num_qudits)
+        if ham_svs is not None:
+            ham, init_sv = ham_svs[circ_name]
+            if ham is None:
+                print(f"Hamiltonian is None for {circ_name}, skipping observable calculation.")
+                continue
             sv_out = full_circ.get_statevector(init_sv)
             dm = get_density_matrix(sv_out.numpy)
             true_val = get_obs(dm, ham)
@@ -250,7 +294,7 @@ def plot_dm_data(circ_names: list[str],
                 tol = float(parts[0])  # Assuming the second part is the tolerance
                 x = (10 ** (-tol))
                 x_vals.append(x)
-                if not calc_obs:
+                if ham_svs is None:
                     # Calculate Trace Distance from full circ
                     max_dist = 0
                     for rho_out, sv in all_data:
@@ -266,8 +310,9 @@ def plot_dm_data(circ_names: list[str],
                     print(f"Observed value for tol {tol} : {y}")
                     # Plot Difference from true value
                     y_vals.append(np.abs(true_val - y))
-        axs.scatter(x_vals, y_vals, label=benchmark_labels.get(circ_name, circ_name),
-                    color=benchmark_colors.get(circ_name, "black"), s=150)
+        axs.scatter(x_vals, y_vals, label=benchmark_labels.get(circ_name, circ_name) + extra_label,
+                    color=benchmark_colors.get(circ_name, "black"), s=150, 
+                    marker=symbol, facecolor='none')
         
     # Plot num_blocks * eps^2 in benchmark color
     for circ_name, num_blocks in num_blocks.items():
