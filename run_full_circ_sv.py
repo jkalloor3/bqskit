@@ -35,6 +35,9 @@ def partition_circs(compiler: Compiler,
 if __name__ == "__main__":
     # circ_names = ["heisenberg7", "qaoa10"]
     circ_name = argv[1]
+    pn = bool(int(argv[2])) if len(argv) > 2 else False
+    particle_number = pn
+    spin_projection = not particle_number
     circ_names = [circ_name]
     compiler = Compiler(num_workers=-1)
 
@@ -91,9 +94,6 @@ if __name__ == "__main__":
 
     print("Circ names to process:", circ_names, flush=True)
 
-    particle_number = True
-    spin_projection = False
-
     for circ_name in circ_names:
         full_circ = load_circuit(circ_name)
         full_circ.remove_all_measurements()
@@ -107,7 +107,7 @@ if __name__ == "__main__":
                                     "{large_block_num}" +
                                     f"_{tol}/")
             
-            save_dir=f"ensemble_dms_{circ_name}{cliff_t_string}_final",
+            save_dir=f"ensemble_dms_{circ_name}{cliff_t_string}_final"
             if particle_number:
                 save_dir += "_N"
             elif spin_projection:
