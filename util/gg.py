@@ -8,7 +8,8 @@ from typing import TYPE_CHECKING
 
 from bqskit.ir.circuit import Circuit, CircuitLocation
 from bqskit.ir.gates import (IdentityGate, ZGate, SGate, SdgGate, 
-                            TGate, HGate, TdgGate, XGate, RZGate, YGate)
+                            TGate, HGate, TdgGate, XGate, RZGate, YGate,
+                            ConstantGate)
     
 from bqskit.ir.gates.qubitgate import QubitGate
 from bqskit.qis.unitary.unitary import RealVector
@@ -30,23 +31,37 @@ gate_defs = {'I': IdentityGate(1), 'Z': ZGate(), 'S': SGate(), 'Sd': SdgGate(),
              'T': TGate(), 'Td': TdgGate(), 'H': HGate(), 'D': SdgGate(), 
              'X': XGate(), 'L': SdgGate(), 'Y': YGate()}
 
-def gridsynth_gates_to_cir(gates: str):
-    circ = Circuit(1)
+
+def get_t_gates_from_string(gates: str) -> list[ConstantGate]:
     # Loop through string and add gates to circuit
+    all_gates: list[ConstantGate] = []
     while len(gates) > 0:
         # Check 2-character gates first
         next_token = gates[:2]
         if next_token in gate_defs:
-            circ.append_gate(gate_defs[next_token], (0,))
+            all_gates.append(gate_defs[next_token])
             gates = gates[2:]
         else:
             # Otherwise, check 1-character gates
             next_token = gates[0]
             if next_token in gate_defs:
-                circ.append_gate(gate_defs[next_token], (0,))
+                all_gates.append(gate_defs[next_token])
             else:
                 print("Unknown: ", next_token)
             gates = gates[1:]
+
+    return all_gates
+
+def gridsynth_gates_to_cir(gates: str, noise_level: float = 0.0) -> Circuit:
+    circ = Circuit(1)
+    all_gates = get_t_gates_from_string(gates)
+    for gate in all_gates:
+        circ.append_gate(gate, [0])
+        if isinstance(gate, TGate) or isinstance(gate, TdgGate):
+            if noise_level > 0 and np.random.rand() < noise_level:
+                # Apply X, Y, or Z gate
+                noise_gate = np.random.choice([XGate(), YGate(), ZGate()])
+                circ.append_gate(noise_gate, [0])
     # Return the circuit
     return circ
 
