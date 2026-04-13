@@ -92,7 +92,7 @@ def generate_tfim_hamiltonian(num_qubits: int) -> np.ndarray:
     op = SparsePauliOp.from_list(He + Hb)
     return op.to_matrix()
 
-def generate_heisenberg_particle_num_hamiltonian(n_qubits: int) -> np.ndarray:
+def generate_heisenberg_spin_projection(n_qubits: int) -> np.ndarray:
     # --- Total Sz = (1/2) * sum_i Z_i ---
     sz_terms = []
     for i in range(n_qubits):
@@ -141,6 +141,11 @@ def generate_hamiltonian(circ_name: str, num_qubits: int,
     elif circ_name.startswith('QITE'):
         return generate_tfim_hamiltonian(num_qubits)
     elif circ_name.startswith('heisenberg'):
+        if particle_number:
+            print("Particle number conservation is not applicable for Heisenberg model")
+            return None
+        elif spin_projection:
+            return generate_heisenberg_spin_projection(num_qubits)
         return generate_heisenberg_hamiltonian(num_qubits)
     elif ("Fermi" in circ_name or "H_" in circ_name):
         # Remove _long from circ_name if it exists
