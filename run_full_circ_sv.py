@@ -16,18 +16,22 @@ from common.io import (load_block, get_block_names)
 from util.common import load_circuit
 from util.unitary_dm_pass import DMEvaluator
 from util.hamiltonian import generate_hamiltonian, generate_init_state
-from util.experiment_util import get_block_names, get_sub_block_nums
+from util.experiment_util import get_block_names
 
+compiler = Compiler(num_workers=-1)
 
-def get_sub_block_nums(block_num: str,
-                       checkpoint_folder: str) -> list[str]:
-    sub_block_path = f"{checkpoint_folder}_{block_num}_*/block_*.data"
+all_partitioned_ids = {}
+
+def get_sub_block_nums(checkpoint_folder: str) -> list[str]:
+    sub_block_path = f"{checkpoint_folder}/block_*.data"
     sub_block_files = glob.glob(sub_block_path)
+    print(f"Found {len(sub_block_files)} sub-block files in checkpoint folder {checkpoint_folder}.")
     sub_block_nums = set()
     for sub_block_file in sub_block_files:
         sub_block_num = Path(sub_block_file).name.split("_")[-1].split(".")[0]
         sub_block_nums.add(sub_block_num)
     sub_block_nums = sorted(list(sub_block_nums))
+    print(f"Sub-block numbers found: {len(sub_block_nums)}")
     return sub_block_nums
 
 # Get partitioned circuits for all 8-qubit blocks
@@ -46,8 +50,11 @@ def partition_circs(compiler: Compiler,
 def get_new_partitioned_data(missing_circ_names: list[str],
                              base_checkpoint_dir: str) -> dict[str, tuple[dict[str, Circuit], Circuit]]:
     new_partitioned_data = {}
+    all_partitioned_ids = {}
     for circ_name in missing_circ_names:
         all_partitioned_ids[circ_name] = {}
+        print(f"Partitioning circuit {circ_name}...", flush=True)
+        print('Block names:', get_block_names(circ_name, extra="_tket"), flush=True)
         for large_block_num in get_block_names(circ_name, extra="_tket"):
             id = partition_circs(compiler, circ_name, large_block_num)
             
@@ -56,9 +63,9 @@ def get_new_partitioned_data(missing_circ_names: list[str],
         new_partitioned_data[circ_name] = {}
         checkpoint_folder_form = f"{base_checkpoint_dir}/{circ_name}" + "_{large_block_num}_" + f"*/"
         for large_block_num in get_block_names(circ_name, extra="_tket"):
-            out_circ = compiler.result(all_partitioned_ids[circ_name][large_block_num])
             base_dir = checkpoint_folder_form.format(large_block_num=large_block_num)
             sub_block_names = get_sub_block_nums(base_dir)
+            out_circ = compiler.result(all_partitioned_ids[circ_name][large_block_num])
             assert out_circ.num_operations == len(sub_block_names), f"Number of operations in circuit {circ_name} does not match number of sub-blocks: {out_circ.num_operations} != {len(sub_block_names)}"
             sub_block_circs = {}
             for i, op in enumerate(out_circ.operations()):
@@ -68,16 +75,13 @@ def get_new_partitioned_data(missing_circ_names: list[str],
             new_partitioned_data[circ_name][large_block_num] = (sub_block_circs, 
                                                                 out_circ)
 
-if __name__ == "__main__":
-    # circ_names = ["heisenberg7", "qaoa10"]
-    circ_name = argv[1]
-    circ_names = [circ_name]
-    compiler = Compiler(num_workers=-1)
+    return new_partitioned_data
 
-    all_partitioned_ids = {}
+def main(circ_name, pn: bool = False):
+    circ_names = [circ_name]
     all_partitioned_data = {}
 
-    cliff_t = False
+    cliff_t = True
     cliff_t_string = "_clifft" if cliff_t else ""
     if cliff_t:
         print("Using cliff-t circuits", flush=True)
@@ -111,8 +115,8 @@ if __name__ == "__main__":
 
     print("Circ names to process:", circ_names, flush=True)
 
-    particle_number = True
-    spin_projection = False
+    particle_number = pn
+    spin_projection = not pn
 
     for circ_name in circ_names:
         full_circ = load_circuit(circ_name)
@@ -120,6 +124,7 @@ if __name__ == "__main__":
         ham = generate_hamiltonian(circ_name, full_circ.num_qudits,
                                    particle_number=particle_number,
                                    spin_projection=spin_projection)
+        print("Ham Shape:", ham.shape, flush=True)
         init_sv = generate_init_state(circ_name, full_circ.num_qudits)
         for tol in [1.0, 2.0, 3.0, 4.0, 5.0]:
             checkpoint_folder_form = (base_checkpoint_dir +  
@@ -127,7 +132,7 @@ if __name__ == "__main__":
                                     "{large_block_num}" +
                                     f"_{tol}/")
             
-            save_dir=f"ensemble_dms_{circ_name}{cliff_t_string}_final",
+            save_dir=f"ensemble_dms_{circ_name}{cliff_t_string}_final"
             if particle_number:
                 save_dir += "_N"
             elif spin_projection:
@@ -154,5 +159,15 @@ if __name__ == "__main__":
 
     for id in compiler_ids:
         compiler.result(id)
+
+if __name__ == '__main__':
+    circ_names = ["FermiHubbard2x2_jw_long"]
+    pns = [False, True]
+    for circ_name in circ_names:
+        for pn in pns:
+            if circ_name == "heisenberg7" and pn:
+                print("Skipping heisenberg7 with particle number conservation, as it is not applicable.", flush=True)
+                continue
+            main(circ_name, pn=pn)
 
     compiler.close()
