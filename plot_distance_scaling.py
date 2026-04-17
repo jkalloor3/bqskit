@@ -22,7 +22,7 @@ if __name__ == '__main__':
             "LiH_jw_long",
         ]
         
-    cliff_t = True
+    cliff_t = False
     cliff_t_string = "_clifft" if cliff_t else ""
     folder_form = "ensemble_dms_{circ_name}" + cliff_t_string + "_final{extra}/"
 
@@ -38,6 +38,6 @@ if __name__ == '__main__':
                  extras=["_N", "_Sz"])
 
     if TRACE_DISTANCE:
-        plt.savefig('trace_distance_scaling_clifft_final.png', dpi=300)
+        plt.savefig('trace_distance_scaling_{cliff_t_string}_final_other.png', dpi=300)
     else:
-        plt.savefig('other_hamiltonian_scaling_clifft_final.png', dpi=300)
+        plt.savefig(f'other_hamiltonian_scaling{cliff_t_string}_final.png', dpi=300)

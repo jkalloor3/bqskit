@@ -328,7 +328,7 @@ def _plot_dm_data(circ_names: list[str],
     axs.set_ylabel(y_label, fontdict={"size": 16})
     axs.set_yscale('log')
     axs.set_xscale('log')
-    axs.legend(fontsize=14)
+    axs.legend(fontsize=14, loc='upper left')
 
     # x_range = np.array(axs.get_xlim())
     # x_vals = np.linspace(x_range[0], x_range[1], 100)
