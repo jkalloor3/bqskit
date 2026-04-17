@@ -274,6 +274,7 @@ def _plot_dm_data(circ_names: list[str],
         print(f"File name: {os.path.join(folder, file_name)}")
         x_vals = []
         y_vals = []
+        y_errs = []
         full_circ = load_circuit(circ_name)
         full_circ.remove_all_measurements()
         if ham_svs is not None:
@@ -295,24 +296,35 @@ def _plot_dm_data(circ_names: list[str],
                 x = (10 ** (-tol))
                 x_vals.append(x)
                 if ham_svs is None:
-                    # Calculate Trace Distance from full circ
-                    max_dist = 0
+                    all_vals = []
                     for rho_out, sv in all_data:
                         sv_out = full_circ.get_statevector(sv)
                         dm_out = get_density_matrix(sv_out.numpy)
-                        y = trace_distance(dm_out, rho_out)
-                        if np.abs(y) > max_dist:
-                            max_dist = np.abs(y)
-                    y_vals.append(max_dist)
+                        y = np.abs(trace_distance(dm_out, rho_out))
+                        all_vals.append(y)
+                    mean_val = np.mean(all_vals)
+                    y_vals.append(mean_val)
+                    y_errs.append([mean_val - np.min(all_vals), np.max(all_vals) - mean_val])
                 else:
                     rho_out, _ = all_data[0]
                     y = get_obs(rho_out, ham)
                     print(f"Observed value for tol {tol} : {y}")
                     # Plot Difference from true value
                     y_vals.append(np.abs(true_val - y))
-        axs.scatter(x_vals, y_vals, label=benchmark_labels.get(circ_name, circ_name) + extra_label,
-                    color=benchmark_colors.get(circ_name, "black"), s=150, 
-                    marker=symbol, facecolor='none')
+
+        if ham_svs is None:
+            y_errs_array = np.array(y_errs).T  # shape (2, N) for asymmetric error bars
+            axs.errorbar(x_vals, y_vals, yerr=y_errs_array,
+                         label=benchmark_labels.get(circ_name, circ_name) + extra_label,
+                         color=benchmark_colors.get(circ_name, "black"),
+                         marker=symbol, markersize=10, fillstyle='none',
+                         linestyle='none', capsize=4)
+        else:
+            axs.scatter(x_vals, y_vals,
+                        label=benchmark_labels.get(circ_name, circ_name) + extra_label,
+                        color=benchmark_colors.get(circ_name, "black"), s=150,
+                        marker=symbol, facecolor='none')
+
         
     # Plot num_blocks * eps^2 in benchmark color
     for circ_name, num_blocks in num_blocks.items():
