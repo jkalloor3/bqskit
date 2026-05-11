@@ -115,17 +115,21 @@ def main(circ_name, pn: bool = False):
 
     print("Circ names to process:", circ_names, flush=True)
 
-    particle_number = pn
-    spin_projection = not pn
+    # particle_number = pn
+    # spin_projection = not pn
+    particle_number = False
+    spin_projection = False
 
     for circ_name in circ_names:
         full_circ = load_circuit(circ_name)
         full_circ.remove_all_measurements()
-        ham = generate_hamiltonian(circ_name, full_circ.num_qudits,
-                                   particle_number=particle_number,
-                                   spin_projection=spin_projection)
-        print("Ham Shape:", ham.shape, flush=True)
-        init_sv = generate_init_state(circ_name, full_circ.num_qudits)
+        # ham = generate_hamiltonian(circ_name, full_circ.num_qudits,
+        #                            particle_number=particle_number,
+        #                            spin_projection=spin_projection)
+        # print("Ham Shape:", ham.shape, flush=True)
+        # init_sv = generate_init_state(circ_name, full_circ.num_qudits)
+        ham = None
+        init_sv = None
         for tol in [1.0, 2.0, 3.0, 4.0, 5.0]:
             checkpoint_folder_form = (base_checkpoint_dir +  
                                     f"/{circ_name}_" + 
@@ -161,8 +165,8 @@ def main(circ_name, pn: bool = False):
         compiler.result(id)
 
 if __name__ == '__main__':
-    circ_names = ["FermiHubbard2x2_jw_long"]
-    pns = [False, True]
+    circ_names = ["qaoa10"]
+    pns = [False]
     for circ_name in circ_names:
         for pn in pns:
             if circ_name == "heisenberg7" and pn:
