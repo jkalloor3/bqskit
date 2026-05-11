@@ -17,7 +17,7 @@ from .distance import trace_distance, get_density_matrix
 from .dm_runner import generate_full_runner, DensityMatrixRunner
 from .experiment_util import get_good_blocks
 
-NUM_SAMPLES = 10
+NUM_SAMPLES = 40
 
 
 def get_obs(dm: np.ndarray, ham: np.ndarray) -> float:
@@ -113,15 +113,15 @@ class DMEvaluator(BasePass):
 
 
     async def initialize(self) -> None:
-        save_file = os.path.join(self.save_dir, f"{self.max_tol}_superop")
-        await self.full_circ_runner.initialize(save_file)
-        self.full_circ_runner.save(save_file)
+        # save_file = os.path.join(self.save_dir, f"{self.max_tol}_superop")
+        await self.full_circ_runner.initialize()
+        # self.full_circ_runner.save(save_file)
 
     async def run_full_ensemble(self, svs: list[StateVector]) -> list[np.ndarray]:
         if len(svs) == 1:
             ens_data_file = os.path.join(self.save_dir, f"{self.max_tol}_rho_out.pkl")
         else:
-            ens_data_file = os.path.join(self.save_dir, f"{self.max_tol}_rho_outs.pkl")
+            ens_data_file = os.path.join(self.save_dir, f"{self.max_tol}_rho_outs_extra.pkl")
         if os.path.exists(ens_data_file):
             print(f"Ensemble data file {ens_data_file} already exists, skipping.", flush=True)
             return
@@ -135,20 +135,40 @@ class DMEvaluator(BasePass):
         if self.num_good_blocks == 0:
             print(f"No good blocks found for {self.circ_name} at tol {self.max_tol}, skipping.", flush=True)
             return
+        
+        # Check files
+        if self.ham is not None and not self.run_td_also:
+            file_name = Path(os.path.join(self.save_dir, f"{self.max_tol}_rho_out.pkl"))
+            if os.path.exists(file_name):
+                print(f"Data file {file_name} already exists, skipping.", flush=True)
+                return
+        
+        if (self.ham is None) or self.run_td_also:
+            file_name = Path(os.path.join(self.save_dir, f"{self.max_tol}_rho_outs_extra.pkl"))
+            if os.path.exists(file_name):
+                print(f"Ensemble data file {file_name} already exists, skipping.", flush=True)
+                return
 
         await self.initialize()
 
         if self.ham is not None:
+            file_name = Path(os.path.join(self.save_dir, f"{self.max_tol}_rho_out.pkl"))
             print(f"Hamiltonian shape: {self.ham.shape}", flush=True)
-            rho_outs = await self.run_full_ensemble([self.init_sv])
-            if rho_outs is not None:
-                rho = rho_outs[0]
-                final_data = [(rho, self.init_sv)]
-                file_name = os.path.join(self.save_dir, f"{self.max_tol}_rho_out.pkl")
-                Path(file_name).parent.mkdir(parents=True, exist_ok=True)
-                pickle.dump(final_data, open(file_name, "wb"))
+            if os.path.exists(file_name):
+                print(f"Data file {file_name} already exists, skipping.", flush=True)
+            else:  
+                rho_outs = await self.run_full_ensemble([self.init_sv])
+                if rho_outs is not None:
+                    rho = rho_outs[0]
+                    final_data = [(rho, self.init_sv)]
+                    file_name.parent.mkdir(parents=True, exist_ok=True)
+                    pickle.dump(final_data, open(file_name, "wb"))
 
         if (self.ham is None) or self.run_td_also:
+            file_name = Path(os.path.join(self.save_dir, f"{self.max_tol}_rho_outs_extra.pkl"))
+            if os.path.exists(file_name):
+                print(f"Ensemble data file {file_name} already exists, skipping.", flush=True)
+                return
             # Otherwise, run full circuit with ensemble
             rand_svs = [StateVector.random(circ.num_qudits) for _ in range(NUM_SAMPLES)]
             final_rho_outs = await self.run_full_ensemble(rand_svs)
@@ -156,6 +176,5 @@ class DMEvaluator(BasePass):
                 return
             final_data = list(zip(final_rho_outs, rand_svs))
             print(f"Final data length: {len(final_data)}", flush=True)
-            file_name = os.path.join(self.save_dir, f"{self.max_tol}_rho_outs.pkl")
-            Path(file_name).parent.mkdir(parents=True, exist_ok=True)
+            file_name.parent.mkdir(parents=True, exist_ok=True)
             pickle.dump(final_data, open(file_name, "wb"))
