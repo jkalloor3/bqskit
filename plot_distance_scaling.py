@@ -35,9 +35,9 @@ if __name__ == '__main__':
 
     plot_dm_data(circ_names, axs, folder_form=folder_form, y_label=y_label, 
                  calc_obs=not TRACE_DISTANCE, cliff_t=cliff_t, 
-                 extras=[""])
+                 extras=["_2"])
 
     if TRACE_DISTANCE:
-        plt.savefig('trace_distance_scaling_{cliff_t_string}_final_errors.png', dpi=300)
+        plt.savefig(f'trace_distance_scaling_{cliff_t_string}_final_errors.png', dpi=300)
     else:
         plt.savefig(f'other_hamiltonian_scaling{cliff_t_string}_final.png', dpi=300)
